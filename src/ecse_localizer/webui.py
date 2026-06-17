@@ -538,6 +538,20 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         if not record:
             raise HTTPException(status_code=404, detail="Job not found")
         changes = worker_status_changes(body)
+        if record.get("cancel_requested") and changes.get("status") in {"done", "failed"}:
+            for key in ["worker_artifacts", "result", "result_report", "result_video"]:
+                changes.pop(key, None)
+            changes.update(
+                {
+                    "status": "cancelled",
+                    "returncode": -9,
+                    "error": "Cancelled by remote request",
+                    "ended_at": iso_now(),
+                    "cancel_handled_at": iso_now(),
+                }
+            )
+        if changes.get("status") == "cancelled":
+            changes.setdefault("cancel_handled_at", iso_now())
         update_job(state, job_id, changes)
         state.store.record_worker_heartbeat(
             {
@@ -550,6 +564,24 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         )
         updated = read_job(state, job_id)
         return {"ok": True, "job": updated}
+
+    @app.post("/api/worker/jobs/{job_id}/control")
+    async def worker_job_control(job_id: str, request: Request) -> dict[str, Any]:
+        body = await require_worker_request(request, state)
+        record = read_job(state, job_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Job not found")
+        worker_id = str(body.get("worker_id") or request.headers.get("x-worker-id") or "")
+        state.store.record_worker_heartbeat(
+            {
+                "status": "online",
+                "worker_id": worker_id or str(record.get("claimed_by") or "local-windows-worker"),
+                "version": str(body.get("version") or ""),
+                "metrics": body.get("metrics") if isinstance(body.get("metrics"), dict) else {},
+                "message": f"job {job_id} control poll",
+            }
+        )
+        return {"ok": True, "control": worker_control_payload(record)}
 
     @app.post("/api/worker/jobs/{job_id}/preview")
     async def worker_upload_preview(job_id: str, request: Request) -> dict[str, Any]:
@@ -696,7 +728,19 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             return {"ok": True}
         if record.get("dispatch_target") == "worker" and record.get("status") in {"queued", "retrying"}:
             update_job(state, job_id, {"status": "cancelled", "ended_at": iso_now(), "returncode": -9, "updated_at": iso_now()})
-            return {"ok": True}
+            return {"ok": True, "job": read_job(state, job_id)}
+        if record.get("dispatch_target") == "worker" and record.get("status") in {"claimed", "running", "paused"}:
+            update_job(
+                state,
+                job_id,
+                {
+                    "cancel_requested": True,
+                    "cancel_requested_at": iso_now(),
+                    "cancel_requested_by": user,
+                    "updated_at": iso_now(),
+                },
+            )
+            return {"ok": True, "job": read_job(state, job_id), "message": "Cancel request sent to Windows worker"}
         return {"ok": False, "message": "Job is not running in this WebUI process"}
 
     @app.post("/api/jobs/{job_id}/retry")
@@ -1169,7 +1213,19 @@ def requeue_stale_worker_jobs_locked(state: WebState) -> list[dict[str, Any]]:
         retry_count = int(record.get("retry_count") or 0)
         previous_status = status
         reason = f"Worker job stale for {age_seconds}s without status update"
-        if retry_count < max_auto_retries:
+        if record.get("cancel_requested"):
+            record.update(
+                {
+                    "status": "cancelled",
+                    "previous_status": previous_status,
+                    "ended_at": iso_now(),
+                    "returncode": -9,
+                    "error": f"Cancelled after stale worker control timeout: {age_seconds}s",
+                    "cancel_handled_at": iso_now(),
+                    "updated_at": iso_now(),
+                }
+            )
+        elif retry_count < max_auto_retries:
             record.update(
                 {
                     "status": "retrying",
@@ -1236,6 +1292,18 @@ def worker_status_changes(body: dict[str, Any]) -> dict[str, Any]:
         if result.get("video"):
             changes["result_video"] = result.get("video")
     return changes
+
+
+def worker_control_payload(record: dict[str, Any]) -> dict[str, Any]:
+    status = str(record.get("status") or "")
+    cancel_requested = bool(record.get("cancel_requested")) and status in {"claimed", "running", "paused"}
+    return {
+        "job_id": str(record.get("id") or ""),
+        "status": status,
+        "cancel_requested": cancel_requested,
+        "cancel_requested_at": record.get("cancel_requested_at"),
+        "cancel_requested_by": record.get("cancel_requested_by"),
+    }
 
 
 def template_params_for_job(state: WebState, user: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -1895,6 +1963,10 @@ def retry_job_record(state: WebState, job_id: str) -> dict[str, Any]:
         "error": None,
         "log": str(log_path),
         "updated_at": iso_now(),
+        "cancel_requested": False,
+        "cancel_requested_at": None,
+        "cancel_requested_by": None,
+        "cancel_handled_at": None,
     }
     update_job(state, job_id, changes)
     return read_job(state, job_id) or record

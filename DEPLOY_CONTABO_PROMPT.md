@@ -67,6 +67,7 @@ Deployment steps:
    - if the Windows worker heartbeat is missing or stale, new jobs must stay `queued` and the UI must show that they are waiting for the local worker, not that GPU processing has already started.
    - during long jobs, the worker posts `running` status updates with best-effort progress, GPU/CPU/disk metrics, local managed-storage byte counts, and a short log tail; do not require Contabo to read Windows log files directly.
    - worker metrics must be sanitized before storage/display; do not expose Windows filesystem paths in dashboard, quota, job, artifact, or heartbeat responses.
+   - cancelling a running worker job must set a `cancel_requested` flag; the Windows worker must observe it through a signed `/api/worker/jobs/{job_id}/control` poll and then report `cancelled`.
    - worker heartbeat/claim may include opaque media refs from `worker.media_roots`; Contabo must store only ref id, display name, size, MIME type, and mtime, never the Windows source path.
    - if a claimed/running worker job becomes stale, the WebUI should move it to `retrying` so the restored Windows worker can claim it again; after the configured retry cap, it should become `failed`.
    - after successful jobs, the worker may upload a low-bitrate MP4 preview and JPG thumbnail to `/api/worker/jobs/{job_id}/preview`; this endpoint must require HMAC signatures, enforce `webui.worker_preview_max_upload_mb`, count files against `remote_quota_bytes`, and never store Windows source paths in the manifest.
@@ -100,6 +101,7 @@ Deployment steps:
    - worker offline status appears when the tunnel is stopped
    - users cannot see each other's jobs
    - jobs move through `queued/claimed/running/retrying/done/failed/cancelled/deleted`
+   - cancelling a running worker job does not require inbound access to Windows; the next worker control poll sees the cancellation request and stops the local process
    - stale `claimed/running` worker jobs are automatically requeued up to the configured cap, then marked failed
    - older JSON job records without the current schema are normalized on read and remain visible/retryable when their state allows it
    - running jobs refresh progress/log-tail summaries without exposing local Windows paths or full logs

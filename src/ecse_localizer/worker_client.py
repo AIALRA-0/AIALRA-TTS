@@ -130,12 +130,22 @@ def run_worker_job(
             running_status_payload(worker_id, log_path, base_config, pid=proc.pid, command=redacted_command(command), lines=log_tail_lines),
         )
         last_update = time.time()
+        cancelled_by_control = False
+        cancel_message = ""
         while True:
             returncode = proc.poll()
             if returncode is not None:
                 break
             if time.time() - last_update >= status_interval:
                 log.flush()
+                control = try_get_worker_control(remote_base_url, worker_token, job_id, worker_id=worker_id)
+                if worker_control_cancel_requested(control):
+                    cancelled_by_control = True
+                    cancel_message = "Cancelled by remote request"
+                    log.write(f"\n{cancel_message}\n")
+                    log.flush()
+                    returncode = terminate_process_tree(proc)
+                    break
                 try_post_status(
                     remote_base_url,
                     worker_token,
@@ -146,7 +156,8 @@ def run_worker_job(
             time.sleep(1.0)
         log.flush()
     result = extract_json_result(log_path)
-    status = "done" if returncode == 0 else "failed"
+    status = "cancelled" if cancelled_by_control else "done" if returncode == 0 else "failed"
+    final_returncode = -9 if cancelled_by_control else returncode
     worker_artifacts: list[dict[str, Any]] = []
     if status == "done":
         worker_artifacts = register_worker_artifacts(result, job)
@@ -157,12 +168,14 @@ def run_worker_job(
     final_progress = 100 if returncode == 0 else extract_progress_from_text(log_tail)
     payload = {
         "status": status,
-        "returncode": returncode,
+        "returncode": final_returncode,
         "worker_id": worker_id,
         "log_tail": log_tail,
         "result": summarize_result(result),
         "metrics": collect_system_metrics(base_config),
     }
+    if cancel_message:
+        payload["error"] = cancel_message
     if worker_artifacts:
         payload["worker_artifacts"] = worker_artifacts
     if preview_summary:
@@ -172,7 +185,7 @@ def run_worker_job(
     post_status(remote_base_url, worker_token, job_id, payload)
     return {
         "status": status,
-        "returncode": returncode,
+        "returncode": final_returncode,
         "log": str(log_path),
         "result": summarize_result(result),
         "preview": preview_summary,
@@ -704,6 +717,47 @@ def post_status(remote_base_url: str, worker_token: str, job_id: str, payload: d
             if attempt < 3:
                 time.sleep(attempt)
     raise RuntimeError(f"Worker status update failed for {job_id}: {last_error}")
+
+
+def get_worker_control(remote_base_url: str, worker_token: str, job_id: str, *, worker_id: str) -> dict[str, Any]:
+    path = f"/api/worker/jobs/{job_id}/control"
+    body = canonical_json({"worker_id": worker_id, "version": __version__})
+    response = requests.post(
+        endpoint(remote_base_url, path),
+        data=body.encode("utf-8"),
+        headers=worker_headers(worker_token, path=path, body=body),
+        timeout=15,
+    )
+    response.raise_for_status()
+    data = response.json()
+    control = data.get("control") if isinstance(data, dict) else {}
+    return control if isinstance(control, dict) else {}
+
+
+def try_get_worker_control(remote_base_url: str, worker_token: str, job_id: str, *, worker_id: str) -> dict[str, Any]:
+    try:
+        return get_worker_control(remote_base_url, worker_token, job_id, worker_id=worker_id)
+    except Exception as exc:
+        print(f"worker control poll warning for {job_id}: {exc}", file=sys.stderr)
+        return {}
+
+
+def worker_control_cancel_requested(control: dict[str, Any]) -> bool:
+    return bool(control.get("cancel_requested")) and str(control.get("status") or "") in {"claimed", "running", "paused"}
+
+
+def terminate_process_tree(proc: subprocess.Popen) -> int | None:
+    if proc.poll() is not None:
+        return proc.returncode
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, text=True)
+    else:
+        proc.terminate()
+    try:
+        return proc.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        return proc.wait(timeout=10)
 
 
 def try_post_status(remote_base_url: str, worker_token: str, job_id: str, payload: dict[str, Any]) -> bool:

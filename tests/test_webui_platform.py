@@ -397,6 +397,73 @@ def test_worker_status_update_refreshes_heartbeat_and_job_progress(tmp_path):
     assert response.json()["quota"]["local_used_bytes"] == 12345
 
 
+def test_running_worker_job_cancel_is_polled_and_finalized(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    record = create_job_record(
+        state,
+        "audit",
+        "Remote audit",
+        ["python", "-m", "ecse_localizer", "audit"],
+        user="admin",
+        metadata={"worker_args": ["audit", "--input", "x"]},
+        dispatch_target="worker",
+    )
+    update_job(state, record["id"], {"status": "running", "claimed_by": "worker-1"})
+
+    response = client.post(f"/api/jobs/{record['id']}/cancel", json={})
+
+    assert response.status_code == 200
+    job = response.json()["job"]
+    assert job["status"] == "running"
+    assert job["cancel_requested"] is True
+    assert job["cancel_requested_by"] == "admin"
+
+    response = client.post(
+        f"/api/worker/jobs/{record['id']}/control",
+        headers={"x-worker-token": "worker-token"},
+        json={"worker_id": "worker-1"},
+    )
+
+    assert response.status_code == 200
+    control = response.json()["control"]
+    assert control["status"] == "running"
+    assert control["cancel_requested"] is True
+    assert "command" not in control
+    assert "path" not in json.dumps(control).lower()
+
+    response = client.post(
+        f"/api/worker/jobs/{record['id']}/status",
+        headers={"x-worker-token": "worker-token"},
+        json={"status": "done", "worker_id": "worker-1", "returncode": 0, "worker_artifacts": [{"ref_id": "late"}]},
+    )
+
+    assert response.status_code == 200
+    job = response.json()["job"]
+    assert job["status"] == "cancelled"
+    assert job["returncode"] == -9
+    assert job["cancel_handled_at"]
+    assert "worker_artifacts" not in job
+
+    response = client.post(f"/api/jobs/{record['id']}/retry", json={})
+
+    assert response.status_code == 200
+    job = response.json()["job"]
+    assert job["status"] == "retrying"
+    assert job["cancel_requested"] is False
+    assert job["cancel_requested_at"] is None
+
+
 def test_job_submit_rejects_full_local_worker_quota(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

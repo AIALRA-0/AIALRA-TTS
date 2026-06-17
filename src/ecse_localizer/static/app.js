@@ -907,7 +907,7 @@ function renderJobs() {
     item.innerHTML = `
       <div class="job-title">
         <span>${escapeHtml(job.title || job.type)}</span>
-        <span class="status ${statusClass(job.status)}">${escapeHtml(job.status)}</span>
+        <span class="status ${statusClass(job.status)}">${escapeHtml(jobStatusLabel(job))}</span>
       </div>
       <div class="job-meta">${escapeHtml(job.created_at || "")} · ${escapeHtml(job.id)}</div>
       <div class="job-meta">${escapeHtml(job.user || "")} · ${escapeHtml(job.metadata?.project_id || "")} · ${escapeHtml(job.metadata?.quality_mode || "")}</div>
@@ -916,6 +916,17 @@ function renderJobs() {
       <div class="job-actions"></div>
     `;
     const actions = item.querySelector(".job-actions");
+    if (canCancelJob(job)) {
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "danger";
+      cancel.textContent = "取消";
+      cancel.addEventListener("click", (event) => {
+        event.stopPropagation();
+        cancelJob(job.id);
+      });
+      actions.appendChild(cancel);
+    }
     if (canRetryJob(job.status)) {
       const retry = document.createElement("button");
       retry.type = "button";
@@ -960,6 +971,7 @@ function jobProgressLine(job) {
 
 function workerJobLine(job) {
   if (job.dispatch_target !== "worker") return "";
+  if (job.cancel_requested) return `worker：取消中，等待 ${job.claimed_by || "本地 worker"} 确认`;
   const submitted = job.metadata?.worker_status_at_submit || job.worker_status_at_submit || {};
   if (job.status === "queued" || job.status === "retrying") {
     if (submitted.heartbeat_online === false) return `worker：等待本地 worker 心跳（提交时 ${submitted.status || "unknown"}）`;
@@ -972,6 +984,29 @@ function workerJobLine(job) {
 
 function canRetryJob(status) {
   return ["done", "passed", "failed", "cancelled"].includes(status);
+}
+
+function canCancelJob(job) {
+  return ["queued", "claimed", "running", "retrying", "paused"].includes(job.status) && !job.cancel_requested;
+}
+
+function jobStatusLabel(job) {
+  return job.cancel_requested && ["claimed", "running", "paused"].includes(job.status) ? "取消中" : job.status;
+}
+
+async function cancelJob(jobId) {
+  if (!confirm("取消该任务？正在本地 worker 上运行的任务会在下一次控制轮询时停止。")) return;
+  try {
+    const result = await api(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST", body: "{}" });
+    if (result.ok) {
+      toast(result.message || "取消请求已发送");
+      await refreshJobs();
+    } else {
+      toast(result.message || "当前任务不能取消");
+    }
+  } catch (error) {
+    toast(`取消失败：${error.message}`);
+  }
 }
 
 async function retryJob(jobId) {

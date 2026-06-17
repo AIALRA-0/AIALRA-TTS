@@ -100,6 +100,8 @@ Queued jobs carry only portable worker arguments plus non-secret job metadata su
 
 While a worker job is running, the Windows worker periodically reports a remote-safe status payload: `running`, `worker_id`, `pid`, best-effort `progress`, sanitized system metrics, local managed-storage byte counts, and a log tail. Contabo stores only that summary; full logs stay on the Windows worker. Metrics are stripped of filesystem path fields before storage or display, and the dashboard uses worker heartbeat metrics in `worker_queue` mode instead of the Contabo host metrics.
 
+Running worker jobs can be cancelled from the WebUI. The remote server marks the job with `cancel_requested`; the Windows worker sees that flag through its signed `/api/worker/jobs/{job_id}/control` poll, terminates the local child process, and reports `cancelled`. Contabo still never opens an inbound connection to the Windows machine.
+
 If a worker-claimed job stops reporting status, the WebUI can recover it automatically. With `webui.worker_requeue_stale_jobs: true`, records stuck in `claimed` or `running` longer than `webui.worker_job_heartbeat_timeout_seconds` are moved to `retrying` and become claimable again; after `webui.worker_job_max_auto_retries`, the record is marked `failed` instead of looping forever.
 
 After a successful worker job, set `worker.upload_previews: true` to have the worker create and upload a preview cache item. The default preview is 854px wide at about 700k video bitrate and 96k AAC audio; adjust `worker.preview_max_width`, `worker.preview_video_bitrate`, `worker.preview_audio_bitrate`, and `worker.preview_max_seconds` to fit the remote storage quota.

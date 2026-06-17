@@ -35,9 +35,11 @@ from ecse_localizer.worker_client import (
     canonical_json,
     collect_worker_media_refs,
     extract_progress_from_text,
+    get_worker_control,
     redacted_command,
     resolve_worker_media_args,
     summarize_result,
+    worker_control_cancel_requested,
     worker_args,
     worker_headers,
     worker_signature,
@@ -368,6 +370,34 @@ def test_worker_progress_parser_handles_percent_and_fraction():
     assert extract_progress_from_text("nothing parseable") is None
 
 
+def test_worker_control_helpers_use_signed_request_without_plaintext_token(monkeypatch):
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"ok": True, "control": {"status": "running", "cancel_requested": True}}
+
+    def fake_post(url, data, headers, timeout):
+        captured.update({"url": url, "data": data, "headers": headers, "timeout": timeout})
+        return Response()
+
+    monkeypatch.setattr("ecse_localizer.worker_client.requests.post", fake_post)
+
+    control = get_worker_control("https://remote.example", "worker-token", "job-1", worker_id="worker-1")
+
+    assert control["cancel_requested"] is True
+    assert worker_control_cancel_requested(control)
+    assert captured["url"] == "https://remote.example/api/worker/jobs/job-1/control"
+    assert b"worker-1" in captured["data"]
+    assert captured["headers"]["X-Worker-Auth"] == "hmac-sha256"
+    assert "X-Worker-Signature" in captured["headers"]
+    assert "X-Worker-Token" not in captured["headers"]
+    assert not worker_control_cancel_requested({"status": "done", "cancel_requested": True})
+
+
 def test_soft_delete_job_hides_record_from_default_history(tmp_path):
     state = WebState(write_config(tmp_path))
     record = create_job_record(
@@ -448,6 +478,34 @@ def test_fresh_running_worker_job_is_not_requeued(tmp_path):
 
     assert requeue_stale_worker_jobs(state) == []
     assert read_job(state, record["id"])["status"] == "running"
+
+
+def test_stale_cancel_requested_worker_job_becomes_cancelled(tmp_path):
+    state = WebState(write_config(tmp_path))
+    state.webui["worker_job_heartbeat_timeout_seconds"] = 30
+    record = create_job_record(
+        state,
+        "audit",
+        "Audit input directory",
+        ["python", "-m", "ecse_localizer", "--config", "remote.yaml", "audit", "--input", "x"],
+        user="admin",
+        metadata={"worker_args": ["audit", "--input", "x"]},
+        dispatch_target="worker",
+    )
+    update_job(
+        state,
+        record["id"],
+        {"status": "running", "claimed_by": "worker-1", "cancel_requested": True, "cancel_requested_by": "admin"},
+    )
+    make_job_file_stale(state, record["id"], seconds=120)
+
+    changed = requeue_stale_worker_jobs(state)
+
+    assert changed[0]["id"] == record["id"]
+    assert changed[0]["status"] == "cancelled"
+    assert changed[0]["returncode"] == -9
+    assert changed[0]["cancel_handled_at"]
+    assert claim_worker_job(state, "worker-new") is None
 
 
 def test_stale_worker_job_fails_after_max_auto_retries(tmp_path):
