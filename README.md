@@ -141,10 +141,11 @@ Contabo deployment templates live in `deploy/`:
 - `deploy/nginx.conf.example`
 - `deploy/config.remote.example.yaml`
 - `deploy/bootstrap_contabo.py`
-- `deploy/CONTABO_DEPLOY_PROMPT.md`
 - `deploy/REMOTE_TUNNEL_GUIDE.md`
 - `deploy/systemd/*.service`
 - `deploy/systemd/*.timer`
+
+The authoritative handoff prompt for a Contabo-side deployment agent is `DEPLOY_CONTABO_PROMPT.md` at the repository root.
 
 On a fresh Contabo clone, generate local-only deployment files without printing secrets:
 
