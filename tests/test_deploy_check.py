@@ -111,6 +111,29 @@ def test_deploy_check_warns_when_worker_offline_threshold_is_too_low():
     assert ("webui.worker_offline_after_seconds", "number_below_recommended") in findings
 
 
+def test_deploy_check_accepts_https_remote_public_base_url():
+    result = check_deploy_config(valid_remote_config(), env={"REMOTE_PUBLIC_BASE_URL": "https://localizer.example.com"})
+
+    assert result["pass"] is True
+    assert result["errors"] == 0
+
+
+def test_deploy_check_rejects_unsafe_remote_public_base_url():
+    private_ip = ".".join(["10", "0", "0", "5"])
+    bad_urls = [
+        "http://localizer.example.com",
+        "https://localhost:7861",
+        "https://127.0.0.1:7861",
+        f"https://{private_ip}",
+    ]
+
+    for url in bad_urls:
+        result = check_deploy_config(valid_remote_config(), env={"REMOTE_PUBLIC_BASE_URL": url})
+        codes = {item["code"] for item in result["findings"]}
+        assert result["pass"] is False
+        assert codes & {"remote_public_base_url_invalid", "remote_public_base_url_not_public"}
+
+
 def test_deploy_check_cli_returns_nonzero_for_unsafe_config(tmp_path, capsys):
     path = tmp_path / "config.yaml"
     path.write_text(

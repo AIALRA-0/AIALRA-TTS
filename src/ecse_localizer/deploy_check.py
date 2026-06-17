@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 
 Finding = dict[str, str]
@@ -26,7 +27,7 @@ SECRET_MIN_LENGTHS = {
 }
 
 
-def check_deploy_config(config: dict[str, Any], *, mode: str = "remote") -> dict[str, Any]:
+def check_deploy_config(config: dict[str, Any], *, mode: str = "remote", env: dict[str, str] | None = None) -> dict[str, Any]:
     findings: list[Finding] = []
     if mode != "remote":
         add(findings, "error", "unsupported_mode", "mode", "deploy-check currently validates remote/Contabo deployments only.")
@@ -78,6 +79,7 @@ def check_deploy_config(config: dict[str, Any], *, mode: str = "remote") -> dict
     check_numeric_range(findings, webui, "max_active_jobs_global", "webui.max_active_jobs_global", min_value=1, max_value=100, level="warn")
 
     check_remote_paths(findings, config)
+    check_remote_environment(findings, env or {})
     check_capability_hints(findings, config)
     return build_result(findings)
 
@@ -190,6 +192,29 @@ def check_remote_paths(findings: list[Finding], config: dict[str, Any]) -> None:
             add(findings, "warn", "relative_remote_path", path, "Use absolute POSIX paths on Contabo.")
     if nested(config, "input_dir") == nested(config, "output_dir"):
         add(findings, "error", "input_output_same_path", "input_dir", "Remote input and output directories must be separate.")
+
+
+def check_remote_environment(findings: list[Finding], env: dict[str, str]) -> None:
+    if "REMOTE_PUBLIC_BASE_URL" not in env:
+        return
+    check_public_base_url(findings, str(env.get("REMOTE_PUBLIC_BASE_URL") or ""))
+
+
+def check_public_base_url(findings: list[Finding], value: str) -> None:
+    path = "env.REMOTE_PUBLIC_BASE_URL"
+    text = value.strip()
+    parsed = urlparse(text)
+    if not text or parsed.scheme != "https" or not parsed.netloc:
+        add(findings, "error", "remote_public_base_url_invalid", path, "Remote worker base URL must be an HTTPS public origin.")
+        return
+    host = (parsed.hostname or "").lower()
+    if not host:
+        add(findings, "error", "remote_public_base_url_invalid", path, "Remote worker base URL must include a hostname.")
+        return
+    if any(marker in text.lower() for marker in PLACEHOLDER_MARKERS):
+        add(findings, "error", "remote_public_base_url_placeholder", path, "Replace the public base URL placeholder before deployment.")
+    if host in {"localhost", "127.0.0.1", "::1", "0.0.0.0"} or has_private_ip(host):
+        add(findings, "error", "remote_public_base_url_not_public", path, "Remote worker base URL must not point at localhost or a private address.")
 
 
 def check_capability_hints(findings: list[Finding], config: dict[str, Any]) -> None:

@@ -363,7 +363,7 @@ def cmd_worker_health(args: argparse.Namespace, config: dict[str, Any]) -> int:
 
 
 def cmd_deploy_check(args: argparse.Namespace, config: dict[str, Any]) -> int:
-    result = check_deploy_config(config, mode=args.mode)
+    result = check_deploy_config(config, mode=args.mode, env=dict(os.environ))
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
