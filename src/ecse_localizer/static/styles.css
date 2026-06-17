@@ -495,14 +495,34 @@ h2 {
   margin-top: 4px;
 }
 
-.user-edit {
+.user-edit,
+.project-edit {
   display: grid;
   grid-template-columns: repeat(4, minmax(120px, 1fr));
   gap: 8px;
   align-items: end;
 }
 
-.user-edit label {
+.project-edit {
+  grid-template-columns: 1.1fr 1.6fr minmax(130px, 0.7fr);
+}
+
+.folder-edit-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.folder-edit-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.user-edit label,
+.project-edit label,
+.folder-edit-row label {
   display: grid;
   gap: 4px;
   color: var(--muted);
@@ -510,7 +530,9 @@ h2 {
 }
 
 .user-edit input,
-.user-edit select {
+.user-edit select,
+.project-edit input,
+.folder-edit-row input {
   min-height: 34px;
 }
 
@@ -578,7 +600,10 @@ button.danger:hover {
   .settings-grid,
   .split-panel,
   .metric-row,
-  .upload-box {
+  .upload-box,
+  .user-edit,
+  .project-edit,
+  .folder-edit-row {
     grid-template-columns: 1fr;
   }
 

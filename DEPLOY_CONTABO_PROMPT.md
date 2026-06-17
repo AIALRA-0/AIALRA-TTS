@@ -109,6 +109,7 @@ Deployment steps:
    - login works
    - project creation works
    - project folders can be created and selected for jobs
+   - project and folder edit actions can rename metadata and adjust project quotas without erasing historical job metadata
    - project and folder archive actions hide targets from selectors and reject them for new jobs without erasing historical job metadata
    - parameter templates can be listed, created, updated, deleted, selected, and applied to queued worker jobs
    - the task form displays ASR/subtitle/TTS language support hints from the online Windows worker heartbeat when available, otherwise from configured fallback capabilities

@@ -482,6 +482,22 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"ok": True, "project": project}
 
+    @app.patch("/api/projects/{project_id}")
+    async def update_project(project_id: str, request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
+        body = await request.json()
+        try:
+            project = state.store.update_project(
+                user,
+                project_id,
+                name=str(body.get("name")) if "name" in body else None,
+                description=str(body.get("description")) if "description" in body else None,
+                quota_project_gb=float(body["quota_project_gb"]) if "quota_project_gb" in body else None,
+                admin=is_admin(state, user),
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "project": project, "projects": projects_with_usage(state, user)}
+
     @app.delete("/api/projects/{project_id}")
     def archive_project(project_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
         try:
@@ -499,6 +515,21 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 project_id,
                 str(body.get("name", "")),
                 parent_id=str(body.get("parent_id") or "root"),
+                admin=is_admin(state, user),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "folder": folder, "projects": projects_with_usage(state, user)}
+
+    @app.patch("/api/projects/{project_id}/folders/{folder_id}")
+    async def update_folder(project_id: str, folder_id: str, request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
+        body = await request.json()
+        try:
+            folder = state.store.update_folder(
+                user,
+                project_id,
+                folder_id,
+                name=str(body.get("name", "")),
                 admin=is_admin(state, user),
             )
         except ValueError as exc:

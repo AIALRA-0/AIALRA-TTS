@@ -137,6 +137,38 @@ def test_project_folder_create_and_validation(tmp_path):
     assert any(item["id"] == folder["id"] for item in saved["folders"])
 
 
+def test_project_and_folder_update_preserves_scope(tmp_path):
+    store = PlatformStore(make_config(tmp_path))
+    store.bootstrap()
+    store.create_user("student.one", "long-enough-password")
+    project = store.create_project("admin", "Course", quota_project_gb=2)
+    folder = store.create_folder("admin", project["id"], "Week 1")
+
+    updated = store.update_project(
+        "admin",
+        project["id"],
+        name="ECSE Course",
+        description="Updated notes",
+        quota_project_gb=3,
+    )
+    renamed = store.update_folder("admin", project["id"], folder["id"], name="Lecture 01")
+
+    assert updated["name"] == "ECSE Course"
+    assert updated["description"] == "Updated notes"
+    assert updated["quota_project_bytes"] == 3 * 1024 * 1024 * 1024
+    assert renamed["name"] == "Lecture 01"
+    store.validate_project_folder("admin", project["id"], folder["id"])
+    saved = next(item for item in store.list_projects("admin") if item["id"] == project["id"])
+    assert any(item["id"] == folder["id"] and item["name"] == "Lecture 01" for item in saved["folders"])
+
+    try:
+        store.update_project("student.one", project["id"], name="Nope")
+    except ValueError as exc:
+        assert "Project not found" in str(exc)
+    else:
+        raise AssertionError("non-owner should not update another user's project")
+
+
 def test_project_and_folder_archive_are_soft_hidden(tmp_path):
     store = PlatformStore(make_config(tmp_path))
     store.bootstrap()

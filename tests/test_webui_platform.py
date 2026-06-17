@@ -85,6 +85,16 @@ def test_static_template_controls_have_save_update_and_delete_actions():
     assert "async function deleteCurrentTemplate()" in js
 
 
+def test_static_project_controls_have_update_actions():
+    js = (Path(__file__).parents[1] / "src" / "ecse_localizer" / "static" / "app.js").read_text(encoding="utf-8")
+
+    assert "保存项目" in js
+    assert "保存文件夹" in js
+    assert "async function saveProjectSettings(projectId)" in js
+    assert "async function saveFolderSettings(projectId, folderId)" in js
+    assert 'method: "PATCH"' in js
+
+
 def test_webui_login_project_and_quota(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
@@ -109,6 +119,22 @@ def test_webui_login_project_and_quota(tmp_path):
     assert response.status_code == 200
     folder = response.json()["folder"]
     assert folder["name"] == "Week 1"
+
+    response = client.patch(
+        f"/api/projects/{project['id']}",
+        json={"name": "Course Project Updated", "description": "edited", "quota_project_gb": 3},
+    )
+    assert response.status_code == 200
+    updated = response.json()["project"]
+    assert updated["name"] == "Course Project Updated"
+    assert updated["description"] == "edited"
+    assert updated["quota_project_bytes"] == 3 * 1024 * 1024 * 1024
+
+    response = client.patch(f"/api/projects/{project['id']}/folders/{folder['id']}", json={"name": "Week One"})
+    assert response.status_code == 200
+    assert response.json()["folder"]["name"] == "Week One"
+    refreshed_project = next(item for item in response.json()["projects"] if item["id"] == project["id"])
+    assert any(item["id"] == folder["id"] and item["name"] == "Week One" for item in refreshed_project["folders"])
 
     response = client.get("/api/templates")
     assert response.status_code == 200

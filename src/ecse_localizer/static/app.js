@@ -639,6 +639,7 @@ function renderProjects() {
   for (const project of state.projects) {
     const item = document.createElement("div");
     item.className = "job-item";
+    const projectQuotaGb = bytesToGb(project.quota_project_bytes || 0, 0);
     item.innerHTML = `
       <div class="job-title">
         <span>${escapeHtml(project.name)}</span>
@@ -646,23 +647,52 @@ function renderProjects() {
       </div>
       <div class="job-meta">${escapeHtml(project.id)} · ${escapeHtml(project.description || "")}</div>
       <div class="job-meta">project quota ${formatBytes(project.project_used_bytes || 0)} / ${formatBytes(project.quota_project_bytes || 0)}</div>
-      <div class="job-meta">folders ${(project.folders || []).map((folder) => escapeHtml(folder.name || folder.id)).join(" · ")}</div>
+      <div class="project-edit">
+        <label>项目名 <input data-project-name="${escapeHtml(project.id)}" value="${escapeHtml(project.name)}" /></label>
+        <label>描述 <input data-project-description="${escapeHtml(project.id)}" value="${escapeHtml(project.description || "")}" /></label>
+        <label>项目额度 GB <input data-project-quota="${escapeHtml(project.id)}" type="number" min="0" step="0.1" value="${projectQuotaGb}" /></label>
+      </div>
+      <div class="folder-edit-list"></div>
     `;
     const actions = document.createElement("div");
     actions.className = "artifact-actions";
+    const saveProjectButton = document.createElement("button");
+    saveProjectButton.type = "button";
+    saveProjectButton.className = "secondary";
+    saveProjectButton.textContent = "保存项目";
+    saveProjectButton.addEventListener("click", () => saveProjectSettings(project.id));
+    actions.appendChild(saveProjectButton);
     const archiveProjectButton = document.createElement("button");
     archiveProjectButton.type = "button";
     archiveProjectButton.className = "secondary";
     archiveProjectButton.textContent = "归档项目";
     archiveProjectButton.addEventListener("click", () => archiveProject(project));
     actions.appendChild(archiveProjectButton);
-    for (const folder of (project.folders || []).filter((item) => item.id !== "root")) {
-      const folderButton = document.createElement("button");
-      folderButton.type = "button";
-      folderButton.className = "secondary";
-      folderButton.textContent = `归档 ${folder.name || folder.id}`;
-      folderButton.addEventListener("click", () => archiveFolder(project, folder));
-      actions.appendChild(folderButton);
+    const folderList = item.querySelector(".folder-edit-list");
+    for (const folder of project.folders || []) {
+      const row = document.createElement("div");
+      row.className = "folder-edit-row";
+      row.innerHTML = `
+        <label>${folder.id === "root" ? "根文件夹" : "文件夹"} <input data-folder-project="${escapeHtml(project.id)}" data-folder-id="${escapeHtml(folder.id)}" value="${escapeHtml(folder.name || folder.id)}" /></label>
+      `;
+      const folderActions = document.createElement("div");
+      folderActions.className = "artifact-actions";
+      const saveFolderButton = document.createElement("button");
+      saveFolderButton.type = "button";
+      saveFolderButton.className = "secondary";
+      saveFolderButton.textContent = "保存文件夹";
+      saveFolderButton.addEventListener("click", () => saveFolderSettings(project.id, folder.id));
+      folderActions.appendChild(saveFolderButton);
+      if (folder.id !== "root") {
+        const folderButton = document.createElement("button");
+        folderButton.type = "button";
+        folderButton.className = "secondary";
+        folderButton.textContent = "归档文件夹";
+        folderButton.addEventListener("click", () => archiveFolder(project, folder));
+        folderActions.appendChild(folderButton);
+      }
+      row.appendChild(folderActions);
+      folderList.appendChild(row);
     }
     item.appendChild(actions);
     list.appendChild(item);
@@ -702,6 +732,43 @@ async function createFolder(event) {
     renderProjects();
   } catch (error) {
     toast(`创建文件夹失败：${error.message}`);
+  }
+}
+
+async function saveProjectSettings(projectId) {
+  try {
+    const payload = {
+      name: document.querySelector(`[data-project-name="${cssEscape(projectId)}"]`).value,
+      description: document.querySelector(`[data-project-description="${cssEscape(projectId)}"]`).value,
+      quota_project_gb: Number(document.querySelector(`[data-project-quota="${cssEscape(projectId)}"]`).value || 0),
+    };
+    const result = await api(`/api/projects/${encodeURIComponent(projectId)}`, { method: "PATCH", body: JSON.stringify(payload) });
+    state.projects = result.projects || state.projects;
+    toast("项目已更新");
+    renderProjectOptions();
+    renderFolderOptions();
+    renderJobFilterOptions();
+    renderProjects();
+  } catch (error) {
+    toast(`保存项目失败：${error.message}`);
+  }
+}
+
+async function saveFolderSettings(projectId, folderId) {
+  try {
+    const input = document.querySelector(`[data-folder-project="${cssEscape(projectId)}"][data-folder-id="${cssEscape(folderId)}"]`);
+    const result = await api(`/api/projects/${encodeURIComponent(projectId)}/folders/${encodeURIComponent(folderId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: input.value }),
+    });
+    state.projects = result.projects || state.projects;
+    toast("文件夹已更新");
+    renderProjectOptions();
+    renderFolderOptions();
+    renderJobFilterOptions();
+    renderProjects();
+  } catch (error) {
+    toast(`保存文件夹失败：${error.message}`);
   }
 }
 
@@ -826,9 +893,9 @@ async function createUser(event) {
   }
 }
 
-function bytesToGb(bytes) {
+function bytesToGb(bytes, minimum = 1) {
   const value = Number(bytes || 0) / 1024 / 1024 / 1024;
-  return Number.isFinite(value) ? Math.max(1, Math.round(value * 100) / 100) : 1;
+  return Number.isFinite(value) ? Math.max(minimum, Math.round(value * 100) / 100) : minimum;
 }
 
 function cssEscape(value) {

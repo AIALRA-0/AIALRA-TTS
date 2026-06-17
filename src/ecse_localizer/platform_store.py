@@ -198,6 +198,36 @@ class PlatformStore:
         self._save(self.projects_path, data)
         return row
 
+    def update_project(
+        self,
+        username: str,
+        project_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        quota_project_gb: float | None = None,
+        admin: bool = False,
+    ) -> dict[str, Any]:
+        data = self._load(self.projects_path, {"projects": []})
+        for project in data.get("projects", []):
+            self._normalize_project(project)
+            if project.get("id") != project_id:
+                continue
+            if not admin and project.get("owner") != username:
+                raise ValueError("Project not found")
+            if project.get("archived_at"):
+                raise ValueError("Project is archived")
+            if name is not None:
+                project["name"] = clean_name(name, default="Untitled Project")
+            if description is not None:
+                project["description"] = str(description or "")[:500]
+            if quota_project_gb is not None:
+                project["quota_project_bytes"] = gb_to_bytes(quota_project_gb)
+            project["updated_at"] = iso_now()
+            self._save(self.projects_path, data)
+            return project_public_view(project)
+        raise ValueError("Project not found")
+
     def create_folder(self, username: str, project_id: str, name: str, *, parent_id: str = "root", admin: bool = False) -> dict[str, Any]:
         clean = clean_name(name, default="Untitled Folder")
         data = self._load(self.projects_path, {"projects": []})
@@ -229,6 +259,39 @@ class PlatformStore:
             project["updated_at"] = iso_now()
             self._save(self.projects_path, data)
             return row
+        raise ValueError("Project not found")
+
+    def update_folder(self, username: str, project_id: str, folder_id: str, *, name: str, admin: bool = False) -> dict[str, Any]:
+        if not folder_id:
+            raise ValueError("Folder not found")
+        clean = clean_name(name, default="Untitled Folder")
+        data = self._load(self.projects_path, {"projects": []})
+        for project in data.get("projects", []):
+            self._normalize_project(project)
+            if project.get("id") != project_id:
+                continue
+            if not admin and project.get("owner") != username:
+                raise ValueError("Project not found")
+            if project.get("archived_at"):
+                raise ValueError("Project is archived")
+            folders = project.get("folders", [])
+            target = next((folder for folder in folders if folder.get("id") == folder_id), None)
+            if not target or target.get("archived_at"):
+                raise ValueError("Folder not found")
+            parent_id = target.get("parent_id", "root")
+            if any(
+                folder.get("id") != folder_id
+                and not folder.get("archived_at")
+                and folder.get("parent_id", "root") == parent_id
+                and str(folder.get("name", "")).lower() == clean.lower()
+                for folder in folders
+            ):
+                raise ValueError(f"Folder already exists: {clean}")
+            target["name"] = clean
+            target["updated_at"] = iso_now()
+            project["updated_at"] = iso_now()
+            self._save(self.projects_path, data)
+            return dict(target)
         raise ValueError("Project not found")
 
     def get_project(self, username: str, project_id: str, *, admin: bool = False) -> dict[str, Any] | None:

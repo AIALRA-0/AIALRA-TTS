@@ -41,7 +41,7 @@ Open:
 http://127.0.0.1:7861
 ```
 
-Set real credentials in local `config.yaml` or `.env`; never commit them. The WebUI supports uploads, task history, project/folder metadata, project and folder archiving, project quotas, reusable parameter templates, invite-only users, admin-managed user status/quotas, common tuning parameters, logs, quota checks, local worker health/metrics, failed-job retry, and soft-deleting job records.
+Set real credentials in local `config.yaml` or `.env`; never commit them. The WebUI supports uploads, task history, project/folder metadata, project and folder editing/archiving, project quotas, reusable parameter templates, invite-only users, admin-managed user status/quotas, common tuning parameters, logs, quota checks, local worker health/metrics, failed-job retry, and soft-deleting job records.
 
 Per-job language, quality, and style settings are written to generated job config files under `runs/`. The base `config.yaml` stays local and is not mutated by submitted jobs.
 
