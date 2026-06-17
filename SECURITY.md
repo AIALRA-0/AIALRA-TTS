@@ -30,6 +30,8 @@ Global tuning and raw YAML configuration endpoints are admin-only. They may expo
 
 Dashboard storage paths are redacted for non-admin users. Ordinary users receive storage labels, while admins can still see absolute paths for deployment troubleshooting.
 
+Video lists use `video-ref:<id>` for non-admin users instead of exposing course or upload directory paths. The server resolves the reference only for the current user's visible videos when a local job is submitted.
+
 ## Artifact Access And Deletion
 
 Generated artifact download URLs are short-lived HMAC-signed URLs. The URL binds to the artifact id and user; it does not expose the filesystem path in the token.

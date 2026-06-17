@@ -15,7 +15,7 @@ else:
 
 from ecse_localizer.artifacts import artifact_catalog
 from ecse_localizer.utils import read_json
-from ecse_localizer.webui import create_app, create_job_record, fields_from_config, update_job
+from ecse_localizer.webui import create_app, create_job_record, fields_from_config, list_all_video_records, resolve_video_reference, update_job
 from ecse_localizer.worker_client import worker_headers
 
 
@@ -545,6 +545,60 @@ def test_dashboard_redacts_storage_paths_for_non_admin(tmp_path):
         assert payload["storage_summary"]["redacted"] is False
         assert payload["input_dir"] == raw_input
         assert payload["output_dir"] == raw_output
+
+
+def test_video_records_use_refs_for_non_admin_paths(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    app = create_app(config_path)
+    state = app.state.web
+    state.store.create_user("student.one", "long-enough-password")
+    course_video = Path(state.config["input_dir"]) / "lecture.mp4"
+    course_video.write_bytes(b"course mp4")
+    upload_video = state.store.user_upload_dir("student.one") / "upload.mp4"
+    upload_video.write_bytes(b"upload mp4")
+
+    records = list_all_video_records(state, "student.one")
+    paths = {row["path"] for row in records}
+    assert str(course_video) not in paths
+    assert str(upload_video) not in paths
+    assert {row["display_path"] for row in records} == {"course media: lecture.mp4", "uploaded media: upload.mp4"}
+    refs = {row["name"]: row["path"] for row in records}
+    assert refs["lecture.mp4"].startswith("video-ref:")
+    assert refs["upload.mp4"].startswith("video-ref:")
+    assert resolve_video_reference(state, "student.one", refs["lecture.mp4"]) == str(course_video)
+    assert resolve_video_reference(state, "student.one", refs["upload.mp4"]) == str(upload_video)
+
+    admin_records = list_all_video_records(state, "admin")
+    assert any(row["path"] == str(course_video) for row in admin_records)
+
+
+def test_videos_api_redacts_paths_for_non_admin(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    app = create_app(config_path)
+    state = app.state.web
+    state.store.create_user("student.one", "long-enough-password")
+    course_video = Path(state.config["input_dir"]) / "lecture.mp4"
+    course_video.write_bytes(b"course mp4")
+
+    with TestClient(app) as student:
+        response = student.post("/api/login", json={"username": "student.one", "password": "long-enough-password"})
+        assert response.status_code == 200
+        response = student.get("/api/videos")
+        assert response.status_code == 200
+        payload = response.json()
+        assert all(row["path"] != str(course_video) for row in payload["videos"])
+        assert all(row["path"].startswith("video-ref:") for row in payload["videos"])
+
+    with TestClient(app) as admin:
+        response = admin.post("/api/login", json={"username": "admin", "password": "local-password"})
+        assert response.status_code == 200
+        response = admin.get("/api/videos")
+        assert response.status_code == 200
+        assert any(row["path"] == str(course_video) for row in response.json()["videos"])
 
 
 def test_artifact_download_urls_are_user_scoped(tmp_path):

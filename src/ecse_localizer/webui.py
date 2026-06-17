@@ -702,8 +702,10 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/api/jobs")
     async def start_job(request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
-        body = await request.json()
+        body = dict(await request.json())
         job_type = str(body.get("type", ""))
+        if job_type == "process_one":
+            body["video"] = resolve_video_reference(state, user, str(body.get("video") or ""))
         execution_mode = str(state.webui.get("execution_mode", "local_subprocess"))
         worker_queue = execution_mode == "worker_queue" or bool(body.get("queue_for_worker"))
         command, title = build_job_command(job_type, body, state, validate_paths=not worker_queue)
@@ -1874,10 +1876,47 @@ def unique_path(path: Path) -> Path:
 
 
 def list_all_video_records(state: WebState, user: str) -> list[dict[str, Any]]:
-    records = list_video_records(state.config, state.store.user_upload_dir(user))
-    if str(state.webui.get("execution_mode", "local_subprocess")) == "worker_queue":
+    execution_mode = str(state.webui.get("execution_mode", "local_subprocess"))
+    include_local_paths = execution_mode != "worker_queue" or bool(state.webui.get("allow_worker_path_submission", False))
+    records = list_video_records(state.config, state.store.user_upload_dir(user)) if include_local_paths else []
+    if not is_admin(state, user):
+        records = [public_video_record(state, user, row) for row in records]
+    if execution_mode == "worker_queue":
         records.extend(worker_media_video_records(state))
     return records
+
+
+def public_video_record(state: WebState, user: str, row: dict[str, Any]) -> dict[str, Any]:
+    name = safe_upload_name(str(row.get("name") or "video.mp4"))
+    uploaded = bool(row.get("uploaded"))
+    return {
+        "name": name,
+        "path": video_ref_for_path(state, user, str(row.get("path") or "")),
+        "size": int(row.get("size", 0) or 0),
+        "uploaded": uploaded,
+        "local_video_ref": True,
+        "display_path": f"{'uploaded media' if uploaded else 'course media'}: {name}",
+    }
+
+
+def video_ref_for_path(state: WebState, user: str, path: str) -> str:
+    resolved = str(Path(path).resolve()).lower()
+    secret = download_secret(state)
+    body = f"{user}\n{resolved}".encode("utf-8", errors="ignore")
+    digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()[:24]
+    return f"video-ref:{digest}"
+
+
+def resolve_video_reference(state: WebState, user: str, video: str) -> str:
+    value = str(video or "").strip()
+    if not value.startswith("video-ref:"):
+        return value
+    records = list_video_records(state.config, state.store.user_upload_dir(user))
+    for row in records:
+        path = str(row.get("path") or "")
+        if video_ref_for_path(state, user, path) == value:
+            return path
+    raise HTTPException(status_code=404, detail="Video reference not found")
 
 
 def worker_media_video_records(state: WebState) -> list[dict[str, Any]]:
