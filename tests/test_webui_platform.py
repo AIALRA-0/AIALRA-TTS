@@ -727,7 +727,9 @@ def test_deleted_job_artifacts_hide_from_normal_page_but_remain_job_scoped(tmp_p
 
     response = client.get("/api/artifacts")
     assert response.status_code == 200
-    assert "lecture_zh_dub.mp4" in {item["name"] for item in response.json()["artifacts"]}
+    artifacts = response.json()["artifacts"]
+    assert "lecture_zh_dub.mp4" in {item["name"] for item in artifacts}
+    download_url = next(item["download_url"] for item in artifacts if item["name"] == "lecture_zh_dub.mp4")
 
     response = client.delete(f"/api/jobs/{record['id']}")
     assert response.status_code == 200
@@ -735,10 +737,15 @@ def test_deleted_job_artifacts_hide_from_normal_page_but_remain_job_scoped(tmp_p
     response = client.get("/api/artifacts")
     assert response.status_code == 200
     assert "lecture_zh_dub.mp4" not in {item["name"] for item in response.json()["artifacts"]}
+    response = client.get(download_url)
+    assert response.status_code == 404
 
     response = client.get(f"/api/jobs/{record['id']}/artifacts")
     assert response.status_code == 200
-    assert "lecture_zh_dub.mp4" in {item["name"] for item in response.json()["artifacts"]}
+    deleted_artifacts = response.json()["artifacts"]
+    deleted_video = next(item for item in deleted_artifacts if item["name"] == "lecture_zh_dub.mp4")
+    assert "download_url" not in deleted_video
+    assert deleted_video["download_disabled_reason"] == "source_job_deleted"
 
 
 def test_ownerless_legacy_jobs_are_admin_only(tmp_path):

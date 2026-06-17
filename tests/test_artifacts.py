@@ -198,6 +198,15 @@ def test_artifact_catalog_hides_deleted_job_artifacts_by_default(tmp_path):
     assert visible == []
     assert {row["kind"] for row in deleted_view} >= {"report_bundle", "zh_dub_mp4", "remote_preview"}
     assert any(row.get("remote_worker_artifact") for row in deleted_view)
+    assert all(row.get("source_deleted") is True for row in deleted_view)
+
+    signed = with_signed_urls(deleted_view, secret="secret", username="student", ttl_seconds=60)
+    exposed = [row for row in signed if row["kind"] != "report_bundle"]
+    assert exposed
+    assert all("download_url" not in row for row in exposed)
+    assert all("preview_url" not in row for row in exposed)
+    assert all("request_cache_url" not in row for row in exposed)
+    assert all(row["download_disabled_reason"] == "source_job_deleted" for row in exposed)
 
 
 def test_artifact_filter_hides_ownerless_rows_from_non_admin():

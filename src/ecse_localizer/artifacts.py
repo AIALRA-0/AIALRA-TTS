@@ -58,6 +58,7 @@ def artifact_catalog(config: dict[str, Any], jobs: list[dict[str, Any]] | None =
         if not include_deleted and (report_key in deleted_report_keys or row_references_deleted_job(report, deleted_job_ids)):
             continue
         job = job_by_report.get(report_key)
+        source_deleted = bool(job and job_is_deleted(job)) or report_key in deleted_report_keys or row_references_deleted_job(report, deleted_job_ids)
         metadata = job.get("metadata") if job and isinstance(job.get("metadata"), dict) else {}
         owner = job.get("user") if job else report.get("user")
         project_id = metadata.get("project_id") if job else report.get("project_id")
@@ -83,6 +84,7 @@ def artifact_catalog(config: dict[str, Any], jobs: list[dict[str, Any]] | None =
             "outputs": len([p for p in bundle_paths if p.exists()]),
             "previewable": False,
             "display_path": str(report_path),
+            "source_deleted": source_deleted,
         }
         for key, value in (report.get("outputs") or {}).items():
             if key not in DOWNLOADABLE_OUTPUTS or not value:
@@ -106,6 +108,7 @@ def artifact_catalog(config: dict[str, Any], jobs: list[dict[str, Any]] | None =
                 "previewable": path.suffix.lower() in PREVIEWABLE_SUFFIXES,
                 "media_type": mimetypes.guess_type(path.name)[0] or "application/octet-stream",
                 "display_path": str(path),
+                "source_deleted": source_deleted,
             }
         for key, preview in (report.get("previews") or {}).items():
             add_preview_record(
@@ -118,11 +121,13 @@ def artifact_catalog(config: dict[str, Any], jobs: list[dict[str, Any]] | None =
                 job_id=job.get("id") if job else None,
                 report=str(report_path),
                 source_output_key=str(key),
+                source_deleted=source_deleted,
             )
     for preview in load_preview_manifest(config):
-        if not include_deleted and row_references_deleted_job(preview, deleted_job_ids):
+        source_deleted = row_references_deleted_job(preview, deleted_job_ids)
+        if not include_deleted and source_deleted:
             continue
-        add_preview_record(records, preview, config=config)
+        add_preview_record(records, preview, config=config, source_deleted=source_deleted)
     add_worker_artifact_records(records, job_rows, include_deleted=include_deleted)
     return sorted(records.values(), key=lambda row: float(row.get("mtime") or 0), reverse=True)
 
@@ -142,7 +147,8 @@ def row_references_deleted_job(row: dict[str, Any], deleted_job_ids: set[str]) -
 
 def add_worker_artifact_records(records: dict[str, dict[str, Any]], jobs: list[dict[str, Any]], *, include_deleted: bool = False) -> None:
     for job in jobs:
-        if job_is_deleted(job) and not include_deleted:
+        source_deleted = job_is_deleted(job)
+        if source_deleted and not include_deleted:
             continue
         artifacts = job.get("worker_artifacts")
         if not isinstance(artifacts, list):
@@ -176,6 +182,7 @@ def add_worker_artifact_records(records: dict[str, dict[str, Any]], jobs: list[d
                     "artifact_ref_id": ref_id,
                     "full_available": True,
                     "display_path": f"Windows worker: {raw.get('name') or ref_id}",
+                    "source_deleted": source_deleted,
                 },
             )
 
@@ -191,6 +198,7 @@ def add_preview_record(
     job_id: str | None = None,
     report: str | None = None,
     source_output_key: str | None = None,
+    source_deleted: bool = False,
 ) -> None:
     row = {"preview_path": preview} if isinstance(preview, str) else dict(preview or {})
     preview_path = Path(str(row.get("preview_path") or row.get("path") or ""))
@@ -219,6 +227,7 @@ def add_preview_record(
         "remote_preview": True,
         "remote_cache": bool(row.get("remote_cache", False)),
         "full_available": bool(row.get("full_available", False)),
+        "source_deleted": bool(row.get("source_deleted", source_deleted)),
     }
     if thumbnail_ok and thumbnail_path:
         records[aid]["thumbnail_path"] = str(thumbnail_path)
@@ -655,7 +664,9 @@ def with_signed_urls(
     for row in artifacts:
         item = dict(row)
         if item.get("kind") != "report_bundle":
-            if item.get("download_requestable") and not item.get("path"):
+            if item.get("source_deleted"):
+                item["download_disabled_reason"] = "source_job_deleted"
+            elif item.get("download_requestable") and not item.get("path"):
                 item["request_cache_url"] = f"/api/artifacts/{item['id']}/request-cache"
             else:
                 token = sign_artifact_token(secret, str(item["id"]), username, ttl_seconds=ttl_seconds)

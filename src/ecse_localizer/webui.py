@@ -273,6 +273,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         row = find_artifact(rows, artifact_id)
         if not row:
             raise HTTPException(status_code=404, detail="Artifact not found")
+        if row.get("source_deleted"):
+            raise HTTPException(status_code=404, detail="Artifact not found")
         if not row.get("path"):
             raise HTTPException(status_code=409, detail="Artifact is on the Windows worker; request a temporary cache first")
         media_type = row.get("media_type") or None
