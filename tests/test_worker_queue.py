@@ -47,6 +47,7 @@ from ecse_localizer.worker_client import (
     claim_job,
     collect_worker_media_refs,
     extract_progress_from_text,
+    final_worker_progress,
     get_worker_control,
     poll_concurrent_once,
     redacted_command,
@@ -854,6 +855,12 @@ def test_worker_progress_parser_handles_percent_and_fraction():
     assert extract_progress_from_text("overall progress: 37%") == 37
     assert extract_progress_from_text("processed segment 3/12") == 25
     assert extract_progress_from_text("nothing parseable") is None
+
+
+def test_final_worker_progress_does_not_mark_cancelled_job_complete():
+    assert final_worker_progress(0, cancelled_by_control=False, log_tail="processed segment 2/10") == 100
+    assert final_worker_progress(0, cancelled_by_control=True, log_tail="processed segment 2/10") == 20
+    assert final_worker_progress(0, cancelled_by_control=True, log_tail="no progress line") is None
 
 
 def test_worker_control_helpers_use_signed_request_without_plaintext_token(monkeypatch):

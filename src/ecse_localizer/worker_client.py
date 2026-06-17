@@ -273,7 +273,7 @@ def run_worker_job(
     if status == "done":
         preview_summary = try_create_and_upload_preview(result, job, remote_base_url, worker_token, base_config, worker_id=worker_id)
     log_tail = sanitize_remote_text(tail_text(log_path, log_tail_lines))
-    final_progress = 100 if returncode == 0 else extract_progress_from_text(log_tail)
+    final_progress = final_worker_progress(returncode, cancelled_by_control=cancelled_by_control, log_tail=log_tail)
     payload = {
         "status": status,
         "returncode": final_returncode,
@@ -886,6 +886,14 @@ def try_get_worker_control(remote_base_url: str, worker_token: str, job_id: str,
 
 def worker_control_cancel_requested(control: dict[str, Any]) -> bool:
     return bool(control.get("cancel_requested")) and str(control.get("status") or "") in {"claimed", "running", "paused"}
+
+
+def final_worker_progress(returncode: int | None, *, cancelled_by_control: bool, log_tail: str) -> int | None:
+    if cancelled_by_control:
+        return extract_progress_from_text(log_tail)
+    if returncode == 0:
+        return 100
+    return extract_progress_from_text(log_tail)
 
 
 def terminate_process_tree(proc: subprocess.Popen) -> int | None:
