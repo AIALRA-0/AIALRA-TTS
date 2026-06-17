@@ -166,6 +166,25 @@ def test_static_ui_uses_sse_with_polling_fallback():
     assert "applyLiveEvent(JSON.parse(event.data))" in js
 
 
+def test_static_ui_has_sidebar_and_status_rail_layout():
+    static_root = Path(__file__).parents[1] / "src" / "ecse_localizer" / "static"
+    html = (static_root / "index.html").read_text(encoding="utf-8")
+    css = (static_root / "styles.css").read_text(encoding="utf-8")
+    js = (static_root / "app.js").read_text(encoding="utf-8")
+
+    assert 'class="sidebar"' in html
+    assert 'class="content-shell"' in html
+    assert 'class="status-rail"' in html
+    assert "layout-rail" in html
+    for element_id in ["statusWorker", "statusQueue", "statusGpu", "statusCpu", "statusMemory", "statusDisk", "statusQuota", "statusLlm", "statusTts"]:
+        assert f'id="{element_id}"' in html
+    assert "grid-template-columns: 248px minmax(0, 1fr) 304px;" in css
+    assert ".status-rail" in css
+    assert "function renderConnectionStatus()" in js
+    assert 'setText("statusWorker", workerText)' in js
+    assert 'setText("statusQuota", quotaText)' in js
+
+
 def test_static_artifact_history_has_scope_filters():
     static_root = Path(__file__).parents[1] / "src" / "ecse_localizer" / "static"
     html = (static_root / "index.html").read_text(encoding="utf-8")

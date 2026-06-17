@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-store" />
     <meta http-equiv="Pragma" content="no-cache" />
     <title>AIALRA Localizer</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260617-tts-sync" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260617-layout-rail" />
   </head>
   <body>
     <main id="loginView" class="login-view" hidden>
@@ -32,6 +32,7 @@
     </main>
 
     <div id="appView" class="app-shell" hidden>
+      <aside class="sidebar">
       <header class="topbar">
         <div>
           <div class="brand">AIALRA Localizer</div>
@@ -52,7 +53,9 @@
         <button class="tab" data-tab="jobs">历史任务</button>
         <button class="tab" data-tab="settings" data-admin-only>参数设置</button>
       </nav>
+      </aside>
 
+      <main class="content-shell">
       <section id="dashboardTab" class="tab-panel active">
         <div class="metric-row">
           <div class="metric"><span id="metricVideos">-</span><small>视频</small></div>
@@ -415,9 +418,37 @@
           </div>
         </section>
       </section>
+      </main>
+
+      <aside class="status-rail" aria-label="运行状态">
+        <section class="rail-section">
+          <div class="rail-head">
+            <h2>运行状态</h2>
+            <span id="statusStream" class="rail-pill">轮询</span>
+          </div>
+          <dl class="rail-list">
+            <div><dt>Worker</dt><dd id="statusWorker">-</dd></div>
+            <div><dt>队列</dt><dd id="statusQueue">-</dd></div>
+            <div><dt>GPU</dt><dd id="statusGpu">-</dd></div>
+            <div><dt>CPU</dt><dd id="statusCpu">-</dd></div>
+            <div><dt>内存</dt><dd id="statusMemory">-</dd></div>
+            <div><dt>磁盘</dt><dd id="statusDisk">-</dd></div>
+          </dl>
+        </section>
+        <section class="rail-section">
+          <div class="rail-head">
+            <h2>模型</h2>
+          </div>
+          <dl class="rail-list">
+            <div><dt>LLM</dt><dd id="statusLlm">-</dd></div>
+            <div><dt>TTS</dt><dd id="statusTts">-</dd></div>
+            <div><dt>额度</dt><dd id="statusQuota">-</dd></div>
+          </dl>
+        </section>
+      </aside>
     </div>
 
     <div id="toast" class="toast" hidden></div>
-    <script src="/assets/app.js?v=20260617-tts-sync"></script>
+    <script src="/assets/app.js?v=20260617-layout-rail"></script>
   </body>
 </html>

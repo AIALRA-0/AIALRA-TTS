@@ -58,6 +58,7 @@ function showLogin() {
   stopLiveTimers();
   $("loginView").hidden = false;
   $("appView").hidden = true;
+  renderConnectionStatus();
 }
 
 function showApp(user, userRecord = null) {
@@ -261,10 +262,12 @@ function connectLiveEvents() {
   if (!("EventSource" in window) || state.eventSource || $("appView").hidden) return;
   const source = new EventSource("/api/events", { withCredentials: true });
   state.eventSource = source;
+  renderConnectionStatus();
   source.addEventListener("state", (event) => {
     try {
       applyLiveEvent(JSON.parse(event.data));
       state.eventConnected = true;
+      renderConnectionStatus();
     } catch (error) {
       console.warn("Live event parse failed:", error);
     }
@@ -273,6 +276,7 @@ function connectLiveEvents() {
     state.eventConnected = false;
     source.close();
     if (state.eventSource === source) state.eventSource = null;
+    renderConnectionStatus();
   };
 }
 
@@ -296,6 +300,8 @@ async function loadDashboard() {
   $("metricReports").textContent = data.report_count;
   $("metricTts").textContent = data.tts.backend || "-";
   $("metricLlm").textContent = data.llm.available ? data.llm.model : "未连接";
+  setText("statusTts", data.tts.backend || "-");
+  setText("statusLlm", data.llm.available ? data.llm.model : "未连接");
   renderRuntimeMetrics(data);
   state.uploadPolicy = data.upload_policy || null;
   renderUploadPolicy();
@@ -333,31 +339,58 @@ function renderRuntimeMetrics(data) {
   const metrics = data.metrics || {};
   const gpu = (metrics.gpu || [])[0] || {};
   const gpuMetric = $("metricGpu");
+  const gpuText = gpu.available ? `${percentText(gpu.util_percent)} / ${percentText(gpu.memory_used_percent)}` : "未检测";
   if (gpuMetric) {
-    gpuMetric.textContent = gpu.available ? `${percentText(gpu.util_percent)} / ${percentText(gpu.memory_used_percent)}` : "未检测";
+    gpuMetric.textContent = gpuText;
     gpuMetric.title = gpu.name || gpu.error || "";
   }
+  setText("statusGpu", gpuText);
   const cpuMetric = $("metricCpu");
-  if (cpuMetric) cpuMetric.textContent = percentText(metrics.cpu?.load_percent);
+  const cpuText = percentText(metrics.cpu?.load_percent);
+  if (cpuMetric) cpuMetric.textContent = cpuText;
+  setText("statusCpu", cpuText);
   const memoryMetric = $("metricMemory");
-  if (memoryMetric) memoryMetric.textContent = percentText(metrics.memory?.used_percent);
+  const memoryText = percentText(metrics.memory?.used_percent);
+  if (memoryMetric) memoryMetric.textContent = memoryText;
+  setText("statusMemory", memoryText);
   const quotaMetric = $("metricQuota");
+  const quotaText = data.quota ? quotaLabel(data.quota) : "-";
   if (quotaMetric) {
-    quotaMetric.textContent = data.quota ? quotaLabel(data.quota) : "-";
+    quotaMetric.textContent = quotaText;
     quotaMetric.title = data.quota ? quotaTitle(data.quota) : "";
   }
+  setText("statusQuota", quotaText);
   const workerMetric = $("metricWorker");
+  const workerText = workerLabel(data.worker);
   if (workerMetric) {
-    workerMetric.textContent = workerLabel(data.worker);
+    workerMetric.textContent = workerText;
     workerMetric.title = data.worker?.message || "";
   }
+  setText("statusWorker", workerText);
   const queueMetric = $("metricQueue");
+  const queueText = queueLabel(data.queue);
   if (queueMetric) {
-    queueMetric.textContent = queueLabel(data.queue);
+    queueMetric.textContent = queueText;
     queueMetric.title = queueTitle(data.queue);
   }
+  setText("statusQueue", queueText);
   const diskMetric = $("metricDisk");
-  if (diskMetric) diskMetric.textContent = metrics.disk ? percentText(metrics.disk.used_percent) : "-";
+  const diskText = metrics.disk ? percentText(metrics.disk.used_percent) : "-";
+  if (diskMetric) diskMetric.textContent = diskText;
+  setText("statusDisk", diskText);
+}
+
+function renderConnectionStatus() {
+  const el = $("statusStream");
+  if (!el) return;
+  el.textContent = state.eventConnected ? "实时" : state.eventSource ? "连接中" : "轮询";
+  el.classList.toggle("ok", state.eventConnected);
+  el.classList.toggle("warn", !state.eventConnected && Boolean(state.eventSource));
+}
+
+function setText(id, value) {
+  const el = $(id);
+  if (el) el.textContent = value ?? "-";
 }
 
 function percentText(value) {
