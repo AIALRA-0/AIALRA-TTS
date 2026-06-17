@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Cache-Control" content="no-store" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <title>AIALRA Localizer</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260617-platform1" />
+  </head>
+  <body>
+    <main id="loginView" class="login-view" hidden>
+      <section class="login-panel">
+        <div>
+          <p class="eyebrow">LOCAL ONLY</p>
+          <h1>AIALRA Localizer</h1>
+          <p class="muted">本地 GPU 视频本地化控制台。媒体、字幕、音频和日志默认只留在本地 worker。</p>
+        </div>
+        <form id="loginForm" class="stack" method="post" action="/login">
+          <label>
+            用户名
+            <input id="loginUser" name="username" autocomplete="username" value="admin" />
+          </label>
+          <label>
+            密码
+            <input id="loginPassword" name="password" type="password" autocomplete="current-password" placeholder="输入本机配置密码" />
+          </label>
+          <button id="loginButton" type="submit">登录</button>
+          <p id="loginError" class="error-line"></p>
+        </form>
+      </section>
+    </main>
+
+    <div id="appView" class="app-shell" hidden>
+      <header class="topbar">
+        <div>
+          <div class="brand">AIALRA Localizer</div>
+          <div id="pathLine" class="path-line"></div>
+        </div>
+        <div class="top-actions">
+          <span id="sessionUser" class="session-user"></span>
+          <button id="refreshBtn" type="button" class="secondary">刷新</button>
+          <button id="logoutBtn" type="button" class="secondary">退出</button>
+        </div>
+      </header>
+
+      <nav class="tabs" aria-label="主导航">
+        <button class="tab active" data-tab="dashboard">仪表盘</button>
+        <button class="tab" data-tab="upload">上传</button>
+        <button class="tab" data-tab="projects">项目</button>
+        <button class="tab" data-tab="jobs">历史任务</button>
+        <button class="tab" data-tab="settings">参数设置</button>
+      </nav>
+
+      <section id="dashboardTab" class="tab-panel active">
+        <div class="metric-row">
+          <div class="metric"><span id="metricVideos">-</span><small>视频</small></div>
+          <div class="metric"><span id="metricReports">-</span><small>报告</small></div>
+          <div class="metric"><span id="metricTts">-</span><small>TTS</small></div>
+          <div class="metric"><span id="metricLlm">-</span><small>LLM</small></div>
+          <div class="metric"><span id="metricGpu">-</span><small>GPU</small></div>
+          <div class="metric"><span id="metricQuota">-</span><small>本地额度</small></div>
+          <div class="metric"><span id="metricWorker">-</span><small>Worker</small></div>
+          <div class="metric"><span id="metricDisk">-</span><small>磁盘</small></div>
+        </div>
+        <section class="panel">
+          <div class="panel-head">
+            <h2>启动任务</h2>
+            <p>所有任务调用本地 CLI，日志会写入项目 runs/webui_jobs。</p>
+          </div>
+          <form id="jobForm" class="task-grid">
+            <label>
+              项目
+              <select id="jobProject"></select>
+            </label>
+            <label>
+              任务类型
+              <select id="jobType">
+                <option value="audit">Audit 扫描</option>
+                <option value="smoke">Smoke test</option>
+                <option value="process_one">处理单个视频</option>
+                <option value="process_all">批量处理全部视频</option>
+                <option value="compact_rerender">按报告重渲染</option>
+                <option value="fidelity_audit">保真审计</option>
+                <option value="report">生成索引报告</option>
+              </select>
+            </label>
+            <label>
+              视频
+              <select id="jobVideo"></select>
+            </label>
+            <label>
+              Smoke 秒数
+              <input id="jobSeconds" type="number" min="60" max="120" value="90" />
+            </label>
+            <label>
+              报告
+              <select id="jobReport"></select>
+            </label>
+            <label>
+              重渲染 tag
+              <input id="jobTag" value="webui" />
+            </label>
+            <label>
+              源语言
+              <input id="jobSourceLanguage" value="auto" />
+            </label>
+            <label>
+              字幕目标语言
+              <input id="jobSubtitleLanguage" value="zh-CN" />
+            </label>
+            <label>
+              TTS 目标语言
+              <input id="jobTtsLanguage" value="zh-CN" />
+            </label>
+            <label>
+              质量模式
+              <select id="jobQualityMode">
+                <option value="best_quality">best_quality</option>
+                <option value="balanced">balanced</option>
+                <option value="fast">fast</option>
+              </select>
+            </label>
+            <label>
+              风格参数
+              <input id="jobStyle" placeholder="自然中文授课、清晰、稍有情绪" />
+            </label>
+            <label class="check-row">
+              <input id="jobForce" type="checkbox" />
+              <span>Force 重跑</span>
+            </label>
+            <div class="form-actions">
+              <button type="submit">启动任务</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>最近报告</h2>
+            <p>优先查看 PASS、输出视频和 QA 警告数量。</p>
+          </div>
+          <div id="reportsTable" class="table"></div>
+        </section>
+      </section>
+
+      <section id="projectsTab" class="tab-panel">
+        <section class="panel split-panel">
+          <div>
+            <div class="panel-head">
+              <h2>项目与文件夹</h2>
+              <p>任务会按用户和项目归档，便于后续远端网站同步。</p>
+            </div>
+            <form id="projectForm" class="stack">
+              <label>
+                新项目名称
+                <input id="projectName" placeholder="例如：ECSE 4961" />
+              </label>
+              <label>
+                描述
+                <input id="projectDescription" placeholder="可选" />
+              </label>
+              <button type="submit">创建项目</button>
+            </form>
+            <div id="projectsList" class="job-list"></div>
+          </div>
+          <div>
+            <div class="panel-head">
+              <h2>用户与额度</h2>
+              <p>邀请制多用户；管理员可创建用户，额度用于限制本地上传占用。</p>
+            </div>
+            <form id="userForm" class="task-grid">
+              <label>
+                用户名
+                <input id="newUsername" autocomplete="off" />
+              </label>
+              <label>
+                初始密码
+                <input id="newPassword" type="password" autocomplete="new-password" />
+              </label>
+              <label>
+                本地额度 GB
+                <input id="newQuotaLocal" type="number" value="500" min="1" />
+              </label>
+              <div class="form-actions">
+                <button type="submit">创建用户</button>
+              </div>
+            </form>
+            <div id="usersList" class="job-list"></div>
+          </div>
+        </section>
+      </section>
+
+      <section id="uploadTab" class="tab-panel">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>上传到本机</h2>
+            <p>文件保存到 _localizer_output/uploads，不覆盖原始课程文件。</p>
+          </div>
+          <form id="uploadForm" class="upload-box">
+            <input id="uploadFiles" type="file" multiple />
+            <button type="submit">上传</button>
+          </form>
+          <pre id="uploadResult" class="log-box small"></pre>
+        </section>
+        <section class="panel">
+          <div class="panel-head">
+            <h2>可处理视频</h2>
+            <p>包含课程目录和本机上传目录。</p>
+          </div>
+          <div id="videosTable" class="table"></div>
+        </section>
+      </section>
+
+      <section id="jobsTab" class="tab-panel">
+        <section class="panel split-panel">
+          <div>
+            <div class="panel-head">
+              <h2>历史任务</h2>
+              <p>点击一条任务查看尾部日志。</p>
+            </div>
+            <div id="jobsList" class="job-list"></div>
+          </div>
+          <div>
+            <div class="panel-head">
+              <h2>任务日志</h2>
+              <p id="selectedJobLine">未选择任务</p>
+            </div>
+            <pre id="jobLog" class="log-box"></pre>
+          </div>
+        </section>
+      </section>
+
+      <section id="settingsTab" class="tab-panel">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>常用参数</h2>
+            <p>保存后立即写入 config.yaml，新任务会使用新参数。</p>
+          </div>
+          <form id="tuningForm" class="settings-grid"></form>
+          <div class="form-actions">
+            <button id="saveTuningBtn" type="button">保存常用参数</button>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head">
+            <h2>原始配置 YAML</h2>
+            <p>高级设置入口。保存前会检查隐私保护项。</p>
+          </div>
+          <textarea id="rawConfig" class="raw-config" spellcheck="false"></textarea>
+          <div class="form-actions">
+            <button id="reloadConfigBtn" type="button" class="secondary">重新加载</button>
+            <button id="saveConfigBtn" type="button">保存 YAML</button>
+          </div>
+        </section>
+      </section>
+    </div>
+
+    <div id="toast" class="toast" hidden></div>
+    <script src="/assets/app.js?v=20260617-platform1"></script>
+  </body>
+</html>

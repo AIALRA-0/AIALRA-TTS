@@ -1,0 +1,77 @@
+from array import array
+
+from ecse_localizer.align import overlap_count
+from ecse_localizer.compact import schedule_compact_units
+from ecse_localizer.subtitle_io import Segment, normalize_segments, write_bilingual_ass
+from ecse_localizer.tts import TTSUnit, make_tts_units, write_pcm
+
+
+def test_normalize_removes_overlap():
+    segments = [Segment(1, 0, 2, "a"), Segment(2, 1, 3, "b")]
+    normalized = normalize_segments(segments)
+    assert overlap_count(normalized) == 0
+    assert normalized[1].start > normalized[0].end
+
+
+def test_clip_to_max_end():
+    segments = [Segment(1, 0, 2, "a"), Segment(2, 3, 7, "b")]
+    normalized = normalize_segments(segments, max_end=5)
+    assert len(normalized) == 2
+    assert normalized[-1].end == 5
+
+
+def test_tts_grouping_merges_short_adjacent_segments():
+    segments = [
+        Segment(1, 0.0, 4.0, "可以开始了。"),
+        Segment(2, 4.0, 8.0, "谢谢刘教授的邀请。"),
+        Segment(3, 8.0, 12.0, "我是拉维。"),
+    ]
+    config = {
+        "tts": {
+            "align_mode": "grouped",
+            "end_gap_seconds": 0.2,
+            "merge_gap_seconds": 0.35,
+            "min_group_duration": 7.0,
+            "max_group_duration": 12.0,
+            "max_group_chars": 110,
+            "estimated_zh_chars_per_second": 5.2,
+            "group_min_estimated_fill_ratio": 0.72,
+        }
+    }
+    units = make_tts_units(segments, config)
+    assert len(units) == 1
+    assert units[0].segment_ids == [1, 2, 3]
+
+
+def test_ass_styles_keep_zh_and_en_on_separate_bands(tmp_path):
+    path = tmp_path / "bilingual.ass"
+    en = [Segment(1, 0, 2, "This is a short English caption.")]
+    zh = [Segment(1, 0, 2, "这是一条中文字幕。")]
+    write_bilingual_ass(path, en, zh)
+    content = path.read_text(encoding="utf-8-sig")
+    assert "Style: ZhMain" in content
+    assert "Style: EnSub" in content
+    assert "ZhMain" in content and ", 178, 1" in content
+    assert "EnSub" in content and ", 72, 1" in content
+
+
+def test_compact_schedule_prevents_audio_overlap(tmp_path):
+    tts_dir = tmp_path / "tts"
+    tts_dir.mkdir()
+    sample_rate = 22050
+    silence = array("h", [0]) * int(sample_rate * 2.0)
+    write_pcm(tts_dir / "seg_00001_pcm.wav", silence, sample_rate)
+    write_pcm(tts_dir / "seg_00002_pcm.wav", silence, sample_rate)
+    units = [
+        TTSUnit(1, 0.0, 1.0, "第一句。", [1]),
+        TTSUnit(2, 1.0, 2.0, "第二句。", [2]),
+    ]
+    config = {
+        "tts": {
+            "compact_schedule_mode": "source_anchored",
+            "prevent_audio_overlap": True,
+            "min_audio_gap_seconds": 0.1,
+        }
+    }
+    scheduled = schedule_compact_units(units, tts_dir, 10.0, config)
+    assert scheduled[1].scheduled_start >= scheduled[0].scheduled_end + 0.1

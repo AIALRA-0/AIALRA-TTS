@@ -1,0 +1,152 @@
+input_dir: "C:/path/to/ECSE 4961"
+output_dir: "C:/path/to/ECSE 4961/_localizer_output"
+work_dir: "C:/path/to/ECSE 4961/_localizer_project/runs"
+
+privacy:
+  allow_cloud_api: false
+  allow_upload_media: false
+  allow_voice_clone_without_consent: false
+
+gpu:
+  device: "cuda"
+  prefer_gpu: true
+  max_vram_gb: 16
+  oom_fallback: true
+
+audio:
+  enhance: true
+  enhancement_backend_order: ["deepfilternet", "clearervoice", "ffmpeg"]
+  loudnorm: true
+  compare_original_vs_enhanced_asr: true
+
+asr:
+  use_existing_subtitles_first: true
+  backend_order: ["whisperx", "faster_whisper"]
+  model: "large-v3"
+  compute_type: "float16"
+  fallback_compute_type: "int8_float16"
+  language: "en"
+  vad: true
+  word_timestamps: true
+
+llm:
+  backend_order: ["ollama", "lmstudio"]
+  endpoint: "http://127.0.0.1:11434/v1"
+  model_candidates:
+    - "qwen2.5:14b-instruct"
+    - "qwen3:14b"
+    - "qwen2.5:7b-instruct"
+    - "qwen2.5:0.5b-instruct"
+  temperature: 0.2
+  max_retries: 5
+  timeout_seconds: 300
+  json_repair: true
+  translation_chunk_size: 8
+  fidelity_chunk_size: 6
+  low_capacity_models: ["0.5b", "1b"]
+  low_capacity_bypass_segment_threshold: 120
+
+translation:
+  target_language: "zh-CN"
+  style: "natural_chinese_lecture"
+  quality_mode: "best_quality"
+  context_window_segments: 3
+  style_sample_segments: 80
+  preserve_code_formula_names: true
+  build_course_glossary_first: true
+  bilingual: true
+  max_zh_chars_per_second: 5.5
+  max_zh_chars_per_subtitle_line: 22
+  hard_truncate_over_limit: false
+
+dialect:
+  enabled: false
+  target: "mandarin"
+  intensity: 0.15
+  preserve_technical_terms: true
+
+tts:
+  backend_order: ["cosyvoice", "piper", "f5_tts", "fish_speech"]
+  default_voice: "neutral_chinese_teacher"
+  dialect: "mandarin"
+  emotion: "clear_engaged_teaching"
+  speed: 1.0
+  max_speed: 1.25
+  absolute_max_speed: 1.35
+  align_mode: "grouped"
+  end_gap_seconds: 0.20
+  merge_gap_seconds: 0.35
+  min_group_duration: 7.0
+  max_group_duration: 12.0
+  max_group_chars: 110
+  estimated_zh_chars_per_second: 5.2
+  group_min_estimated_fill_ratio: 0.72
+  min_fill_ratio: 0.70
+  target_fill_ratio: 0.94
+  min_slow_factor: 0.78
+  compact_min_gap_seconds: 0.22
+  compact_max_gap_seconds: 0.70
+  compact_max_advance_seconds: 0.5
+  compact_schedule_mode: "source_anchored"
+  compact_distributed_max_gap_seconds: 2.0
+  compact_resynthesize_tts: false
+  compact_lead_in_seconds: 0.0
+  prevent_audio_overlap: true
+  min_audio_gap_seconds: 0.08
+  compact_subtitle_hold_seconds: 0.18
+  compact_subtitle_gap_seconds: 0.04
+  auto_detect_speaker_gender: true
+  speaker_gender: "auto"
+  speaker_gender_sample_seconds: 180
+  male_speaker: "中文男"
+  female_speaker: "中文女"
+  unknown_speaker: "中文女"
+  allow_voice_clone: false
+  reference_audio: null
+  reference_text: null
+  cosyvoice_python: "C:/path/to/ECSE 4961/_localizer_project/.conda/cosyvoice/python.exe"
+  cosyvoice_root: "C:/path/to/ECSE 4961/_localizer_project/third_party/CosyVoice"
+  cosyvoice_model_dir: "C:/path/to/ECSE 4961/_localizer_project/models/cosyvoice/CosyVoice-300M-SFT"
+  cosyvoice_speaker: "中文女"
+  cosyvoice_speed: 1.0
+  cosyvoice_gain: 2.8
+  final_audio_filter: "highpass=f=100,lowpass=f=9800,equalizer=f=240:t=q:w=1.0:g=-2.5,equalizer=f=3000:t=q:w=1.0:g=2.5,equalizer=f=5200:t=q:w=1.0:g=1.8,acompressor=threshold=-20dB:ratio=2.4:attack=5:release=100,loudnorm=I=-16:TP=-1.0:LRA=8,alimiter=limit=0.98"
+  final_audio_filter_male: "asetrate=23594,aresample=22050,atempo=0.93456,highpass=f=120,lowpass=f=9800,equalizer=f=180:t=q:w=1.1:g=-4.0,equalizer=f=2600:t=q:w=1.0:g=2.8,equalizer=f=4200:t=q:w=1.0:g=4.0,equalizer=f=6500:t=q:w=1.0:g=2.0,acompressor=threshold=-21dB:ratio=2.8:attack=4:release=90,loudnorm=I=-16:TP=-1.0:LRA=8,alimiter=limit=0.98"
+  final_audio_filter_female: "highpass=f=110,lowpass=f=9800,equalizer=f=240:t=q:w=1.0:g=-2.0,equalizer=f=3200:t=q:w=1.0:g=2.8,equalizer=f=5600:t=q:w=1.0:g=1.8,acompressor=threshold=-21dB:ratio=2.5:attack=4:release=90,loudnorm=I=-16:TP=-1.0:LRA=8,alimiter=limit=0.98"
+  piper_exe: "C:/path/to/ECSE 4961/_localizer_project/models/piper/piper.exe"
+  piper_model: "C:/path/to/ECSE 4961/_localizer_project/models/piper/voices/zh_CN-huayan-medium.onnx"
+  piper_noise_scale: 0.45
+  piper_noise_w: 0.65
+  piper_sentence_silence: 0.08
+  clean_final_audio: true
+
+mux:
+  keep_original_audio: false
+  original_audio_volume: 0.08
+  hard_subtitle: true
+  soft_subtitle: true
+  export_audio_only: true
+
+qa:
+  fail_on_empty_translation: true
+  fail_on_missing_outputs: true
+  flag_untranslated_ascii_ratio: 0.5
+  flag_tts_overrun: true
+  fail_on_rule_fallback_translation: true
+  generate_html_report: true
+
+webui:
+  enabled: true
+  host: "127.0.0.1"
+  port: 7861
+  username: "admin"
+  password: "change-me-before-use"
+  session_secret: "change-me-generate-a-long-random-secret"
+  bind_local_only: true
+  upload_dir: "C:/path/to/ECSE 4961/_localizer_output/uploads"
+  job_dir: "C:/path/to/ECSE 4961/_localizer_project/runs/webui_jobs"
+  platform_dir: "C:/path/to/ECSE 4961/_localizer_project/runs/platform"
+  max_upload_mb: 20480
+  default_local_quota_gb: 500
+  default_remote_quota_gb: 10
+  worker_token: "change-me-generate-a-long-random-token"

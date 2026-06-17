@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ecse-localizer"
+version = "0.1.0"
+description = "Local ECSE lecture video localization pipeline"
+requires-python = ">=3.10"
+dependencies = [
+  "PyYAML>=6.0.1",
+  "pysubs2>=1.7.3",
+  "requests>=2.31.0",
+  "jsonschema>=4.22.0",
+  "tqdm>=4.66.0",
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "python-multipart>=0.0.9",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

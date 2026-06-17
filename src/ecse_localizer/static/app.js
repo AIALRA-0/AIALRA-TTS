@@ -1,0 +1,597 @@
+const state = {
+  videos: [],
+  reports: [],
+  jobs: [],
+  projects: [],
+  users: [],
+  selectedJob: null,
+  jobTimer: null,
+};
+
+const $ = (id) => document.getElementById(id);
+
+window.addEventListener("unhandledrejection", (event) => {
+  const message = String(event.reason?.message || event.reason || "");
+  if (message.includes("tabs:outgoing.message.ready")) {
+    event.preventDefault();
+    return;
+  }
+  console.warn("WebUI background promise failed:", event.reason);
+});
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    credentials: "include",
+    headers: options.body instanceof FormData ? {} : { "Content-Type": "application/json" },
+    ...options,
+  });
+  if (response.status === 401) {
+    showLogin();
+    throw new Error("需要登录");
+  }
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const payload = await response.json();
+      detail = payload.detail || detail;
+    } catch (_) {
+      detail = await response.text();
+    }
+    throw new Error(detail);
+  }
+  const contentType = response.headers.get("content-type") || "";
+  return contentType.includes("application/json") ? response.json() : response.text();
+}
+
+function showLogin() {
+  $("loginView").hidden = false;
+  $("appView").hidden = true;
+}
+
+function showApp(user) {
+  $("loginView").hidden = true;
+  $("appView").hidden = false;
+  $("sessionUser").textContent = user ? `已登录：${user}` : "";
+  const loginButton = $("loginButton");
+  if (loginButton) {
+    loginButton.disabled = false;
+    loginButton.textContent = "登录";
+  }
+}
+
+function toast(message) {
+  const el = $("toast");
+  el.textContent = message;
+  el.hidden = false;
+  clearTimeout(el.timer);
+  el.timer = setTimeout(() => {
+    el.hidden = true;
+  }, 4200);
+}
+
+async function bootstrap() {
+  bindEvents();
+  try {
+    const session = await api("/api/session");
+    if (session.authenticated) {
+      showApp(session.user);
+      refreshAll();
+    } else {
+      showLogin();
+    }
+  } catch (_) {
+    showLogin();
+  }
+}
+
+function bindEvents() {
+  $("loginForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    $("loginError").textContent = "";
+    const loginButton = $("loginButton");
+    loginButton.disabled = true;
+    loginButton.textContent = "登录中...";
+    try {
+      const payload = {
+        username: $("loginUser").value,
+        password: $("loginPassword").value,
+      };
+      const result = await api("/api/login", { method: "POST", body: JSON.stringify(payload) });
+      loginButton.textContent = "已登录，正在加载...";
+      showApp(result.user);
+      refreshAll();
+    } catch (error) {
+      $("loginError").textContent = error.message;
+      loginButton.disabled = false;
+      loginButton.textContent = "登录";
+    }
+  });
+
+  $("logoutBtn").addEventListener("click", async () => {
+    await api("/api/logout", { method: "POST", body: "{}" }).catch(() => {});
+    showLogin();
+  });
+
+  $("refreshBtn").addEventListener("click", () => {
+    refreshAll();
+  });
+
+  document.querySelectorAll(".tab").forEach((button) => {
+    button.addEventListener("click", () => showTab(button.dataset.tab));
+  });
+
+  $("jobForm").addEventListener("submit", startJob);
+  $("uploadForm").addEventListener("submit", uploadFiles);
+  $("projectForm").addEventListener("submit", createProject);
+  $("userForm").addEventListener("submit", createUser);
+  $("saveTuningBtn").addEventListener("click", saveTuning);
+  $("reloadConfigBtn").addEventListener("click", loadRawConfig);
+  $("saveConfigBtn").addEventListener("click", saveRawConfig);
+}
+
+function showTab(name) {
+  document.querySelectorAll(".tab").forEach((el) => el.classList.toggle("active", el.dataset.tab === name));
+  document.querySelectorAll(".tab-panel").forEach((el) => el.classList.toggle("active", el.id === `${name}Tab`));
+  if (name === "jobs") refreshJobs();
+  if (name === "projects") {
+    loadProjects();
+    loadUsers();
+  }
+  if (name === "settings") {
+    loadTuning();
+    loadRawConfig();
+  }
+}
+
+async function refreshAll() {
+  const results = await Promise.allSettled([loadDashboard(), loadVideos(), loadReports(), refreshJobs(), loadProjects(), loadUsers(), loadTuning()]);
+  const failed = results.filter((item) => item.status === "rejected");
+  if (failed.length) {
+    console.warn("Partial refresh failed:", failed.map((item) => item.reason));
+    toast(`部分数据刷新失败：${failed[0].reason?.message || failed[0].reason}`);
+  }
+  if (!state.jobTimer) {
+    state.jobTimer = setInterval(() => {
+      refreshJobs().catch((error) => console.warn("Job refresh failed:", error));
+    }, 5000);
+  }
+}
+
+async function loadDashboard() {
+  const data = await api("/api/dashboard");
+  $("pathLine").textContent = `输入：${data.input_dir}    输出：${data.output_dir}`;
+  $("metricVideos").textContent = data.video_count;
+  $("metricReports").textContent = data.report_count;
+  $("metricTts").textContent = data.tts.backend || "-";
+  $("metricLlm").textContent = data.llm.available ? data.llm.model : "未连接";
+  const gpu = (data.metrics?.gpu || [])[0] || {};
+  $("metricGpu").textContent = gpu.available ? `${Math.round(gpu.util_percent)}% / ${Math.round(gpu.memory_used_percent)}%` : "未检测";
+  $("metricQuota").textContent = data.quota ? `${formatBytes(data.quota.local_used_bytes)} / ${formatBytes(data.quota.local_quota_bytes)}` : "-";
+  $("metricWorker").textContent = data.worker?.status || "local";
+  $("metricDisk").textContent = data.metrics?.disk ? `${Math.round(data.metrics.disk.used_percent)}%` : "-";
+  state.projects = data.projects || [];
+  renderProjectOptions();
+  renderProjects();
+  state.reports = data.latest_reports || [];
+  renderReports();
+}
+
+async function loadVideos() {
+  const data = await api("/api/videos");
+  state.videos = data.videos || [];
+  renderVideoOptions();
+  renderVideos();
+}
+
+async function loadReports() {
+  const data = await api("/api/reports");
+  state.reports = data.reports || [];
+  renderReportOptions();
+  renderReports();
+}
+
+function renderVideoOptions() {
+  const select = $("jobVideo");
+  select.innerHTML = "";
+  for (const video of state.videos) {
+    const option = document.createElement("option");
+    option.value = video.path;
+    option.textContent = `${video.uploaded ? "[上传] " : ""}${video.name}`;
+    select.appendChild(option);
+  }
+}
+
+function renderReportOptions() {
+  const select = $("jobReport");
+  select.innerHTML = "";
+  for (const report of state.reports) {
+    const option = document.createElement("option");
+    option.value = report.path;
+    option.textContent = `${report.pass ? "PASS" : "WARN"} · ${report.name}`;
+    select.appendChild(option);
+  }
+}
+
+async function loadProjects() {
+  try {
+    const data = await api("/api/projects");
+    state.projects = data.projects || [];
+    renderProjectOptions();
+    renderProjects();
+  } catch (error) {
+    console.warn("Project load failed:", error);
+  }
+}
+
+function renderProjectOptions() {
+  const select = $("jobProject");
+  if (!select) return;
+  select.innerHTML = "";
+  for (const project of state.projects) {
+    const option = document.createElement("option");
+    option.value = project.id;
+    option.textContent = `${project.owner ? `${project.owner} / ` : ""}${project.name}`;
+    select.appendChild(option);
+  }
+}
+
+function renderProjects() {
+  const list = $("projectsList");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!state.projects.length) {
+    list.textContent = "暂无项目";
+    return;
+  }
+  for (const project of state.projects) {
+    const item = document.createElement("div");
+    item.className = "job-item";
+    item.innerHTML = `
+      <div class="job-title">
+        <span>${escapeHtml(project.name)}</span>
+        <span class="status ok">${escapeHtml(project.owner || "")}</span>
+      </div>
+      <div class="job-meta">${escapeHtml(project.id)} · ${escapeHtml(project.description || "")}</div>
+    `;
+    list.appendChild(item);
+  }
+}
+
+async function createProject(event) {
+  event.preventDefault();
+  try {
+    const payload = {
+      name: $("projectName").value,
+      description: $("projectDescription").value,
+    };
+    await api("/api/projects", { method: "POST", body: JSON.stringify(payload) });
+    $("projectName").value = "";
+    $("projectDescription").value = "";
+    toast("项目已创建");
+    await loadProjects();
+  } catch (error) {
+    toast(`创建项目失败：${error.message}`);
+  }
+}
+
+async function loadUsers() {
+  try {
+    const data = await api("/api/users");
+    state.users = data.users || [];
+    renderUsers();
+  } catch (error) {
+    state.users = [];
+    renderUsers("当前账号不是管理员，不能查看用户列表。");
+  }
+}
+
+function renderUsers(message = "") {
+  const list = $("usersList");
+  if (!list) return;
+  list.innerHTML = "";
+  if (message) {
+    list.textContent = message;
+    return;
+  }
+  if (!state.users.length) {
+    list.textContent = "暂无用户或无权限";
+    return;
+  }
+  for (const user of state.users) {
+    const item = document.createElement("div");
+    item.className = "job-item";
+    item.innerHTML = `
+      <div class="job-title">
+        <span>${escapeHtml(user.username)}</span>
+        <span class="status ${user.disabled ? "bad" : "ok"}">${escapeHtml(user.role || "user")}</span>
+      </div>
+      <div class="job-meta">local quota ${formatBytes(user.quota_local_bytes || 0)} · remote quota ${formatBytes(user.quota_remote_bytes || 0)}</div>
+    `;
+    list.appendChild(item);
+  }
+}
+
+async function createUser(event) {
+  event.preventDefault();
+  try {
+    const payload = {
+      username: $("newUsername").value,
+      password: $("newPassword").value,
+      quota_local_gb: Number($("newQuotaLocal").value || 500),
+    };
+    await api("/api/users", { method: "POST", body: JSON.stringify(payload) });
+    $("newUsername").value = "";
+    $("newPassword").value = "";
+    toast("用户已创建");
+    await loadUsers();
+  } catch (error) {
+    toast(`创建用户失败：${error.message}`);
+  }
+}
+
+function renderReports() {
+  const table = $("reportsTable");
+  table.innerHTML = "";
+  table.append(row(["状态", "报告", "问题", "TTS"], true));
+  for (const report of state.reports.slice(0, 14)) {
+    const status = document.createElement("span");
+    status.className = `status ${report.pass ? "ok" : "warn"}`;
+    status.textContent = report.pass ? "PASS" : "CHECK";
+    const name = document.createElement("div");
+    name.innerHTML = `<strong>${escapeHtml(report.name)}</strong><div class="cell-path">${escapeHtml(report.path)}</div>`;
+    table.append(row([status, name, String(report.issues ?? "-"), report.tts || "-"]));
+  }
+}
+
+function renderVideos() {
+  const table = $("videosTable");
+  table.innerHTML = "";
+  table.append(row(["来源", "视频", "大小", "操作"], true));
+  for (const video of state.videos) {
+    const name = document.createElement("div");
+    name.innerHTML = `<strong>${escapeHtml(video.name)}</strong><div class="cell-path">${escapeHtml(video.path)}</div>`;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "secondary";
+    btn.textContent = "选中";
+    btn.addEventListener("click", () => {
+      $("jobVideo").value = video.path;
+      showTab("dashboard");
+    });
+    table.append(row([video.uploaded ? "上传" : "课程", name, formatBytes(video.size), btn]));
+  }
+}
+
+function row(items, header = false) {
+  const el = document.createElement("div");
+  el.className = `row ${header ? "header" : ""}`;
+  for (const item of items) {
+    const cell = document.createElement("div");
+    if (item instanceof Node) {
+      cell.appendChild(item);
+    } else {
+      cell.textContent = item;
+    }
+    el.appendChild(cell);
+  }
+  return el;
+}
+
+async function uploadFiles(event) {
+  event.preventDefault();
+  const files = $("uploadFiles").files;
+  if (!files.length) {
+    toast("请选择文件");
+    return;
+  }
+  const form = new FormData();
+  for (const file of files) form.append("files", file);
+  $("uploadResult").textContent = "上传中...";
+  try {
+    const result = await api("/api/upload", { method: "POST", body: form });
+    $("uploadResult").textContent = JSON.stringify(result, null, 2);
+    toast("上传完成");
+    await loadVideos();
+  } catch (error) {
+    $("uploadResult").textContent = error.message;
+  }
+}
+
+async function startJob(event) {
+  event.preventDefault();
+  const type = $("jobType").value;
+  const payload = {
+    type,
+    video: $("jobVideo").value,
+    seconds: Number($("jobSeconds").value || 90),
+    report: $("jobReport").value,
+    tag: $("jobTag").value || "webui",
+    force: $("jobForce").checked,
+    project_id: $("jobProject").value,
+    source_language: $("jobSourceLanguage").value || "auto",
+    target_subtitle_language: $("jobSubtitleLanguage").value || "zh-CN",
+    target_tts_language: $("jobTtsLanguage").value || "zh-CN",
+    quality_mode: $("jobQualityMode").value || "best_quality",
+    style: $("jobStyle").value || "",
+  };
+  try {
+    const result = await api("/api/jobs", { method: "POST", body: JSON.stringify(payload) });
+    toast(`任务已启动：${result.job.title}`);
+    state.selectedJob = result.job.id;
+    showTab("jobs");
+    await refreshJobs();
+    await loadJobLog(result.job.id);
+  } catch (error) {
+    toast(`启动失败：${error.message}`);
+  }
+}
+
+async function refreshJobs() {
+  try {
+    const data = await api("/api/jobs");
+    state.jobs = data.jobs || [];
+    renderJobs();
+    if (state.selectedJob) await loadJobLog(state.selectedJob, false);
+  } catch (_) {}
+}
+
+function renderJobs() {
+  const list = $("jobsList");
+  list.innerHTML = "";
+  if (!state.jobs.length) {
+    list.textContent = "暂无任务";
+    return;
+  }
+  for (const job of state.jobs) {
+    const item = document.createElement("div");
+    item.className = "job-item";
+    item.innerHTML = `
+      <div class="job-title">
+        <span>${escapeHtml(job.title || job.type)}</span>
+        <span class="status ${statusClass(job.status)}">${escapeHtml(job.status)}</span>
+      </div>
+      <div class="job-meta">${escapeHtml(job.created_at || "")} · ${escapeHtml(job.id)}</div>
+      <div class="job-meta">${escapeHtml(job.user || "")} · ${escapeHtml(job.metadata?.project_id || "")} · ${escapeHtml(job.metadata?.quality_mode || "")}</div>
+    `;
+    item.addEventListener("click", () => {
+      state.selectedJob = job.id;
+      loadJobLog(job.id);
+    });
+    list.appendChild(item);
+  }
+}
+
+async function loadJobLog(jobId, noisy = true) {
+  try {
+    const text = await api(`/api/jobs/${encodeURIComponent(jobId)}/log?lines=360`);
+    $("selectedJobLine").textContent = jobId;
+    $("jobLog").textContent = text || "日志为空";
+  } catch (error) {
+    if (noisy) toast(error.message);
+  }
+}
+
+async function loadTuning() {
+  const data = await api("/api/tuning");
+  const form = $("tuningForm");
+  form.innerHTML = "";
+  for (const field of data.fields || []) {
+    const label = document.createElement("label");
+    if (field.type === "textarea") label.className = "wide";
+    label.textContent = field.label;
+    const input = controlForField(field);
+    if (!input.matches(".check-row")) input.dataset.path = field.path;
+    label.appendChild(input);
+    form.appendChild(label);
+  }
+}
+
+function controlForField(field) {
+  if (field.type === "bool") {
+    const wrap = document.createElement("label");
+    wrap.className = "check-row";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = Boolean(field.value);
+    input.dataset.path = field.path;
+    const span = document.createElement("span");
+    span.textContent = field.value ? "开启" : "关闭";
+    input.addEventListener("change", () => {
+      span.textContent = input.checked ? "开启" : "关闭";
+    });
+    wrap.append(input, span);
+    return wrap;
+  }
+  if (field.type === "choice") {
+    const select = document.createElement("select");
+    for (const value of field.options || []) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      select.appendChild(option);
+    }
+    select.value = field.value ?? "";
+    return select;
+  }
+  if (field.type === "textarea") {
+    const textarea = document.createElement("textarea");
+    textarea.value = field.value ?? "";
+    return textarea;
+  }
+  const input = document.createElement("input");
+  input.type = field.type === "int" || field.type === "float" ? "number" : "text";
+  if (field.type === "float") input.step = "0.01";
+  if (field.min !== undefined) input.min = field.min;
+  if (field.max !== undefined) input.max = field.max;
+  input.value = field.value ?? "";
+  return input;
+}
+
+async function saveTuning() {
+  const values = {};
+  for (const control of $("tuningForm").querySelectorAll("[data-path]")) {
+    if (control.matches(".check-row")) {
+      const input = control.querySelector("input");
+      values[input.dataset.path] = input.checked;
+    } else if (control.type === "checkbox") {
+      values[control.dataset.path] = control.checked;
+    } else {
+      values[control.dataset.path] = control.value;
+    }
+  }
+  try {
+    await api("/api/tuning", { method: "POST", body: JSON.stringify({ values }) });
+    toast("常用参数已保存");
+    await loadTuning();
+    await loadRawConfig();
+  } catch (error) {
+    toast(`保存失败：${error.message}`);
+  }
+}
+
+async function loadRawConfig() {
+  try {
+    $("rawConfig").value = await api("/api/config/raw");
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function saveRawConfig() {
+  try {
+    await api("/api/config/raw", { method: "POST", body: JSON.stringify({ yaml: $("rawConfig").value }) });
+    toast("YAML 已保存");
+    await refreshAll();
+  } catch (error) {
+    toast(`保存失败：${error.message}`);
+  }
+}
+
+function statusClass(status) {
+  if (status === "passed") return "ok";
+  if (status === "failed" || status === "cancelled") return "bad";
+  return "warn";
+}
+
+function formatBytes(size) {
+  if (!Number.isFinite(size)) return "-";
+  const units = ["B", "KB", "MB", "GB"];
+  let n = size;
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i += 1;
+  }
+  return `${n.toFixed(i ? 1 : 0)} ${units[i]}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+bootstrap();

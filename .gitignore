@@ -1,0 +1,49 @@
+# Local secrets and machine-specific config
+.env
+.env.*
+!.env.example
+config.yaml
+config.local.yaml
+config.*.local.yaml
+secrets*.json
+*.pem
+*.key
+*.pfx
+*.crt
+*.csr
+
+# Generated media, reports, logs, caches, and run state
+logs/
+runs/
+models/
+third_party/
+.venv/
+.conda/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Course inputs and generated outputs must stay local
+_localizer_output/
+uploads/
+*.mp4
+*.mkv
+*.mov
+*.webm
+*.m4v
+*.wav
+*.mp3
+*.m4a
+*.srt
+*.vtt
+*.ass
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
