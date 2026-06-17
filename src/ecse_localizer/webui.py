@@ -252,8 +252,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             "tts": tts,
             "llm": llm.__dict__,
             "capabilities": caps,
-            "quota": state.store.quota_status(user),
-            "projects": state.store.list_projects(user, admin=is_admin(state, user)),
+            "quota": quota_status_with_reservations(state, user),
+            "projects": projects_with_usage(state, user),
             "worker": worker,
             "queue": job_queue_summary(state, user, worker=worker, jobs=jobs),
             "metrics": dashboard_metrics(state, worker),
@@ -290,7 +290,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         rows = filter_artifact_records(rows, project_id=project_id, folder_id=folder_id, job_id=job_id, kind=kind)
         rows = with_signed_urls(rows[:300], secret=download_secret(state), username=user, ttl_seconds=int(state.webui.get("signed_url_ttl_seconds", 900)))
         rows = public_artifact_records(state, user, rows)
-        return {"artifacts": rows, "quota": state.store.quota_status(user)}
+        return {"artifacts": rows, "quota": quota_status_with_reservations(state, user)}
 
     @app.get("/api/artifacts/{artifact_id}/download")
     def download_artifact(artifact_id: str, request: Request, token: str = "", download: int = 0, variant: str = "") -> FileResponse:
@@ -337,7 +337,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             "ok": True,
             "artifact": row if admin else public_artifact_record(row),
             "deleted": deleted if admin else public_delete_result(deleted),
-            "quota": state.store.quota_status(user),
+            "quota": quota_status_with_reservations(state, user),
         }
 
     @app.post("/api/artifacts/{artifact_id}/request-cache")
@@ -466,7 +466,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             for target in created_targets:
                 target.unlink(missing_ok=True)
             raise
-        return {"ok": True, "saved": saved, "quota": state.store.quota_status(user)}
+        return {"ok": True, "saved": saved, "quota": quota_status_with_reservations(state, user)}
 
     @app.get("/api/tuning")
     def get_tuning(user: str = Depends(require_user)) -> dict[str, Any]:
@@ -658,7 +658,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.get("/api/quota")
     def quota(user: str = Depends(require_user)) -> dict[str, Any]:
-        return state.store.quota_status(user)
+        return quota_status_with_reservations(state, user)
 
     @app.get("/api/metrics")
     def metrics(user: str = Depends(require_user)) -> dict[str, Any]:
@@ -666,7 +666,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return {
             "metrics": dashboard_metrics(state, worker),
             "worker": worker,
-            "quota": state.store.quota_status(user),
+            "quota": quota_status_with_reservations(state, user),
             "queue": job_queue_summary(state, user, worker=worker),
         }
 
@@ -828,7 +828,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "message": f"job {job_id} preview uploaded",
             }
         )
-        return {"ok": True, "preview": row, "bytes": len(body), "quota": state.store.quota_status(str(record.get("user") or ""))}
+        return {"ok": True, "preview": row, "bytes": len(body), "quota": quota_status_with_reservations(state, str(record.get("user") or ""))}
 
     @app.post("/api/worker/jobs/{job_id}/artifact-cache")
     async def worker_upload_artifact_cache(job_id: str, request: Request) -> dict[str, Any]:
@@ -863,7 +863,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "message": f"job {job_id} artifact cache uploaded",
             }
         )
-        return {"ok": True, "artifact": row, "bytes": len(body), "quota": state.store.quota_status(str(record.get("user") or ""))}
+        return {"ok": True, "artifact": row, "bytes": len(body), "quota": quota_status_with_reservations(state, str(record.get("user") or ""))}
 
     @app.get("/api/jobs")
     def jobs(
@@ -895,7 +895,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         rows = filter_artifact_records(rows, job_id=job_id)
         rows = with_signed_urls(rows[:300], secret=download_secret(state), username=user, ttl_seconds=int(state.webui.get("signed_url_ttl_seconds", 900)))
         rows = public_artifact_records(state, user, rows)
-        return {"job": public_job_record(record), "artifacts": rows, "quota": state.store.quota_status(user)}
+        return {"job": public_job_record(record), "artifacts": rows, "quota": quota_status_with_reservations(state, user)}
 
     @app.get("/api/jobs/{job_id}/log")
     def job_log(job_id: str, lines: int = 240, user: str = Depends(require_user)) -> PlainTextResponse:
@@ -1070,7 +1070,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         payload: dict[str, Any] = {
             "ok": True,
             "job": public_job_record(deleted),
-            "quota": state.store.quota_status(user),
+            "quota": quota_status_with_reservations(state, user),
         }
         if deleted_files is not None:
             payload["deleted_files"] = deleted_files if is_admin(state, user) else public_delete_result(deleted_files)
@@ -2217,6 +2217,37 @@ def active_project_storage_reserved_bytes(state: WebState, project_id: str) -> i
     return total
 
 
+def quota_status_with_reservations(state: WebState, username: str) -> dict[str, Any]:
+    quota = dict(state.store.quota_status(username))
+    local_reserved = active_job_storage_reserved_bytes(state, username, "estimated_local_bytes")
+    local_quota = int(quota.get("local_quota_bytes") or 0)
+    local_used = int(quota.get("local_used_bytes") or 0)
+    local_committed = local_used + local_reserved
+    quota["local_reserved_bytes"] = local_reserved
+    quota["local_committed_bytes"] = local_committed
+    quota["local_available_bytes"] = max(0, local_quota - local_committed) if local_quota else 0
+    quota["local_committed_percent"] = round((local_committed / local_quota) * 100, 2) if local_quota else 0
+
+    remote_reserved = active_artifact_cache_reserved_bytes(state, username)
+    remote_quota = int(quota.get("remote_quota_bytes") or 0)
+    remote_used = int(quota.get("remote_used_bytes") or 0)
+    remote_committed = remote_used + remote_reserved
+    quota["remote_reserved_bytes"] = remote_reserved
+    quota["remote_committed_bytes"] = remote_committed
+    quota["remote_available_bytes"] = max(0, remote_quota - remote_committed) if remote_quota else 0
+    quota["remote_committed_percent"] = round((remote_committed / remote_quota) * 100, 2) if remote_quota else 0
+
+    global_remote_reserved = active_artifact_cache_reserved_bytes(state, None)
+    global_remote_quota = int(quota.get("remote_global_quota_bytes") or 0)
+    global_remote_used = int(quota.get("remote_global_used_bytes") or 0)
+    global_remote_committed = global_remote_used + global_remote_reserved
+    quota["remote_global_reserved_bytes"] = global_remote_reserved
+    quota["remote_global_committed_bytes"] = global_remote_committed
+    quota["remote_global_available_bytes"] = max(0, global_remote_quota - global_remote_committed) if global_remote_quota else 0
+    quota["remote_global_committed_percent"] = round((global_remote_committed / global_remote_quota) * 100, 2) if global_remote_quota else 0
+    return quota
+
+
 def projects_with_usage(state: WebState, user: str, *, include_archived: bool = False) -> list[dict[str, Any]]:
     admin = is_admin(state, user)
     projects = state.store.list_projects(user, admin=admin, include_archived=include_archived)
@@ -2225,10 +2256,14 @@ def projects_with_usage(state: WebState, user: str, *, include_archived: bool = 
     for project in projects:
         row = dict(project)
         used = int(usage.get(str(project.get("id")), 0))
+        reserved = active_project_storage_reserved_bytes(state, str(project.get("id") or ""))
+        committed = used + reserved
         quota = int(project.get("quota_project_bytes") or 0)
         row["project_used_bytes"] = used
-        row["project_remaining_bytes"] = max(0, quota - used) if quota else 0
-        row["project_percent"] = round((used / quota) * 100, 2) if quota else 0
+        row["project_reserved_bytes"] = reserved
+        row["project_committed_bytes"] = committed
+        row["project_remaining_bytes"] = max(0, quota - committed) if quota else 0
+        row["project_percent"] = round((committed / quota) * 100, 2) if quota else 0
         rows.append(row)
     return rows
 

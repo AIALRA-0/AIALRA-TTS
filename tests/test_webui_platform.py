@@ -75,9 +75,12 @@ def test_tuning_fields_include_tts_slot_trim_controls():
 
 def test_static_ui_does_not_expose_raw_worker_path_placeholder():
     html = (Path(__file__).parents[1] / "src" / "ecse_localizer" / "static" / "index.html").read_text(encoding="utf-8")
+    js = (Path(__file__).parents[1] / "src" / "ecse_localizer" / "static" / "app.js").read_text(encoding="utf-8")
 
     assert r"D:\worker-media" not in html
     assert "jobWorkerVideoPath" in html
+    assert "remote_reserved_bytes" in js
+    assert "project_reserved_bytes" in js
 
 
 def test_safe_upload_name_strips_paths_and_windows_reserved_names():
@@ -2217,6 +2220,61 @@ def test_worker_queue_submit_counts_active_project_storage_reservations(tmp_path
     assert first.json()["job"]["metadata"]["estimated_project_bytes"] == 100
     assert second.status_code == 413
     assert "Project quota exceeded" in second.text
+
+
+def test_quota_and_project_views_include_active_storage_reservations(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config["webui"]["job_storage_reserve_multiplier"] = 1.0
+    config["webui"]["max_active_jobs_per_user"] = 5
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    response = client.post(
+        "/api/worker/heartbeat",
+        headers={"x-worker-token": "worker-token"},
+        json={
+            "worker_id": "worker-1",
+            "media_refs": [{"ref_id": "media123", "name": "lecture.mp4", "size": 100, "media_type": "video/mp4"}],
+            "metrics": {"local_storage": {"managed_bytes": 20, "total_reported_bytes": 20, "roots": []}},
+        },
+    )
+    assert response.status_code == 200
+    project = client.get("/api/projects").json()["projects"][0]
+    response = client.post(
+        "/api/jobs",
+        json={"type": "process_one", "video": "worker-ref:media123", "video_name": "lecture.mp4", "project_id": project["id"], "folder_id": "root"},
+    )
+    assert response.status_code == 200
+    create_job_record(
+        state,
+        "cache_artifact",
+        "Cache full artifact",
+        ["python", "-m", "ecse_localizer", "worker-cache-artifact"],
+        user="admin",
+        metadata={"worker_action": "upload_artifact_cache", "artifact_size": 50},
+        dispatch_target="worker",
+    )
+
+    quota = client.get("/api/quota").json()
+    projects = client.get("/api/projects").json()["projects"]
+    row = next(item for item in projects if item["id"] == project["id"])
+
+    assert quota["local_used_bytes"] == 20
+    assert quota["local_reserved_bytes"] == 100
+    assert quota["local_committed_bytes"] == 120
+    assert quota["remote_reserved_bytes"] == 50
+    assert quota["remote_committed_bytes"] == quota["remote_used_bytes"] + 50
+    assert row["project_reserved_bytes"] == 100
+    assert row["project_committed_bytes"] == row["project_used_bytes"] + 100
+    assert row["project_remaining_bytes"] == row["quota_project_bytes"] - row["project_committed_bytes"]
 
 
 def test_worker_preview_upload_registers_manifest_and_artifact(tmp_path):

@@ -351,10 +351,10 @@ function queueTitle(queue) {
 }
 
 function quotaLabel(quota) {
-  const userRemote = `${formatBytes(quota.remote_used_bytes || 0)} / ${formatBytes(quota.remote_quota_bytes || 0)}`;
+  const userRemote = `${formatBytes(quota.remote_committed_bytes ?? quota.remote_used_bytes ?? 0)} / ${formatBytes(quota.remote_quota_bytes || 0)}`;
   const globalQuota = Number(quota.remote_global_quota_bytes || 0);
   const globalRemote = globalQuota
-    ? `${formatBytes(quota.remote_global_used_bytes || 0)} / ${formatBytes(globalQuota)}`
+    ? `${formatBytes(quota.remote_global_committed_bytes ?? quota.remote_global_used_bytes ?? 0)} / ${formatBytes(globalQuota)}`
     : "不限";
   return `远端 ${userRemote} · 全局 ${globalRemote}`;
 }
@@ -362,12 +362,12 @@ function quotaLabel(quota) {
 function quotaTitle(quota) {
   const globalQuota = Number(quota.remote_global_quota_bytes || 0);
   const globalRemote = globalQuota
-    ? `${formatBytes(quota.remote_global_used_bytes || 0)} / ${formatBytes(globalQuota)}`
+    ? `${formatBytes(quota.remote_global_committed_bytes ?? quota.remote_global_used_bytes ?? 0)} / ${formatBytes(globalQuota)}`
     : "未设置硬上限";
   return [
-    `用户远端：${formatBytes(quota.remote_used_bytes || 0)} / ${formatBytes(quota.remote_quota_bytes || 0)}`,
+    `用户远端：${formatBytes(quota.remote_committed_bytes ?? quota.remote_used_bytes ?? 0)} / ${formatBytes(quota.remote_quota_bytes || 0)}（已用 ${formatBytes(quota.remote_used_bytes || 0)}，预留 ${formatBytes(quota.remote_reserved_bytes || 0)}）`,
     `全局远端：${globalRemote}`,
-    `本地 worker：${formatBytes(quota.local_used_bytes || 0)} / ${formatBytes(quota.local_quota_bytes || 0)}`,
+    `本地 worker：${formatBytes(quota.local_committed_bytes ?? quota.local_used_bytes ?? 0)} / ${formatBytes(quota.local_quota_bytes || 0)}（已用 ${formatBytes(quota.local_used_bytes || 0)}，预留 ${formatBytes(quota.local_reserved_bytes || 0)}）`,
   ].join("\n");
 }
 
@@ -731,7 +731,7 @@ function renderProjects() {
       </div>
       <div class="job-meta">${escapeHtml(project.id)} · ${escapeHtml(project.description || "")}</div>
       ${project.archived_at ? `<div class="job-meta">archived ${escapeHtml(project.archived_at || "")} by ${escapeHtml(project.archived_by || "")}</div>` : ""}
-      <div class="job-meta">project quota ${formatBytes(project.project_used_bytes || 0)} / ${formatBytes(project.quota_project_bytes || 0)}</div>
+      <div class="job-meta">project quota ${formatBytes(project.project_committed_bytes ?? project.project_used_bytes ?? 0)} / ${formatBytes(project.quota_project_bytes || 0)} · used ${formatBytes(project.project_used_bytes || 0)} · reserved ${formatBytes(project.project_reserved_bytes || 0)}</div>
       <div class="project-edit">
         <label>项目名 <input data-project-name="${escapeHtml(project.id)}" value="${escapeHtml(project.name)}" ${project.archived_at ? "disabled" : ""} /></label>
         <label>描述 <input data-project-description="${escapeHtml(project.id)}" value="${escapeHtml(project.description || "")}" ${project.archived_at ? "disabled" : ""} /></label>
