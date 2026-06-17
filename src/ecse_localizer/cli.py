@@ -23,6 +23,7 @@ from .llm_local import LocalLLMClient
 from .metrics import collect_system_metrics
 from .mux import hardsub_video, mux_video
 from .platform_store import PlatformStore
+from .platform_check import build_worker_health_payload, run_platform_check
 from .qa import run_qa
 from .repair import repair_from_fidelity
 from .release_check import run_release_check
@@ -93,6 +94,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p = sub.add_parser("remote-smoke")
     p.add_argument("--output", help="Directory for remote_smoke_report.json/md. Defaults to work_dir/remote_smoke.")
     p.add_argument("--json", action="store_true", help="Print the full smoke JSON result.")
+    p = sub.add_parser("platform-check")
+    p.add_argument("--output", help="Directory for platform_check_report.json/md. Defaults to work_dir/platform_check.")
+    p.add_argument("--worker-id", default="local-windows-worker")
+    p.add_argument("--json", action="store_true", help="Print the full platform check JSON result.")
 
     sub.add_parser("tts-health")
     p = sub.add_parser("worker-status")
@@ -125,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     config = load_config(args.config)
     try:
-        if args.command not in {"deploy-check", "worker-health", "release-check"}:
+        if args.command not in {"deploy-check", "worker-health", "release-check", "platform-check"}:
             privacy_guard(config)
         if args.command == "audit":
             return cmd_audit(args, config)
@@ -149,6 +154,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_translation_sample(args, config)
         if args.command == "remote-smoke":
             return cmd_remote_smoke(args, config)
+        if args.command == "platform-check":
+            return cmd_platform_check(args, config)
         if args.command == "tts-health":
             print(json.dumps(tts_health(config), ensure_ascii=False, indent=2))
             return 0
@@ -308,7 +315,7 @@ def cmd_worker_status(args: argparse.Namespace, config: dict[str, Any]) -> int:
 
 
 def cmd_worker_health(args: argparse.Namespace, config: dict[str, Any]) -> int:
-    payload = build_worker_status_payload(config, worker_id=args.worker_id)
+    payload = build_worker_health_payload(config, worker_id=args.worker_id)
     remote_checked = False
     remote_ok = False
     remote_error_type = ""
@@ -408,6 +415,21 @@ def cmd_remote_smoke(args: argparse.Namespace, config: dict[str, Any]) -> int:
     if args.json:
         payload["steps"] = result["steps"]
     print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0 if result["pass"] else 2
+
+
+def cmd_platform_check(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    output = Path(args.output) if args.output else Path(config["work_dir"]) / "platform_check"
+    result = run_platform_check(config, output_dir=output, worker_id=args.worker_id)
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        status = "PASS" if result["pass"] else "FAIL"
+        print(f"{status}: {result['summary']['checked_gates']} gate(s), failed: {', '.join(result['summary']['failed_gates']) or 'none'}")
+        for name, gate in result["gates"].items():
+            gate_status = "PASS" if gate.get("pass") else "FAIL"
+            print(f"{gate_status} {name}: {gate.get('errors', 0)} error(s), {gate.get('warnings', 0)} warning(s)")
+        print(json.dumps({"json": result.get("json"), "markdown": result.get("markdown")}, ensure_ascii=False, indent=2))
     return 0 if result["pass"] else 2
 
 

@@ -160,11 +160,12 @@ Before committing:
 
 ```powershell
 .\tools\secret_scan.ps1
+.\12_platform_check.ps1
 .\11_remote_smoke.ps1
 .\10_release_check.ps1
 ```
 
-The public template files are `config.example.yaml` and `.env.example`. Release rules live in `RELEASE.md`; CI runs tests, compile checks, WebUI JS syntax, secret scan, translation sample, worker health, and release metadata gates on GitHub.
+The public template files are `config.example.yaml` and `.env.example`. Release rules live in `RELEASE.md`; CI runs tests, compile checks, WebUI JS syntax, secret scan, translation sample, remote worker smoke, worker health, aggregate platform check, and release metadata gates on GitHub. CI explicitly uses `config.example.yaml`; never commit local `config.yaml`.
 
 ## Useful Commands
 
@@ -178,6 +179,7 @@ python -m ecse_localizer fidelity-audit --report "<VIDEO_ROOT>\_localizer_output
 python -m ecse_localizer repair-fidelity --report "<VIDEO_ROOT>\_localizer_output\<lecture>_report.json"
 python -m ecse_localizer translation-sample --output ".\runs\translation_quality_sample"
 python -m ecse_localizer remote-smoke --output ".\runs\remote_smoke"
+python -m ecse_localizer platform-check --output ".\runs\platform_check"
 python -m ecse_localizer tts-health
 python -m ecse_localizer worker-status
 python -m ecse_localizer worker-health --skip-remote

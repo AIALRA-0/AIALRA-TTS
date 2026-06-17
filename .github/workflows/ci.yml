@@ -47,16 +47,20 @@ jobs:
 
       - name: Translation sample gate
         shell: pwsh
-        run: python -m ecse_localizer translation-sample --output ".\runs\translation_quality_sample"
+        run: python -m ecse_localizer --config ".\config.example.yaml" translation-sample --output ".\runs\translation_quality_sample"
 
       - name: Remote worker queue smoke
         shell: pwsh
-        run: python -m ecse_localizer remote-smoke --output ".\runs\remote_smoke"
+        run: python -m ecse_localizer --config ".\config.example.yaml" remote-smoke --output ".\runs\remote_smoke"
 
       - name: Worker health local gate
         shell: pwsh
-        run: python -m ecse_localizer worker-health --skip-remote
+        run: python -m ecse_localizer --config ".\config.example.yaml" worker-health --skip-remote
+
+      - name: Platform aggregate gate
+        shell: pwsh
+        run: python -m ecse_localizer --config ".\config.example.yaml" platform-check --output ".\runs\platform_check"
 
       - name: Release metadata gate
         shell: pwsh
-        run: python -m ecse_localizer release-check
+        run: python -m ecse_localizer --config ".\config.example.yaml" release-check

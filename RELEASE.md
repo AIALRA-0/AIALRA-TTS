@@ -23,11 +23,14 @@ node --check .\src\ecse_localizer\static\app.js
 python -m ecse_localizer translation-sample --output ".\runs\translation_quality_sample"
 python -m ecse_localizer remote-smoke --output ".\runs\remote_smoke"
 python -m ecse_localizer worker-health --skip-remote
+python -m ecse_localizer platform-check --output ".\runs\platform_check"
 python -m ecse_localizer --config deploy\config.remote.example.yaml deploy-check
 python -m ecse_localizer release-check
 ```
 
 `deploy-check` is expected to fail on `deploy/config.remote.example.yaml` until placeholder secrets are replaced in a real deployment config. For release gating, this proves placeholders are still present in the public template and catches accidental unsafe edits. A production `deploy/config.remote.yaml` must pass `deploy-check` before exposure.
+
+`platform-check` aggregates release metadata, deterministic translation quality, remote worker queue smoke, local worker health, and the public remote-template guard into one report under `runs/platform_check/`.
 
 ## Tagging
 

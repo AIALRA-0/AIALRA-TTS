@@ -26,10 +26,12 @@ version = "{pyproject_version}"
         "deploy/Caddyfile.example",
         ".env.example",
         "tools/secret_scan.ps1",
+        "config.example.yaml",
         "08_deploy_check.ps1",
         "09_worker_healthcheck.ps1",
         "10_release_check.ps1",
         "11_remote_smoke.ps1",
+        "12_platform_check.ps1",
     ]:
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         (root / rel).write_text("placeholder\n", encoding="utf-8")
