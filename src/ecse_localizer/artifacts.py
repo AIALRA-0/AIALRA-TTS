@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .utils import read_json
+from .utils import read_json, write_json
 
 
 DOWNLOADABLE_OUTPUTS = {
@@ -256,25 +256,41 @@ def verify_artifact_token(secret: str, token: str, artifact_id_value: str, usern
 
 
 def safe_delete_artifact(path: str | Path, config: dict[str, Any]) -> dict[str, Any]:
-    target = Path(path).resolve()
-    allowed_roots = [
+    target = validate_managed_file(path, config)
+    if not target.exists():
+        return {"deleted": False, "path": str(target), "reason": "missing"}
+    size = target.stat().st_size
+    target.unlink()
+    return {"deleted": True, "path": str(target), "bytes": size}
+
+
+def managed_roots(config: dict[str, Any]) -> list[Path]:
+    roots = [
         Path(config["output_dir"]).resolve(),
         Path(config["work_dir"]).resolve(),
     ]
-    webui = config.get("webui", {})
-    if webui.get("upload_dir"):
-        allowed_roots.append(Path(webui["upload_dir"]).resolve())
-    if webui.get("preview_dir"):
-        allowed_roots.append(Path(webui["preview_dir"]).resolve())
+    webui = config.get("webui", {}) if isinstance(config.get("webui"), dict) else {}
+    for key in ["upload_dir", "preview_dir", "job_dir"]:
+        if webui.get(key):
+            roots.append(Path(str(webui[key])).resolve())
+    unique: dict[str, Path] = {}
+    for root in roots:
+        unique[str(root).lower()] = root
+    return list(unique.values())
+
+
+def validate_managed_file(path: str | Path, config: dict[str, Any]) -> Path:
+    target = Path(path).resolve()
+    allowed_roots = managed_roots(config)
     if not target.exists():
-        return {"deleted": False, "path": str(target), "reason": "missing"}
+        if not any(is_relative_to(target, root) for root in allowed_roots):
+            raise ValueError(f"Refusing to delete outside managed roots: {target}")
+        return target
     if not any(is_relative_to(target, root) for root in allowed_roots):
         raise ValueError(f"Refusing to delete outside managed roots: {target}")
     if target.is_dir():
         raise ValueError("Directory deletion is not allowed through artifact API")
-    size = target.stat().st_size
-    target.unlink()
-    return {"deleted": True, "path": str(target), "bytes": size}
+    return target
 
 
 def safe_delete_artifact_record(row: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
@@ -324,19 +340,189 @@ def cleanup_expired_files(config: dict[str, Any], *, older_than_days: int = 7, d
     for root in roots:
         if root.exists():
             for path in root.rglob("*"):
+                if path.resolve() == preview_manifest_path(config):
+                    continue
+                if is_protected_cleanup_metadata(path, config):
+                    continue
                 key = str(path.resolve()).lower()
                 if key not in seen and path.is_file() and path.stat().st_mtime < cutoff:
                     candidates.append(path)
                     seen.add(key)
     for path in candidates:
-        row = {"path": str(path), "bytes": path.stat().st_size}
-        if not dry_run:
-            path.unlink(missing_ok=True)
-            row["deleted"] = True
-        else:
-            row["deleted"] = False
-        deleted.append(row)
+        deleted.append(cleanup_delete_file(config, path, dry_run=dry_run, reason="expired_file"))
+    deleted.extend(cleanup_deleted_job_artifacts(config, cutoff=cutoff, dry_run=dry_run, seen=seen))
+    deleted.extend(cleanup_preview_manifest(config, cutoff=cutoff, dry_run=dry_run, seen=seen))
     return {"dry_run": dry_run, "older_than_days": older_than_days, "count": len(deleted), "bytes": sum(int(x["bytes"]) for x in deleted), "items": deleted[:500]}
+
+
+def cleanup_deleted_job_artifacts(config: dict[str, Any], *, cutoff: float, dry_run: bool, seen: set[str]) -> list[dict[str, Any]]:
+    job_dir = webui_job_dir(config)
+    if not job_dir.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for job_path in sorted(job_dir.glob("*.json")):
+        try:
+            job = read_json(job_path)
+        except Exception:
+            continue
+        if not isinstance(job, dict) or str(job.get("status") or "") != "deleted":
+            continue
+        deleted_at = parse_epoch(job.get("deleted_at")) or job_path.stat().st_mtime
+        if deleted_at >= cutoff:
+            continue
+        report = job.get("result_report") or job.get("report")
+        if report:
+            for path in report_bundle_paths(report):
+                row = cleanup_delete_file(config, path, dry_run=dry_run, reason="deleted_job_bundle")
+                rows.append(row)
+                seen.add(str(path.resolve()).lower())
+        for key in ["result_video", "result_audio", "log"]:
+            value = job.get(key)
+            if not value:
+                continue
+            row = cleanup_delete_file(config, Path(str(value)), dry_run=dry_run, reason=f"deleted_job_{key}")
+            rows.append(row)
+            seen.add(str(Path(str(value)).resolve()).lower())
+    return rows
+
+
+def cleanup_preview_manifest(config: dict[str, Any], *, cutoff: float, dry_run: bool, seen: set[str]) -> list[dict[str, Any]]:
+    manifest_path = preview_manifest_path(config)
+    if not manifest_path.exists():
+        return []
+    try:
+        data = read_json(manifest_path)
+    except Exception:
+        return []
+    raw_rows = data.get("previews", data) if isinstance(data, dict) else data
+    if not isinstance(raw_rows, list):
+        return []
+    rows = [row for row in raw_rows if isinstance(row, dict)]
+    deleted_job_ids = deleted_job_ids_older_than(config, cutoff=cutoff)
+    kept: list[dict[str, Any]] = []
+    actions: list[dict[str, Any]] = []
+    changed = False
+    for row in rows:
+        paths = preview_row_paths(row)
+        row_mtime = max([path.stat().st_mtime for path in paths if path.exists()] or [parse_epoch(row.get("updated_at")) or 0])
+        linked_deleted_job = any(str(row.get(key) or "") in deleted_job_ids for key in ["job_id", "cache_job_id", "source_job_id"])
+        missing_all_files = bool(paths) and not any(path.exists() for path in paths)
+        expired = row_mtime and row_mtime < cutoff
+        if linked_deleted_job or missing_all_files or expired:
+            reason = "deleted_job_preview" if linked_deleted_job else "missing_preview_manifest_files" if missing_all_files else "expired_preview_manifest"
+            for path in paths:
+                key = str(path.resolve()).lower()
+                if key in seen:
+                    continue
+                actions.append(cleanup_delete_file(config, path, dry_run=dry_run, reason=reason))
+                seen.add(key)
+            changed = True
+        else:
+            kept.append(row)
+    if changed and not dry_run:
+        write_json(manifest_path, {"previews": kept})
+    return actions
+
+
+def deleted_job_ids_older_than(config: dict[str, Any], *, cutoff: float) -> set[str]:
+    job_dir = webui_job_dir(config)
+    if not job_dir.exists():
+        return set()
+    ids: set[str] = set()
+    for job_path in job_dir.glob("*.json"):
+        try:
+            job = read_json(job_path)
+        except Exception:
+            continue
+        if not isinstance(job, dict) or str(job.get("status") or "") != "deleted":
+            continue
+        deleted_at = parse_epoch(job.get("deleted_at")) or job_path.stat().st_mtime
+        if deleted_at < cutoff and job.get("id"):
+            ids.add(str(job["id"]))
+    return ids
+
+
+def cleanup_delete_file(config: dict[str, Any], path: Path, *, dry_run: bool, reason: str) -> dict[str, Any]:
+    try:
+        target = validate_managed_file(path, config)
+    except ValueError as exc:
+        return {"path": str(Path(path)), "bytes": 0, "deleted": False, "reason": reason, "error": str(exc)}
+    size = path_size(target)
+    row = {"path": str(target), "bytes": size, "deleted": False, "reason": reason}
+    if not target.exists():
+        row["reason"] = "missing"
+        return row
+    if not dry_run:
+        target.unlink(missing_ok=True)
+        row["deleted"] = True
+    return row
+
+
+def is_protected_cleanup_metadata(path: Path, config: dict[str, Any]) -> bool:
+    target = path.resolve()
+    webui = config.get("webui", {}) if isinstance(config.get("webui"), dict) else {}
+    protected_roots = []
+    for key in ["platform_dir", "job_dir"]:
+        if webui.get(key):
+            protected_roots.append(Path(str(webui[key])).resolve())
+    for root in protected_roots:
+        if is_relative_to(target, root):
+            return True
+    return False
+
+
+def report_bundle_paths(report: str | Path) -> list[Path]:
+    report_path = Path(str(report))
+    paths = [report_path, report_path.with_suffix(".md")]
+    if report_path.exists():
+        try:
+            report_data = read_json(report_path)
+            if isinstance(report_data, dict):
+                for key, value in (report_data.get("outputs") or {}).items():
+                    if key in DOWNLOADABLE_OUTPUTS and value:
+                        paths.append(Path(str(value)))
+        except Exception:
+            pass
+    seen: set[str] = set()
+    out: list[Path] = []
+    for path in paths:
+        key = str(path.resolve()).lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(path)
+    return out
+
+
+def preview_row_paths(row: dict[str, Any]) -> list[Path]:
+    paths: list[Path] = []
+    for key in ["preview_path", "path", "thumbnail_path"]:
+        value = row.get(key)
+        if value:
+            path = Path(str(value))
+            if path not in paths:
+                paths.append(path)
+    return paths
+
+
+def webui_job_dir(config: dict[str, Any]) -> Path:
+    webui = config.get("webui", {}) if isinstance(config.get("webui"), dict) else {}
+    if webui.get("job_dir"):
+        return Path(str(webui["job_dir"])).resolve()
+    return Path(config["work_dir"]).resolve() / "webui_jobs"
+
+
+def parse_epoch(value: Any) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value or "").strip()
+    if not text:
+        return 0.0
+    for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"]:
+        try:
+            return time.mktime(time.strptime(text[:19], fmt))
+        except ValueError:
+            continue
+    return 0.0
 
 
 def with_signed_urls(

@@ -46,7 +46,8 @@ Deployment steps:
    - short-lived logs
 7. Configure a cleanup job:
    - remove expired previews
-   - remove deleted-user artifacts
+   - remove old soft-deleted job artifacts, logs, preview cache files, and stale preview manifest rows
+   - preserve job JSON records, user metadata, project metadata, and template metadata
    - reject new uploads when quota would be exceeded
 8. Configure worker connectivity:
    - prefer WireGuard/Tailscale/cloudflared reverse tunnel
@@ -104,6 +105,7 @@ Deployment steps:
    - running jobs refresh progress/log-tail summaries without exposing local Windows paths or full logs
    - failed jobs can be retried without rewriting the base config
    - deleted jobs are soft-deleted from normal history before any physical artifact cleanup
+   - cleanup dry-runs report old deleted-job artifacts without deleting them; cleanup apply removes only managed output/run/upload/job-log/preview files and preserves metadata JSON
    - a queued job can be claimed through `/api/worker/jobs/claim`
    - a queued `repair_fidelity` job claims portable worker args beginning with `repair-fidelity`
    - worker status updates through `/api/worker/jobs/{job_id}/status`

@@ -1,4 +1,6 @@
 import json
+import os
+import time
 from pathlib import Path
 
 import pytest
@@ -27,6 +29,15 @@ def make_config(tmp_path: Path) -> dict:
         "work_dir": str(work),
         "webui": {"upload_dir": str(upload), "preview_dir": str(out / "previews")},
     }
+
+
+def old_iso(days: int = 10) -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - days * 86400))
+
+
+def make_stale(path: Path, *, days: int = 10) -> None:
+    old_time = time.time() - days * 86400
+    os.utime(path, (old_time, old_time))
 
 
 def test_artifact_catalog_and_signed_token(tmp_path):
@@ -214,10 +225,7 @@ def test_cleanup_expired_files_dry_run(tmp_path):
     config = make_config(tmp_path)
     stale = Path(config["work_dir"]) / "old.tmp"
     stale.write_text("old", encoding="utf-8")
-    old_time = stale.stat().st_mtime - 10 * 86400
-    import os
-
-    os.utime(stale, (old_time, old_time))
+    make_stale(stale)
     result = cleanup_expired_files(config, older_than_days=7, dry_run=True)
     assert result["count"] == 1
     assert stale.exists()
@@ -229,9 +237,120 @@ def test_cleanup_expired_files_includes_preview_cache(tmp_path):
     preview_dir.mkdir()
     stale = preview_dir / "old_preview.mp4"
     stale.write_bytes(b"old")
-    old_time = stale.stat().st_mtime - 10 * 86400
-    import os
-
-    os.utime(stale, (old_time, old_time))
+    make_stale(stale)
     result = cleanup_expired_files(config, older_than_days=7, dry_run=True)
     assert any(item["path"] == str(stale.resolve()) for item in result["items"])
+
+
+def test_cleanup_deleted_job_artifacts_dry_run_then_apply(tmp_path):
+    config = make_config(tmp_path)
+    job_dir = tmp_path / "jobs"
+    job_dir.mkdir()
+    config["webui"]["job_dir"] = str(job_dir)
+    out = Path(config["output_dir"])
+    video = out / "demo_zh_dub.mp4"
+    report = out / "demo_report.json"
+    report_md = out / "demo_report.md"
+    log = job_dir / "job.log"
+    video.write_bytes(b"mp4")
+    report.write_text(json.dumps({"name": "demo", "outputs": {"zh_dub_mp4": str(video)}}), encoding="utf-8")
+    report_md.write_text("report", encoding="utf-8")
+    log.write_text("log", encoding="utf-8")
+    job_record = job_dir / "job-1.json"
+    job_record.write_text(
+        json.dumps(
+            {
+                "id": "job-1",
+                "status": "deleted",
+                "deleted_at": old_iso(),
+                "result_report": str(report),
+                "log": str(log),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    dry = cleanup_expired_files(config, older_than_days=7, dry_run=True)
+
+    dry_paths = {item["path"] for item in dry["items"]}
+    assert str(report.resolve()) in dry_paths
+    assert str(video.resolve()) in dry_paths
+    assert str(log.resolve()) in dry_paths
+    assert report.exists() and report_md.exists() and video.exists() and log.exists()
+    assert job_record.exists()
+
+    applied = cleanup_expired_files(config, older_than_days=7, dry_run=False)
+
+    assert applied["count"] >= 4
+    assert not report.exists()
+    assert not report_md.exists()
+    assert not video.exists()
+    assert not log.exists()
+    assert job_record.exists()
+
+
+def test_cleanup_deleted_job_prunes_preview_manifest_rows(tmp_path):
+    config = make_config(tmp_path)
+    job_dir = tmp_path / "jobs"
+    job_dir.mkdir()
+    config["webui"]["job_dir"] = str(job_dir)
+    preview_dir = Path(config["webui"]["preview_dir"])
+    preview_dir.mkdir()
+    preview = preview_dir / "demo_preview.mp4"
+    thumbnail = preview_dir / "demo_thumb.jpg"
+    preview.write_bytes(b"preview")
+    thumbnail.write_bytes(b"thumb")
+    (preview_dir / "preview_manifest.json").write_text(
+        json.dumps(
+            {
+                "previews": [
+                    {
+                        "id": "job-1-preview",
+                        "job_id": "job-1",
+                        "preview_path": str(preview),
+                        "thumbnail_path": str(thumbnail),
+                        "updated_at": old_iso(days=1),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (job_dir / "job-1.json").write_text(
+        json.dumps({"id": "job-1", "status": "deleted", "deleted_at": old_iso()}),
+        encoding="utf-8",
+    )
+
+    result = cleanup_expired_files(config, older_than_days=7, dry_run=False)
+
+    assert any(item["reason"] == "deleted_job_preview" for item in result["items"])
+    assert not preview.exists()
+    assert not thumbnail.exists()
+    manifest = json.loads((preview_dir / "preview_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["previews"] == []
+
+
+def test_cleanup_preserves_platform_and_job_metadata_under_work_dir(tmp_path):
+    config = make_config(tmp_path)
+    work = Path(config["work_dir"])
+    job_dir = work / "webui_jobs"
+    platform_dir = work / "platform"
+    job_dir.mkdir()
+    platform_dir.mkdir()
+    config["webui"]["job_dir"] = str(job_dir)
+    config["webui"]["platform_dir"] = str(platform_dir)
+    job_record = job_dir / "job-1.json"
+    users = platform_dir / "users.json"
+    temp = work / "old.tmp"
+    job_record.write_text(json.dumps({"id": "job-1", "status": "done"}), encoding="utf-8")
+    users.write_text(json.dumps({"users": []}), encoding="utf-8")
+    temp.write_text("old", encoding="utf-8")
+    make_stale(job_record)
+    make_stale(users)
+    make_stale(temp)
+
+    cleanup_expired_files(config, older_than_days=7, dry_run=False)
+
+    assert job_record.exists()
+    assert users.exists()
+    assert not temp.exists()

@@ -49,7 +49,7 @@ Parameter templates store non-secret generation settings such as source language
 
 The task form shows local language capability hints for ASR, subtitle translation, and TTS. These hints come from `asr.supported_languages`, `translation.supported_target_languages`, `translation.allow_unlisted_targets`, and `tts.supported_languages`, plus the currently detected local LLM/TTS backend. Unlisted subtitle targets can be queued when the local LLM is available, but they are flagged as QA-required; TTS targets must be supported by the active local TTS backend.
 
-The WebUI also has a `产物` page for generated artifacts. It can list reports, subtitles, WAV/MP4 outputs, show local preview links for media, create short-lived signed download URLs, delete managed output files, and run cleanup dry-runs. Deletion is restricted to managed output, run, upload, and preview-cache directories; it refuses to touch the original video root. Uploads enforce suffix, per-file size, user quota, and request-level reserved bytes; job submission enforces per-user and global active-job limits.
+The WebUI also has a `产物` page for generated artifacts. It can list reports, subtitles, WAV/MP4 outputs, show local preview links for media, create short-lived signed download URLs, delete managed output files, and run cleanup dry-runs. Deletion is restricted to managed output, run, upload, job-log, and preview-cache directories; it refuses to touch the original video root. Cleanup preserves job JSON and platform/user metadata, but can remove expired run/cache files plus old soft-deleted job outputs and preview manifest rows. Uploads enforce suffix, per-file size, user quota, and request-level reserved bytes; job submission enforces per-user and global active-job limits.
 
 For Contabo mode, low-bitrate previews and thumbnails can be registered through `webui.preview_manifest` without exposing Windows source paths. The manifest can be a list or `{ "previews": [...] }`; each row may include `name`, `preview_path`, `thumbnail_path`, `owner`, `project_id`, `job_id`, and `source_output_key`. The API serves only the preview-cache files through signed URLs.
 
@@ -62,6 +62,8 @@ Quota fields are split by storage responsibility. `remote_quota_bytes` limits Co
 Job records are JSON files with `schema_version`. WebUI normalizes older records on read/claim/update by filling missing metadata, log path, dispatch target, timestamps, retry count, and worker args when possible. Job states are normalized to `queued`, `claimed`, `running`, `paused`, `retrying`, `done`, `failed`, `cancelled`, and `deleted`; older `passed` records are migrated to `done` with `legacy_status: passed`.
 
 Project quota is tracked as generated managed artifact usage per project. Original course videos stay outside project cleanup and remain protected.
+
+Cleanup is intentionally two-stage: deleting a job first hides the record from normal history by marking it `deleted`; the scheduled `cleanup` command later removes that deleted job's report bundle, logs, preview cache files, and stale manifest rows after `webui.cleanup_older_than_days`. The job JSON record remains as audit metadata unless you remove it manually from the managed job store.
 
 ## Remote + Local Architecture
 
