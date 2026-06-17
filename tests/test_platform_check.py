@@ -126,6 +126,13 @@ def test_webui_api_smoke_gate_uses_isolated_state_and_checks_core_apis(tmp_path)
     assert steps["cancel_claimed_worker_job"]["pass"] is True
     assert steps["worker_control_poll_cancel"]["pass"] is True
     assert steps["worker_reports_cancelled"]["pass"] is True
+    assert steps["worker_registers_artifact_ref"]["pass"] is True
+    assert steps["artifact_ref_requestable"]["pass"] is True
+    assert steps["request_artifact_cache"]["pass"] is True
+    assert steps["worker_claims_cache_job"]["pass"] is True
+    assert steps["worker_uploads_artifact_cache"]["pass"] is True
+    assert steps["cached_artifact_downloadable"]["pass"] is True
+    assert steps["signed_cached_download"]["pass"] is True
 
     repeated = webui_api_smoke_gate(config(tmp_path), out)
     assert repeated["pass"] is True

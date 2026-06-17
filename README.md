@@ -207,7 +207,7 @@ Before committing:
 .\10_release_check.ps1
 ```
 
-The public template files are `config.example.yaml` and `.env.example`. Release rules live in `RELEASE.md`; CI runs tests, compile checks, WebUI JS syntax, PowerShell syntax, secret scan, translation sample, remote worker smoke, isolated WebUI API workflow smoke, worker health, aggregate platform check, and release metadata gates on GitHub. The isolated WebUI smoke creates throwaway user/project/folder/template records, publishes a signed worker heartbeat with a redacted `worker-ref`, queues and claims a worker job, verifies remote cancel/control/status handling, and never touches real platform state. CI explicitly uses `config.example.yaml`; never commit local `config.yaml`.
+The public template files are `config.example.yaml` and `.env.example`. Release rules live in `RELEASE.md`; CI runs tests, compile checks, WebUI JS syntax, PowerShell syntax, secret scan, translation sample, remote worker smoke, isolated WebUI API workflow smoke, worker health, aggregate platform check, and release metadata gates on GitHub. The isolated WebUI smoke creates throwaway user/project/folder/template records, publishes a signed worker heartbeat with a redacted `worker-ref`, queues and claims worker jobs, verifies remote cancel/control/status handling, registers a remote full-output artifact ref, requests a temporary cache upload, verifies the worker cache upload, and checks the signed download response without touching real platform state. CI explicitly uses `config.example.yaml`; never commit local `config.yaml`.
 
 ## Useful Commands
 

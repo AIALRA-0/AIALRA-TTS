@@ -382,6 +382,146 @@ def webui_api_smoke_gate(config: dict[str, Any], output_dir: Path | None) -> dic
         )
         add_step("worker_reports_cancelled", status.status_code, status_ok)
 
+        output_job_response = client.post(
+            "/api/jobs",
+            json={
+                "type": "process_one",
+                "video": "worker-ref:smoke_media_1",
+                "video_name": "lecture.mp4",
+                "project_id": project.get("id", ""),
+                "folder_id": folder.get("id", "root"),
+                "template_id": template.get("id", ""),
+            },
+        )
+        output_job_json = response_json(output_job_response)
+        output_job = output_job_json.get("job") if isinstance(output_job_json.get("job"), dict) else {}
+        add_step(
+            "queue_output_job",
+            output_job_response.status_code,
+            output_job_response.status_code == 200 and output_job.get("status") == "queued",
+        )
+
+        output_claim = signed_worker_post(client, smoke_config, "/api/worker/jobs/claim", claim_payload, worker_headers)
+        output_claim_json = response_json(output_claim)
+        output_claimed = output_claim_json.get("job") if isinstance(output_claim_json.get("job"), dict) else {}
+        add_step(
+            "worker_claims_output_job",
+            output_claim.status_code,
+            output_claim.status_code == 200 and output_claimed.get("id") == output_job.get("id") and output_claimed.get("status") == "claimed",
+        )
+
+        output_status_path = f"/api/worker/jobs/{output_job.get('id', '')}/status"
+        output_status = signed_worker_post(
+            client,
+            smoke_config,
+            output_status_path,
+            {
+                "worker_id": "windows-smoke-worker",
+                "status": "done",
+                "returncode": 0,
+                "progress": 100,
+                "worker_artifacts": [
+                    {
+                        "ref_id": "smoke_ref_1",
+                        "source_output_key": "zh_dub_mp4",
+                        "name": "lecture_zh_dub.mp4",
+                        "size": 8,
+                        "media_type": "video/mp4",
+                    }
+                ],
+            },
+            worker_headers,
+        )
+        output_status_json = response_json(output_status)
+        output_status_job = output_status_json.get("job") if isinstance(output_status_json.get("job"), dict) else {}
+        add_step(
+            "worker_registers_artifact_ref",
+            output_status.status_code,
+            output_status.status_code == 200
+            and output_status_job.get("status") == "done"
+            and bool(output_status_job.get("worker_artifacts")),
+        )
+
+        remote_artifacts_response = client.get("/api/artifacts")
+        remote_artifacts_json = response_json(remote_artifacts_response)
+        remote_artifacts = remote_artifacts_json.get("artifacts") if isinstance(remote_artifacts_json.get("artifacts"), list) else []
+        remote_artifact = next((item for item in remote_artifacts if item.get("id") == "worker_artifact_smoke_ref_1"), {})
+        remote_artifact_text = json.dumps(remote_artifact, ensure_ascii=False).lower()
+        remote_artifact_ok = (
+            remote_artifacts_response.status_code == 200
+            and remote_artifact.get("remote_worker_artifact") is True
+            and remote_artifact.get("request_cache_url") == "/api/artifacts/worker_artifact_smoke_ref_1/request-cache"
+            and not remote_artifact.get("download_url")
+            and "worker_secret_area" not in remote_artifact_text
+        )
+        add_step("artifact_ref_requestable", remote_artifacts_response.status_code, remote_artifact_ok)
+
+        cache_request = client.post(str(remote_artifact.get("request_cache_url") or ""), json={})
+        cache_request_json = response_json(cache_request)
+        cache_job = cache_request_json.get("job") if isinstance(cache_request_json.get("job"), dict) else {}
+        cache_request_ok = (
+            cache_request.status_code == 200
+            and cache_job.get("type") == "cache_artifact"
+            and cache_job.get("metadata", {}).get("worker_action") == "upload_artifact_cache"
+            and cache_job.get("metadata", {}).get("artifact_ref_id") == "smoke_ref_1"
+        )
+        add_step("request_artifact_cache", cache_request.status_code, cache_request_ok)
+
+        cache_claim = signed_worker_post(client, smoke_config, "/api/worker/jobs/claim", claim_payload, worker_headers)
+        cache_claim_json = response_json(cache_claim)
+        cache_claimed = cache_claim_json.get("job") if isinstance(cache_claim_json.get("job"), dict) else {}
+        add_step(
+            "worker_claims_cache_job",
+            cache_claim.status_code,
+            cache_claim.status_code == 200 and cache_claimed.get("id") == cache_job.get("id") and cache_claimed.get("status") == "claimed",
+        )
+
+        cache_body = b"full mp4"
+        cache_path = f"/api/worker/jobs/{cache_job.get('id', '')}/artifact-cache"
+        cache_upload = signed_worker_binary_post(
+            client,
+            smoke_config,
+            cache_path,
+            cache_body,
+            {
+                "Content-Type": "video/mp4",
+                "X-Worker-Artifact-Id": "worker_artifact_smoke_ref_1",
+                "X-Worker-Artifact-Ref": "smoke_ref_1",
+                "X-Worker-Artifact-Name": "lecture_zh_dub.mp4",
+                "X-Worker-Artifact-File-Name": "lecture_zh_dub.mp4",
+                "X-Worker-Artifact-Source-Key": "zh_dub_mp4",
+                "X-Worker-Id": "windows-smoke-worker",
+            },
+            worker_headers,
+        )
+        cache_upload_json = response_json(cache_upload)
+        cache_upload_ok = (
+            cache_upload.status_code == 200
+            and cache_upload_json.get("artifact", {}).get("id") == "worker_artifact_smoke_ref_1"
+            and cache_upload_json.get("artifact", {}).get("remote_cache") is True
+        )
+        add_step("worker_uploads_artifact_cache", cache_upload.status_code, cache_upload_ok)
+
+        cached_artifacts_response = client.get("/api/artifacts")
+        cached_artifacts_json = response_json(cached_artifacts_response)
+        cached_artifacts = cached_artifacts_json.get("artifacts") if isinstance(cached_artifacts_json.get("artifacts"), list) else []
+        cached_artifact = next((item for item in cached_artifacts if item.get("id") == "worker_artifact_smoke_ref_1"), {})
+        cached_ok = (
+            cached_artifacts_response.status_code == 200
+            and cached_artifact.get("remote_cache") is True
+            and bool(cached_artifact.get("download_url"))
+            and not cached_artifact.get("request_cache_url")
+        )
+        add_step("cached_artifact_downloadable", cached_artifacts_response.status_code, cached_ok)
+
+        download_url = str(cached_artifact.get("download_url") or "")
+        download_response = client.get(download_url) if download_url else None
+        add_step(
+            "signed_cached_download",
+            download_response.status_code if download_response is not None else 0,
+            bool(download_response is not None and download_response.status_code == 200 and download_response.content == cache_body),
+        )
+
         healthz = client.get("/healthz")
         healthz_json = response_json(healthz)
         health_ok = healthz.status_code == 200 and "ok" in healthz_json and "worker_token" not in str(healthz_json).lower()
@@ -422,6 +562,9 @@ def isolated_webui_smoke_config(config: dict[str, Any], root: Path) -> dict[str,
     webui.setdefault("default_remote_quota_gb", 1)
     webui.setdefault("default_project_quota_gb", 1)
     webui.setdefault("worker_disk_min_free_gb", 1)
+    webui.setdefault("max_active_jobs_per_user", 8)
+    webui.setdefault("max_active_jobs_global", 16)
+    webui.setdefault("worker_artifact_cache_max_upload_mb", 8)
     return smoke
 
 
@@ -454,6 +597,26 @@ def signed_worker_post(client: Any, config: dict[str, Any], path: str, payload: 
             config["webui"]["worker_token"],
             path=path,
             body=body,
+        ),
+    )
+
+
+def signed_worker_binary_post(
+    client: Any,
+    config: dict[str, Any],
+    path: str,
+    body: bytes,
+    extra_headers: dict[str, str],
+    header_builder: Any,
+) -> Any:
+    return client.post(
+        path,
+        content=body,
+        headers=header_builder(
+            config["webui"]["worker_token"],
+            path=path,
+            body=body,
+            extra_headers=extra_headers,
         ),
     )
 
