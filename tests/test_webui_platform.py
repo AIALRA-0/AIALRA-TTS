@@ -60,6 +60,13 @@ def test_tuning_fields_include_tts_slot_trim_controls():
     assert fields["tts.slot_trim_fade_seconds"]["type"] == "float"
 
 
+def test_static_ui_does_not_expose_raw_worker_path_placeholder():
+    html = (Path(__file__).parents[1] / "src" / "ecse_localizer" / "static" / "index.html").read_text(encoding="utf-8")
+
+    assert r"D:\worker-media" not in html
+    assert "jobWorkerVideoPath" in html
+
+
 def test_webui_login_project_and_quota(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
@@ -301,11 +308,39 @@ def test_upload_disabled_by_default_for_worker_queue(tmp_path):
 
     response = client.get("/api/dashboard")
     assert response.status_code == 200
-    assert response.json()["upload_policy"]["enabled"] is False
+    policy = response.json()["upload_policy"]
+    assert policy["enabled"] is False
+    assert policy["execution_mode"] == "worker_queue"
+    assert policy["allow_worker_path_submission"] is False
+    assert policy["worker_ref_required"] is True
+    assert "worker-ref" in policy["worker_path_message"]
 
     response = client.post("/api/upload", files=[("files", ("lecture.mp4", BytesIO(b"x"), "video/mp4"))])
     assert response.status_code == 403
     assert "Windows worker" in response.text
+
+
+def test_worker_path_submission_policy_is_opt_in(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config["webui"]["allow_worker_path_submission"] = True
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+
+    response = client.get("/api/dashboard")
+    assert response.status_code == 200
+    policy = response.json()["upload_policy"]
+    assert policy["execution_mode"] == "worker_queue"
+    assert policy["allow_worker_path_submission"] is True
+    assert policy["worker_ref_required"] is False
+    assert "private trusted deployment" in policy["worker_path_message"]
 
 
 def test_jobs_endpoint_filters_by_project_folder_and_status(tmp_path):

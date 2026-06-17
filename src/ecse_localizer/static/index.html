@@ -107,9 +107,9 @@
               视频
               <select id="jobVideo"></select>
             </label>
-            <label>
-              Worker 本地视频路径
-              <input id="jobWorkerVideoPath" placeholder="D:\worker-media\lecture.mp4" />
+            <label id="workerPathField" hidden>
+              Worker 本地视频路径（私有部署）
+              <input id="jobWorkerVideoPath" placeholder="仅限受信任私有部署，优先选择 Worker 视频" disabled />
             </label>
             <label>
               Smoke 秒数

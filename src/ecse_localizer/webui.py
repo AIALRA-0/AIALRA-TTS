@@ -999,6 +999,8 @@ def browser_upload_policy(state: WebState) -> dict[str, Any]:
     execution_mode = str(state.webui.get("execution_mode", "local_subprocess") or "local_subprocess")
     explicit = state.webui.get("allow_remote_media_uploads")
     enabled = bool(explicit) if explicit is not None else execution_mode != "worker_queue"
+    allow_worker_path_submission = bool(state.webui.get("allow_worker_path_submission", False))
+    worker_ref_required = execution_mode == "worker_queue" and not allow_worker_path_submission
     if enabled:
         message = "Browser uploads are stored in the configured WebUI upload directory and count against remote quota."
         mode = "webui_upload_dir"
@@ -1014,6 +1016,13 @@ def browser_upload_policy(state: WebState) -> dict[str, Any]:
         "execution_mode": execution_mode,
         "max_upload_mb": int(state.webui.get("max_upload_mb", 20480) or 20480),
         "allowed_suffixes": sorted(ALLOWED_UPLOAD_SUFFIXES),
+        "allow_worker_path_submission": allow_worker_path_submission,
+        "worker_ref_required": worker_ref_required,
+        "worker_path_message": (
+            "Submit worker-ref media options published by the Windows worker."
+            if worker_ref_required
+            else "Raw worker paths are enabled only for a private trusted deployment."
+        ),
         "message": message,
     }
 

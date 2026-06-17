@@ -311,6 +311,21 @@ function renderUploadPolicy() {
   if (result && !enabled && !result.textContent.trim()) {
     result.textContent = policy.message || "";
   }
+  renderWorkerPathPolicy();
+}
+
+function renderWorkerPathPolicy() {
+  const policy = state.uploadPolicy || {};
+  const allowRawWorkerPath = policy.allow_worker_path_submission === true && policy.execution_mode === "worker_queue";
+  const field = $("workerPathField");
+  const input = $("jobWorkerVideoPath");
+  if (!field || !input) return;
+  field.hidden = !allowRawWorkerPath;
+  input.disabled = !allowRawWorkerPath;
+  if (!allowRawWorkerPath) {
+    input.value = "";
+  }
+  input.title = policy.worker_path_message || "";
 }
 
 function renderLanguageCapabilities() {
@@ -995,7 +1010,8 @@ async function uploadFiles(event) {
 async function startJob(event) {
   event.preventDefault();
   const type = $("jobType").value;
-  const workerVideoPath = $("jobWorkerVideoPath").value.trim();
+  const allowRawWorkerPath = state.uploadPolicy?.allow_worker_path_submission === true && state.uploadPolicy?.execution_mode === "worker_queue";
+  const workerVideoPath = allowRawWorkerPath ? $("jobWorkerVideoPath").value.trim() : "";
   const selectedVideo = $("jobVideo").selectedOptions[0];
   const payload = {
     type,

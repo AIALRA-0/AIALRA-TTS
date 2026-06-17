@@ -117,7 +117,8 @@ Deployment steps:
    - upload quota is enforced across multi-file requests and active-job concurrency limits return HTTP 429 with a readable message
    - browser media upload is disabled in `worker_queue` mode unless explicitly enabled, so original videos do not land on the Contabo disk by default
    - worker media refs appear in the task video selector as `worker-ref:<id>` options without exposing Windows source paths
-   - the task form rejects raw Windows worker-visible local video paths unless `webui.allow_worker_path_submission=true` is deliberately enabled for a private trusted deployment
+   - the task form hides and clears the raw Windows worker-path input unless `webui.allow_worker_path_submission=true` is deliberately enabled for a private trusted deployment
+   - the task API rejects raw Windows worker-visible local video paths unless that same opt-in is enabled
    - admins can disable users and update local/remote user quotas without disabling the last active admin
    - project quota usage is visible for generated managed artifacts
    - worker heartbeat appears online
