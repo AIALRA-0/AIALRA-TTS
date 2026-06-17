@@ -18,6 +18,7 @@ REQUIRED_FILES = [
     "deploy/docker-compose.yml",
     "deploy/Dockerfile.web",
     "deploy/Caddyfile.example",
+    "deploy/bootstrap_contabo.py",
     ".env.example",
     "licenses_report.md",
     "tools/secret_scan.ps1",
@@ -32,6 +33,7 @@ REQUIRED_FILES = [
 REQUIRED_GITIGNORE_PATTERNS = [
     "config.yaml",
     ".env",
+    "deploy/config.remote.yaml",
     "logs/",
     "runs/",
     "models/",

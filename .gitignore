@@ -5,6 +5,8 @@
 config.yaml
 config.local.yaml
 config.*.local.yaml
+deploy/config.remote.yaml
+deploy/config.remote.local.yaml
 secrets*.json
 *.pem
 *.key

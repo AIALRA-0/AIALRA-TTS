@@ -24,6 +24,7 @@ version = "{pyproject_version}"
         "deploy/docker-compose.yml",
         "deploy/Dockerfile.web",
         "deploy/Caddyfile.example",
+        "deploy/bootstrap_contabo.py",
         ".env.example",
         "licenses_report.md",
         "tools/secret_scan.ps1",
@@ -41,6 +42,7 @@ version = "{pyproject_version}"
             [
                 "config.yaml",
                 ".env",
+                "deploy/config.remote.yaml",
                 "logs/",
                 "runs/",
                 "models/",

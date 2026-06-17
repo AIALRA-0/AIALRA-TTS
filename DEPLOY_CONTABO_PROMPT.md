@@ -19,14 +19,19 @@ Deployment steps:
    git clone https://github.com/AIALRA-0/AIALRA-TTS.git
    cd AIALRA-TTS
    ```
-2. Create `.env` from `.env.example` and fill:
+2. Generate local-only deployment files. This writes `.env` and `deploy/config.remote.yaml`, refuses to overwrite existing files unless `--force` is passed, and does not print generated secrets:
+   ```bash
+   python3 deploy/bootstrap_contabo.py --public-base-url https://your-domain.example --admin-username admin
+   ```
+   If you need to set the first admin password manually, add `--admin-password 'REPLACE_WITH_STRONG_LOCAL_SECRET'`. Do not commit `.env` or `deploy/config.remote.yaml`.
+3. Review `.env` locally and fill or rotate if needed:
    - `WEBUI_SESSION_SECRET`
    - `WEBUI_ADMIN_USERNAME`
    - `WEBUI_ADMIN_PASSWORD`
    - `REMOTE_PUBLIC_BASE_URL`
    - `WORKER_SHARED_TOKEN`
    - `WEBUI_DOWNLOAD_SECRET`
-3. Create a production config from `config.example.yaml`.
+4. Review the production config in `deploy/config.remote.yaml`.
    - Set `privacy.allow_cloud_api=false`.
    - Set `privacy.allow_upload_media=false`.
    - Set small Contabo remote quota defaults.
@@ -38,24 +43,24 @@ Deployment steps:
    - Keep `webui.allow_remote_media_uploads=false` on Contabo unless a deliberate short-lived cache policy is approved.
    - Keep `webui.allow_worker_path_submission=false`; users should select opaque `worker-ref:<id>` options published by the Windows worker, not paste Windows filesystem paths into the public web app.
    - Do not copy local `config.yaml`; use template values and environment variables only.
-4. Run the deployment guard before starting the public service:
+5. Run the deployment guard before starting the public service:
    ```bash
    python -m ecse_localizer --config deploy/config.remote.yaml deploy-check
    ```
    Treat any `ERROR` as a hard stop. The check validates placeholder secrets, worker HMAC/nonce enforcement, remote media upload policy, privacy flags, signed URL TTL, remote quota bounds, private IPs, and Windows path leakage without printing secret values.
-5. Run the web service behind Caddy or Nginx with HTTPS.
-6. Restrict upload size at reverse proxy and application level.
-7. Configure persistent volumes only for:
+6. Run the web service behind Caddy or Nginx with HTTPS.
+7. Restrict upload size at reverse proxy and application level.
+8. Configure persistent volumes only for:
    - metadata database or JSON store
    - thumbnails/previews cache
    - `webui.preview_dir` and `webui.preview_manifest` for low-bitrate preview rows
    - short-lived logs
-8. Configure a cleanup job:
+9. Configure a cleanup job:
    - remove expired previews
    - remove old soft-deleted job artifacts, logs, preview cache files, and stale preview manifest rows
    - preserve job JSON records, user metadata, project metadata, and template metadata
    - reject new uploads when quota would be exceeded
-9. Configure worker connectivity:
+10. Configure worker connectivity:
    - prefer WireGuard/Tailscale/cloudflared reverse tunnel
    - follow `deploy/REMOTE_TUNNEL_GUIDE.md` for the outbound-only worker connection model
    - set `webui.worker_auth_mode: "hmac"` and `webui.worker_require_nonce: true`; require `X-Worker-Timestamp` + `X-Worker-Nonce` + `X-Worker-Signature` for worker heartbeat/API
@@ -93,7 +98,7 @@ Deployment steps:
      .\install_worker_heartbeat_task.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
      .\install_worker_poll_task.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
      ```
-10. Validate:
+11. Validate:
    - `python -m ecse_localizer --config deploy/config.remote.yaml deploy-check` returns PASS before the service is exposed
    - `.\09_worker_healthcheck.ps1` returns PASS on the Windows worker before scheduled tasks are installed
    - `python -m ecse_localizer translation-sample --output runs/translation_quality_sample` creates JSON/Markdown comparing literal, lecture, coherence, and repair stages
@@ -156,6 +161,7 @@ The repository includes:
 - `deploy/Dockerfile.web`
 - `deploy/Caddyfile.example`
 - `deploy/config.remote.example.yaml`
+- `deploy/bootstrap_contabo.py`
 - `deploy/systemd/aialra-web.service`
 - `deploy/systemd/aialra-cleanup.service`
 - `deploy/systemd/aialra-cleanup.timer`

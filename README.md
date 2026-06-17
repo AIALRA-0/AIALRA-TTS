@@ -135,9 +135,18 @@ Contabo deployment templates live in `deploy/`:
 - `deploy/Dockerfile.web`
 - `deploy/Caddyfile.example`
 - `deploy/config.remote.example.yaml`
+- `deploy/bootstrap_contabo.py`
 - `deploy/REMOTE_TUNNEL_GUIDE.md`
 - `deploy/systemd/*.service`
 - `deploy/systemd/*.timer`
+
+On a fresh Contabo clone, generate local-only deployment files without printing secrets:
+
+```bash
+python3 deploy/bootstrap_contabo.py --public-base-url https://your-domain.example --admin-username admin
+```
+
+This creates `.env` and `deploy/config.remote.yaml`; both are ignored by git and must stay off GitHub.
 
 Before putting the remote WebUI behind a public domain, run the deployment guard on the target config:
 

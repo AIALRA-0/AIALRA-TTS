@@ -6,6 +6,7 @@ This project is designed for local media processing. Treat videos, subtitles, tr
 
 - `.env`
 - `config.yaml`
+- `deploy/config.remote.yaml`
 - real server hostnames, IP addresses, tunnel names, tokens, or passwords
 - source videos or uploaded media
 - generated subtitles, audio, videos, QA reports, logs, model weights, and run caches
