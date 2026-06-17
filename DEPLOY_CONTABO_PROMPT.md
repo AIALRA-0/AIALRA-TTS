@@ -68,6 +68,7 @@ Deployment steps:
    - project folders can be created and selected for jobs
    - parameter templates can be listed, created, selected, and applied to queued worker jobs
    - user quota is enforced
+   - admins can disable users and update local/remote user quotas without disabling the last active admin
    - project quota usage is visible for generated managed artifacts
    - worker heartbeat appears online
    - GPU/CPU metrics update

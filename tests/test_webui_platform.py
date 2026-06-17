@@ -112,3 +112,39 @@ def test_webui_login_project_and_quota(tmp_path):
     response = client.get("/api/quota")
     assert response.status_code == 200
     assert response.json()["local_quota_bytes"] > 0
+
+
+def test_webui_admin_can_update_user_quota_and_disable(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    app = create_app(write_config(tmp_path))
+    admin = TestClient(app)
+
+    response = admin.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+
+    response = admin.post(
+        "/api/users",
+        json={"username": "student.one", "password": "long-enough-password", "quota_local_gb": 2, "quota_remote_gb": 3},
+    )
+    assert response.status_code == 200
+
+    response = admin.patch(
+        "/api/users/student.one",
+        json={"role": "user", "disabled": True, "quota_local_gb": 4, "quota_remote_gb": 5},
+    )
+    assert response.status_code == 200
+    user = response.json()["user"]
+    assert user["disabled"] is True
+    assert user["quota_local_bytes"] == 4 * 1024 * 1024 * 1024
+    assert user["quota_remote_bytes"] == 5 * 1024 * 1024 * 1024
+
+    student = TestClient(app)
+    response = student.post("/api/login", json={"username": "student.one", "password": "long-enough-password"})
+    assert response.status_code == 401
+
+    response = admin.patch("/api/users/admin", json={"disabled": True})
+    assert response.status_code == 400
+
+    response = admin.patch("/api/users/admin", json={"role": "user"})
+    assert response.status_code == 400

@@ -436,6 +436,25 @@ h2 {
   margin-top: 4px;
 }
 
+.user-edit {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.user-edit label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.user-edit input,
+.user-edit select {
+  min-height: 34px;
+}
+
 .job-actions button {
   min-height: 30px;
   padding: 6px 10px;

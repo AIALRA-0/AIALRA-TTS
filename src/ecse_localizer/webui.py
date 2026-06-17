@@ -401,6 +401,27 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"ok": True, "user": created}
 
+    @app.patch("/api/users/{username}")
+    async def update_user(username: str, request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
+        if not is_admin(state, user):
+            raise HTTPException(status_code=403, detail="Admin required")
+        body = await request.json()
+        if username.lower() == user.lower() and bool(body.get("disabled", False)):
+            raise HTTPException(status_code=400, detail="Cannot disable the current admin session")
+        if username.lower() == user.lower() and str(body.get("role", "admin")) != "admin":
+            raise HTTPException(status_code=400, detail="Cannot demote the current admin session")
+        try:
+            updated = state.store.update_user(
+                username,
+                role=str(body["role"]) if "role" in body else None,
+                disabled=bool(body["disabled"]) if "disabled" in body else None,
+                quota_local_gb=float(body["quota_local_gb"]) if "quota_local_gb" in body else None,
+                quota_remote_gb=float(body["quota_remote_gb"]) if "quota_remote_gb" in body else None,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "user": updated, "users": state.store.list_users()}
+
     @app.post("/api/worker/heartbeat")
     async def worker_heartbeat(request: Request) -> dict[str, Any]:
         require_worker_token(request, state)
@@ -575,7 +596,8 @@ def verify_session(request: Request, state: WebState) -> str | None:
     if int(payload.get("exp", 0)) < int(time.time()):
         return None
     username = str(payload.get("u") or "") or None
-    if username and not state.store.get_user(username):
+    record = state.store.get_user(username) if username else None
+    if username and (not record or record.get("disabled")):
         return None
     return username
 

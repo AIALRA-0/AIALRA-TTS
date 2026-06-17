@@ -409,14 +409,47 @@ function renderUsers(message = "") {
   for (const user of state.users) {
     const item = document.createElement("div");
     item.className = "job-item";
+    const localGb = bytesToGb(user.quota_local_bytes || 0);
+    const remoteGb = bytesToGb(user.quota_remote_bytes || 0);
     item.innerHTML = `
       <div class="job-title">
         <span>${escapeHtml(user.username)}</span>
-        <span class="status ${user.disabled ? "bad" : "ok"}">${escapeHtml(user.role || "user")}</span>
+        <span class="status ${user.disabled ? "bad" : "ok"}">${user.disabled ? "disabled" : escapeHtml(user.role || "user")}</span>
       </div>
       <div class="job-meta">local quota ${formatBytes(user.quota_local_bytes || 0)} · remote quota ${formatBytes(user.quota_remote_bytes || 0)}</div>
+      <div class="user-edit">
+        <label>role <select data-user-role="${escapeHtml(user.username)}"><option value="user">user</option><option value="admin">admin</option></select></label>
+        <label>local GB <input data-user-local="${escapeHtml(user.username)}" type="number" min="1" value="${localGb}" /></label>
+        <label>remote GB <input data-user-remote="${escapeHtml(user.username)}" type="number" min="1" value="${remoteGb}" /></label>
+        <label class="check-row"><input data-user-disabled="${escapeHtml(user.username)}" type="checkbox" ${user.disabled ? "checked" : ""} /><span>禁用</span></label>
+      </div>
+      <div class="job-actions"></div>
     `;
+    item.querySelector(`[data-user-role="${cssEscape(user.username)}"]`).value = user.role || "user";
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "secondary";
+    save.textContent = "保存用户";
+    save.addEventListener("click", () => saveUserSettings(user.username));
+    item.querySelector(".job-actions").appendChild(save);
     list.appendChild(item);
+  }
+}
+
+async function saveUserSettings(username) {
+  try {
+    const payload = {
+      role: document.querySelector(`[data-user-role="${cssEscape(username)}"]`).value,
+      disabled: document.querySelector(`[data-user-disabled="${cssEscape(username)}"]`).checked,
+      quota_local_gb: Number(document.querySelector(`[data-user-local="${cssEscape(username)}"]`).value || 1),
+      quota_remote_gb: Number(document.querySelector(`[data-user-remote="${cssEscape(username)}"]`).value || 1),
+    };
+    const result = await api(`/api/users/${encodeURIComponent(username)}`, { method: "PATCH", body: JSON.stringify(payload) });
+    state.users = result.users || state.users;
+    renderUsers();
+    toast("用户已更新");
+  } catch (error) {
+    toast(`保存用户失败：${error.message}`);
   }
 }
 
@@ -427,6 +460,7 @@ async function createUser(event) {
       username: $("newUsername").value,
       password: $("newPassword").value,
       quota_local_gb: Number($("newQuotaLocal").value || 500),
+      quota_remote_gb: Number($("newQuotaRemote").value || 10),
     };
     await api("/api/users", { method: "POST", body: JSON.stringify(payload) });
     $("newUsername").value = "";
@@ -436,6 +470,16 @@ async function createUser(event) {
   } catch (error) {
     toast(`创建用户失败：${error.message}`);
   }
+}
+
+function bytesToGb(bytes) {
+  const value = Number(bytes || 0) / 1024 / 1024 / 1024;
+  return Number.isFinite(value) ? Math.max(1, Math.round(value * 100) / 100) : 1;
+}
+
+function cssEscape(value) {
+  if (window.CSS?.escape) return window.CSS.escape(String(value));
+  return String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
 
 function currentTemplateParams() {

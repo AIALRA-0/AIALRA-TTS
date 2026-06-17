@@ -127,6 +127,45 @@ class PlatformStore:
         self.ensure_default_template(username)
         return public_user(row)
 
+    def update_user(
+        self,
+        username: str,
+        *,
+        role: str | None = None,
+        disabled: bool | None = None,
+        quota_local_gb: float | None = None,
+        quota_remote_gb: float | None = None,
+    ) -> dict[str, Any]:
+        users = self._load(self.users_path, {"users": []})
+        rows = users.get("users", [])
+        target: dict[str, Any] | None = None
+        for row in rows:
+            if str(row.get("username", "")).lower() == username.lower():
+                target = row
+                break
+        if not target:
+            raise ValueError("User not found")
+
+        updated = dict(target)
+        if role is not None:
+            updated["role"] = role if role in {"admin", "user"} else "user"
+        if disabled is not None:
+            updated["disabled"] = bool(disabled)
+        if quota_local_gb is not None:
+            updated["quota_local_bytes"] = gb_to_bytes(quota_local_gb)
+        if quota_remote_gb is not None:
+            updated["quota_remote_bytes"] = gb_to_bytes(quota_remote_gb)
+        updated["updated_at"] = iso_now()
+
+        simulated = [updated if row is target else row for row in rows]
+        if not any(row.get("role") == "admin" and not row.get("disabled") for row in simulated):
+            raise ValueError("At least one active admin user is required")
+
+        target.clear()
+        target.update(updated)
+        self._save(self.users_path, users)
+        return public_user(target)
+
     def list_projects(self, username: str, *, admin: bool = False) -> list[dict[str, Any]]:
         data = self._load(self.projects_path, {"projects": []})
         rows = data.get("projects", [])

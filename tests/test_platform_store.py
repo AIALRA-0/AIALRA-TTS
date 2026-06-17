@@ -52,6 +52,34 @@ def test_create_invited_user(tmp_path):
     assert store.list_templates("student.one")[0]["name"] == "Best Quality Mandarin"
 
 
+def test_update_user_quota_role_and_disabled_state(tmp_path):
+    store = PlatformStore(make_config(tmp_path))
+    store.bootstrap()
+    store.create_user("student.one", "long-enough-password", quota_local_gb=2, quota_remote_gb=3)
+
+    updated = store.update_user("student.one", disabled=True, quota_local_gb=4, quota_remote_gb=5)
+    assert updated["disabled"] is True
+    assert updated["quota_local_bytes"] == 4 * 1024 * 1024 * 1024
+    assert updated["quota_remote_bytes"] == 5 * 1024 * 1024 * 1024
+    assert store.verify_user("student.one", "long-enough-password") is None
+
+    updated = store.update_user("student.one", disabled=False, role="admin")
+    assert updated["role"] == "admin"
+    assert store.verify_user("student.one", "long-enough-password")
+
+
+def test_update_user_preserves_at_least_one_active_admin(tmp_path):
+    store = PlatformStore(make_config(tmp_path))
+    store.bootstrap()
+
+    try:
+        store.update_user("admin", disabled=True)
+    except ValueError as exc:
+        assert "active admin" in str(exc)
+    else:
+        raise AssertionError("disabling only admin should fail")
+
+
 def test_project_folder_create_and_validation(tmp_path):
     store = PlatformStore(make_config(tmp_path))
     store.bootstrap()
