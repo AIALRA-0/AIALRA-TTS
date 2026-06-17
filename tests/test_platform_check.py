@@ -122,6 +122,10 @@ def test_webui_api_smoke_gate_uses_isolated_state_and_checks_core_apis(tmp_path)
     assert steps["worker_media_refs"]["pass"] is True
     assert steps["queue_worker_ref_job"]["pass"] is True
     assert steps["job_history_filter"]["pass"] is True
+    assert steps["worker_claims_job"]["pass"] is True
+    assert steps["cancel_claimed_worker_job"]["pass"] is True
+    assert steps["worker_control_poll_cancel"]["pass"] is True
+    assert steps["worker_reports_cancelled"]["pass"] is True
 
     repeated = webui_api_smoke_gate(config(tmp_path), out)
     assert repeated["pass"] is True

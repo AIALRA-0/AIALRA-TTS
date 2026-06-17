@@ -271,16 +271,7 @@ def webui_api_smoke_gate(config: dict[str, Any], output_dir: Path | None) -> dic
                 }
             ],
         }
-        heartbeat_body = json.dumps(heartbeat_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        heartbeat = client.post(
-            "/api/worker/heartbeat",
-            content=heartbeat_body,
-            headers=worker_headers(
-                smoke_config["webui"]["worker_token"],
-                path="/api/worker/heartbeat",
-                body=heartbeat_body,
-            ),
-        )
+        heartbeat = signed_worker_post(client, smoke_config, "/api/worker/heartbeat", heartbeat_payload, worker_headers)
         heartbeat_json = response_json(heartbeat)
         heartbeat_text = json.dumps(heartbeat_json, ensure_ascii=False)
         heartbeat_ok = heartbeat.status_code == 200 and "worker_secret_area" not in heartbeat_text.lower()
@@ -325,6 +316,71 @@ def webui_api_smoke_gate(config: dict[str, Any], output_dir: Path | None) -> dic
         job_list = jobs_json.get("jobs") if isinstance(jobs_json.get("jobs"), list) else []
         jobs_ok = jobs_response.status_code == 200 and any(item.get("id") == job.get("id") for item in job_list)
         add_step("job_history_filter", jobs_response.status_code, jobs_ok)
+
+        claim_payload = {
+            "worker_id": "windows-smoke-worker",
+            "version": "platform-check",
+            "metrics": heartbeat_payload["metrics"],
+        }
+        claim = signed_worker_post(client, smoke_config, "/api/worker/jobs/claim", claim_payload, worker_headers)
+        claim_json = response_json(claim)
+        claimed_job = claim_json.get("job") if isinstance(claim_json.get("job"), dict) else {}
+        claim_ok = (
+            claim.status_code == 200
+            and claimed_job.get("id") == job.get("id")
+            and claimed_job.get("status") == "claimed"
+            and claimed_job.get("claimed_by") == "windows-smoke-worker"
+        )
+        add_step("worker_claims_job", claim.status_code, claim_ok)
+
+        cancel_response = client.post(f"/api/jobs/{job.get('id', '')}/cancel", json={})
+        cancel_json = response_json(cancel_response)
+        cancel_job = cancel_json.get("job") if isinstance(cancel_json.get("job"), dict) else {}
+        cancel_ok = (
+            cancel_response.status_code == 200
+            and cancel_job.get("status") == "claimed"
+            and cancel_job.get("cancel_requested") is True
+            and cancel_job.get("cancel_requested_by") == username
+        )
+        add_step("cancel_claimed_worker_job", cancel_response.status_code, cancel_ok)
+
+        control_path = f"/api/worker/jobs/{job.get('id', '')}/control"
+        control = signed_worker_post(client, smoke_config, control_path, {"worker_id": "windows-smoke-worker"}, worker_headers)
+        control_json = response_json(control)
+        control_payload = control_json.get("control") if isinstance(control_json.get("control"), dict) else {}
+        control_text = json.dumps(control_json, ensure_ascii=False).lower()
+        control_ok = (
+            control.status_code == 200
+            and control_payload.get("status") == "claimed"
+            and control_payload.get("cancel_requested") is True
+            and "command" not in control_text
+            and "worker_secret_area" not in control_text
+        )
+        add_step("worker_control_poll_cancel", control.status_code, control_ok)
+
+        status_path = f"/api/worker/jobs/{job.get('id', '')}/status"
+        status = signed_worker_post(
+            client,
+            smoke_config,
+            status_path,
+            {
+                "worker_id": "windows-smoke-worker",
+                "status": "done",
+                "returncode": 0,
+                "worker_artifacts": [{"ref_id": "late-artifact"}],
+            },
+            worker_headers,
+        )
+        status_json = response_json(status)
+        status_job = status_json.get("job") if isinstance(status_json.get("job"), dict) else {}
+        status_ok = (
+            status.status_code == 200
+            and status_job.get("status") == "cancelled"
+            and status_job.get("returncode") == -9
+            and status_job.get("cancel_handled_at")
+            and "worker_artifacts" not in status_job
+        )
+        add_step("worker_reports_cancelled", status.status_code, status_ok)
 
         healthz = client.get("/healthz")
         healthz_json = response_json(healthz)
@@ -387,6 +443,19 @@ def response_json(response: Any) -> dict[str, Any]:
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def signed_worker_post(client: Any, config: dict[str, Any], path: str, payload: dict[str, Any], header_builder: Any) -> Any:
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return client.post(
+        path,
+        content=body,
+        headers=header_builder(
+            config["webui"]["worker_token"],
+            path=path,
+            body=body,
+        ),
+    )
 
 
 def deploy_template_guard() -> dict[str, Any]:
