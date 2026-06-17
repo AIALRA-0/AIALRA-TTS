@@ -32,6 +32,7 @@ Deployment steps:
    - Set small Contabo remote quota defaults.
    - Set `webui.default_project_quota_gb` to the per-project generated-artifact budget.
    - Set `webui.max_active_jobs_per_user` and `webui.max_active_jobs_global` conservatively for the first public test.
+   - Set `asr.supported_languages`, `translation.supported_target_languages`, and `tts.supported_languages` to match the Windows worker's installed models.
    - Keep full media storage on the Windows worker.
    - Set `webui.execution_mode=worker_queue` on Contabo.
    - Do not copy local `config.yaml`; use template values and environment variables only.
@@ -70,6 +71,7 @@ Deployment steps:
    - project creation works
    - project folders can be created and selected for jobs
    - parameter templates can be listed, created, selected, and applied to queued worker jobs
+   - the task form displays ASR/subtitle/TTS language support hints from the configured local model capabilities
    - user quota is enforced
    - upload quota is enforced across multi-file requests and active-job concurrency limits return HTTP 429 with a readable message
    - admins can disable users and update local/remote user quotas without disabling the last active admin

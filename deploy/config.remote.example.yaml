@@ -9,9 +9,17 @@ privacy:
 
 translation:
   target_language: "zh-CN"
+  supported_target_languages: ["zh-CN", "zh-TW", "zh-HK", "en", "ja", "ko", "es", "fr", "de"]
+  allow_unlisted_targets: true
   style: "natural_chinese_lecture"
   quality_mode: "best_quality"
   max_zh_chars_per_subtitle_line: 22
+
+asr:
+  supported_languages: ["auto", "en", "zh", "zh-CN", "yue", "ja", "ko", "es", "fr", "de"]
+
+tts:
+  supported_languages: ["zh-CN", "zh", "cmn", "mandarin", "yue"]
 
 webui:
   enabled: true

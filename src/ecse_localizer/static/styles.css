@@ -270,6 +270,41 @@ h2 {
   font-size: 13px;
 }
 
+.capability-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.capability-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  color: #344054;
+  background: #f8fafc;
+  font-size: 12px;
+}
+
+.capability-pill.ok {
+  border-color: #8bd3a5;
+  background: #eefbf2;
+}
+
+.capability-pill.warn {
+  border-color: #e8c46a;
+  background: #fff8e5;
+}
+
+.capability-pill.bad {
+  border-color: #ef9a9a;
+  background: #fff1f1;
+}
+
 .task-grid,
 .settings-grid {
   display: grid;

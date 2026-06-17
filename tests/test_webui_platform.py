@@ -114,6 +114,13 @@ def test_webui_login_project_and_quota(tmp_path):
     assert response.status_code == 200
     assert response.json()["local_quota_bytes"] > 0
 
+    response = client.get("/api/dashboard")
+    assert response.status_code == 200
+    caps = response.json()["capabilities"]
+    assert "asr" in caps
+    assert "translation" in caps
+    assert "tts" in caps
+
 
 def test_webui_admin_can_update_user_quota_and_disable(tmp_path):
     if TestClient is None:

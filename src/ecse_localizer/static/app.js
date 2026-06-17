@@ -6,6 +6,7 @@ const state = {
   users: [],
   artifacts: [],
   templates: [],
+  capabilities: null,
   selectedJob: null,
   jobTimer: null,
 };
@@ -128,6 +129,10 @@ function bindEvents() {
   $("folderForm").addEventListener("submit", createFolder);
   $("jobProject").addEventListener("change", renderFolderOptions);
   $("jobTemplate").addEventListener("change", applySelectedTemplate);
+  ["jobSourceLanguage", "jobSubtitleLanguage", "jobTtsLanguage"].forEach((id) => {
+    const el = $(id);
+    if (el) el.addEventListener("input", renderLanguageCapabilities);
+  });
   $("saveTemplateBtn").addEventListener("click", saveCurrentTemplate);
   $("userForm").addEventListener("submit", createUser);
   $("refreshArtifactsBtn").addEventListener("click", loadArtifacts);
@@ -180,6 +185,8 @@ async function loadDashboard() {
   workerMetric.textContent = workerLabel(data.worker);
   workerMetric.title = data.worker?.message || "";
   $("metricDisk").textContent = data.metrics?.disk ? `${Math.round(data.metrics.disk.used_percent)}%` : "-";
+  state.capabilities = data.capabilities || null;
+  renderLanguageCapabilities();
   state.projects = data.projects || [];
   renderProjectOptions();
   renderFolderOptions();
@@ -196,6 +203,80 @@ function workerLabel(worker) {
     return "等待 worker";
   }
   return worker.status === "online" ? "online" : "local";
+}
+
+function renderLanguageCapabilities() {
+  const el = $("languageCapabilityLine");
+  if (!el) return;
+  const caps = state.capabilities;
+  if (!caps) {
+    el.textContent = "语言能力：未加载";
+    return;
+  }
+  const source = $("jobSourceLanguage")?.value || "auto";
+  const subtitle = $("jobSubtitleLanguage")?.value || "zh-CN";
+  const tts = $("jobTtsLanguage")?.value || "zh-CN";
+  const asr = languageCapabilityStatus(caps.asr, source, { autoOk: true });
+  const translation = translationCapabilityStatus(caps.translation, subtitle);
+  const speech = languageCapabilityStatus(caps.tts, tts, { autoOk: false });
+  el.innerHTML = [
+    capabilityPill("ASR", source, asr),
+    capabilityPill("字幕", subtitle, translation),
+    capabilityPill("TTS", tts, speech),
+  ].join("");
+}
+
+function translationCapabilityStatus(cap, language) {
+  if (!cap?.available) return { ok: false, warn: false, text: "LLM 未连接" };
+  if (languageSupported(cap.supported_target_languages || [], language)) return { ok: true, warn: false, text: cap.model || cap.backend || "local LLM" };
+  if (cap.supports_arbitrary_targets) return { ok: true, warn: true, text: "可尝试，需 QA" };
+  return { ok: false, warn: false, text: "未列入支持" };
+}
+
+function languageCapabilityStatus(cap, language, options = {}) {
+  if (!cap) return { ok: false, warn: false, text: "未知" };
+  if (options.autoOk && normalizeLanguage(language) === "auto" && cap.auto_detect) {
+    return { ok: true, warn: false, text: "自动识别" };
+  }
+  const ok = languageSupported(cap.supported_languages || [], language);
+  return {
+    ok,
+    warn: false,
+    text: ok ? cap.backend || "支持" : "未列入支持",
+  };
+}
+
+function capabilityPill(label, language, status) {
+  const cls = status.ok ? (status.warn ? "warn" : "ok") : "bad";
+  return `<span class="capability-pill ${cls}"><strong>${escapeHtml(label)}</strong>${escapeHtml(language)} · ${escapeHtml(status.text)}</span>`;
+}
+
+function languageSupported(list, requested) {
+  const target = normalizeLanguage(requested);
+  return (list || []).some((item) => {
+    const supported = normalizeLanguage(item);
+    if (supported === "*" || supported === "any") return true;
+    if (target === supported) return true;
+    const targetBase = target.split("-")[0];
+    const supportedBase = supported.split("-")[0];
+    return targetBase === supportedBase && ["zh", "en", "ja", "ko"].includes(targetBase);
+  });
+}
+
+function normalizeLanguage(value) {
+  const text = String(value || "").trim().replaceAll("_", "-").toLowerCase();
+  const aliases = {
+    mandarin: "zh-cn",
+    cmn: "zh-cn",
+    cantonese: "yue",
+    "zh-hans": "zh-cn",
+    "zh-cn": "zh-cn",
+    "zh-sg": "zh-cn",
+    "zh-hant": "zh-tw",
+    "zh-tw": "zh-tw",
+    "zh-hk": "zh-hk",
+  };
+  return aliases[text] || text;
 }
 
 async function loadVideos() {

@@ -26,6 +26,7 @@ asr:
   compute_type: "float16"
   fallback_compute_type: "int8_float16"
   language: "en"
+  supported_languages: ["auto", "en", "zh", "zh-CN", "yue", "ja", "ko", "es", "fr", "de"]
   vad: true
   word_timestamps: true
 
@@ -48,6 +49,8 @@ llm:
 
 translation:
   target_language: "zh-CN"
+  supported_target_languages: ["zh-CN", "zh-TW", "zh-HK", "en", "ja", "ko", "es", "fr", "de"]
+  allow_unlisted_targets: true
   style: "natural_chinese_lecture"
   quality_mode: "best_quality"
   context_window_segments: 3
@@ -71,6 +74,7 @@ dialect:
 
 tts:
   backend_order: ["cosyvoice", "piper", "f5_tts", "fish_speech"]
+  supported_languages: ["zh-CN", "zh", "cmn", "mandarin", "yue"]
   default_voice: "neutral_chinese_teacher"
   dialect: "mandarin"
   emotion: "clear_engaged_teaching"

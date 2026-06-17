@@ -31,6 +31,7 @@ from .artifacts import (
     verify_artifact_token,
     with_signed_urls,
 )
+from .capabilities import language_capabilities
 from .config import load_config, privacy_guard, save_config
 from .job_config import write_job_config
 from .llm_local import LocalLLMClient
@@ -182,6 +183,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         reports = list_reports(state.config, limit=12)
         videos = list_video_records(state.config, state.store.user_upload_dir(user))
         llm = LocalLLMClient(state.config).status()
+        tts = tts_health(state.config)
         return {
             "input_dir": state.config["input_dir"],
             "output_dir": state.config["output_dir"],
@@ -190,8 +192,9 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             "report_count": len(list_reports(state.config, limit=10000)),
             "latest_reports": reports,
             "latest_jobs": list_jobs(state, user)[:8],
-            "tts": tts_health(state.config),
+            "tts": tts,
             "llm": llm.__dict__,
+            "capabilities": language_capabilities(state.config, llm_status=llm, tts_status=tts),
             "quota": state.store.quota_status(user),
             "projects": state.store.list_projects(user, admin=is_admin(state, user)),
             "worker": worker_status_payload(state),
@@ -207,6 +210,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     def reports(_: str = Depends(require_user)) -> dict[str, Any]:
         state.reload_config()
         return {"reports": list_reports(state.config, limit=200)}
+
+    @app.get("/api/capabilities")
+    def capabilities(_: str = Depends(require_user)) -> dict[str, Any]:
+        state.reload_config()
+        llm = LocalLLMClient(state.config).status()
+        tts = tts_health(state.config)
+        return language_capabilities(state.config, llm_status=llm, tts_status=tts)
 
     @app.get("/api/artifacts")
     def artifacts(user: str = Depends(require_user)) -> dict[str, Any]:
