@@ -365,6 +365,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             "artifact_id": str(row["id"]),
             "artifact_ref_id": str(row["artifact_ref_id"]),
             "artifact_name": str(row.get("name") or ""),
+            "artifact_size": int(max(0, float(row.get("size") or 0))),
             "source_job_id": str(row.get("source_job_id") or row.get("job_id") or ""),
             "source_output_key": str(row.get("source_output_key") or ""),
             "project_id": str(row.get("project_id") or ""),
@@ -1469,13 +1470,34 @@ def enforce_artifact_cache_request_limits(state: WebState, username: str, artifa
     if size > max_bytes:
         raise HTTPException(status_code=413, detail=f"Worker artifact cache exceeds {state.webui.get('worker_artifact_cache_max_upload_mb', 2048)} MB")
     quota = state.store.quota_status(username)
-    remaining = max(0, int(quota["remote_quota_bytes"]) - int(quota["remote_used_bytes"]))
+    reserved = active_artifact_cache_reserved_bytes(state, username)
+    remaining = max(0, int(quota["remote_quota_bytes"]) - int(quota["remote_used_bytes"]) - reserved)
     if size > remaining:
         raise HTTPException(status_code=413, detail=f"Remote quota exceeded. Remaining bytes: {remaining}")
     global_quota = int(quota.get("remote_global_quota_bytes") or 0)
-    global_remaining = max(0, global_quota - int(quota.get("remote_global_used_bytes") or 0)) if global_quota else 0
+    global_reserved = active_artifact_cache_reserved_bytes(state, None)
+    global_remaining = max(0, global_quota - int(quota.get("remote_global_used_bytes") or 0) - global_reserved) if global_quota else 0
     if global_quota > 0 and size > global_remaining:
         raise HTTPException(status_code=413, detail=f"Global remote quota exceeded. Remaining bytes: {global_remaining}")
+
+
+def active_artifact_cache_reserved_bytes(state: WebState, username: str | None) -> int:
+    reserved = 0
+    for record in list_jobs(state, None):
+        if username is not None and str(record.get("user") or "") != username:
+            continue
+        if record.get("type") != "cache_artifact":
+            continue
+        if normalize_job_status(str(record.get("status") or "")) not in ACTIVE_JOB_STATUSES:
+            continue
+        metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+        if metadata.get("worker_action") != "upload_artifact_cache":
+            continue
+        try:
+            reserved += int(max(0, float(metadata.get("artifact_size") or 0)))
+        except (TypeError, ValueError):
+            continue
+    return reserved
 
 
 def find_active_artifact_cache_job(state: WebState, username: str, *, artifact_id: str, artifact_ref_id: str) -> dict[str, Any] | None:

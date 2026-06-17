@@ -11,6 +11,7 @@ from ecse_localizer.redaction import is_remote_safe_reference, sanitize_remote_c
 from ecse_localizer.platform_store import safe_worker_id
 from ecse_localizer.webui import (
     WebState,
+    active_artifact_cache_reserved_bytes,
     active_job_counts,
     browser_upload_policy,
     build_job_command,
@@ -1392,6 +1393,35 @@ def test_artifact_cache_request_preflight_enforces_remote_quota_without_testclie
         assert "Remote quota exceeded" in str(exc)
     else:
         raise AssertionError("expected artifact cache request to enforce remote quota")
+
+
+def test_artifact_cache_request_preflight_counts_active_cache_reservations_without_testclient(tmp_path):
+    config_path = write_config(tmp_path)
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    data["webui"]["default_remote_quota_gb"] = 1
+    data["webui"]["global_remote_quota_gb"] = 0.00000015
+    config_path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    state = WebState(config_path)
+    create_job_record(
+        state,
+        "cache_artifact",
+        "Cache remote artifact",
+        ["python", "-m", "ecse_localizer", "worker-cache-artifact"],
+        user="student",
+        metadata={"worker_action": "upload_artifact_cache", "artifact_size": 100},
+        dispatch_target="worker",
+    )
+
+    assert active_artifact_cache_reserved_bytes(state, None) == 100
+    assert active_artifact_cache_reserved_bytes(state, "admin") == 0
+
+    try:
+        enforce_artifact_cache_request_limits(state, "admin", {"id": "worker_artifact_ref1", "size": 100})
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 413
+        assert "Global remote quota exceeded" in str(exc)
+    else:
+        raise AssertionError("expected artifact cache request to count active global reservations")
 
 
 def test_artifact_cache_request_preflight_enforces_single_file_limit_without_testclient(tmp_path):

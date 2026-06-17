@@ -2417,6 +2417,54 @@ def test_request_worker_artifact_cache_rejects_known_size_over_remote_quota(tmp_
     assert not any(job["type"] == "cache_artifact" for job in client.get("/api/jobs").json()["jobs"])
 
 
+def test_request_worker_artifact_cache_counts_active_cache_reservations(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config["webui"]["default_remote_quota_gb"] = 0.00000015
+    config["webui"]["max_active_jobs_per_user"] = 5
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    source_job = create_job_record(
+        state,
+        "process_one",
+        "Remote process",
+        ["python", "-m", "ecse_localizer", "process-one", "--video", r"C:\private\lecture.mp4"],
+        user="admin",
+        metadata={"project_id": "course", "folder_id": "week_1"},
+        dispatch_target="worker",
+    )
+    update_job(
+        state,
+        source_job["id"],
+        {
+            "status": "done",
+            "worker_artifacts": [
+                {"ref_id": "ref_a", "source_output_key": "zh_dub_mp4", "name": "lecture_a.mp4", "size": 100},
+                {"ref_id": "ref_b", "source_output_key": "zh_dub_mp4", "name": "lecture_b.mp4", "size": 100},
+            ],
+        },
+    )
+    artifacts = {item["artifact_ref_id"]: item for item in client.get("/api/artifacts").json()["artifacts"] if item.get("remote_worker_artifact")}
+
+    first = client.post(artifacts["ref_a"]["request_cache_url"], json={})
+    second = client.post(artifacts["ref_b"]["request_cache_url"], json={})
+
+    assert first.status_code == 200
+    assert first.json()["job"]["metadata"]["artifact_size"] == 100
+    assert second.status_code == 413
+    assert "Remote quota exceeded" in second.text
+    cache_jobs = [item for item in client.get("/api/jobs").json()["jobs"] if item["type"] == "cache_artifact"]
+    assert len(cache_jobs) == 1
+
+
 def test_request_worker_artifact_cache_rejects_known_size_over_global_remote_quota(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
