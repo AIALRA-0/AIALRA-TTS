@@ -151,7 +151,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             return RedirectResponse("/?login_error=1", status_code=303)
         token = make_session(username, state)
         response = RedirectResponse("/", status_code=303)
-        response.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", max_age=TOKEN_TTL_SECONDS)
+        set_session_cookie(response, token, state)
         return response
 
     @app.get("/api/session")
@@ -175,13 +175,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=401, detail="Invalid username or password")
         token = make_session(username, state)
         response = JSONResponse({"ok": True, "user": username})
-        response.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", max_age=TOKEN_TTL_SECONDS)
+        set_session_cookie(response, token, state)
         return response
 
     @app.post("/api/logout")
     def logout(_: str = Depends(require_user)) -> JSONResponse:
         response = JSONResponse({"ok": True})
-        response.delete_cookie(COOKIE_NAME)
+        delete_session_cookie(response, state)
         return response
 
     @app.get("/api/dashboard")
@@ -837,6 +837,25 @@ def make_session(username: str, state: WebState) -> str:
     body = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
     sig = sign(body, state)
     return f"{body}.{sig}"
+
+
+def set_session_cookie(response: Response, token: str, state: WebState) -> None:
+    response.set_cookie(
+        COOKIE_NAME,
+        token,
+        httponly=True,
+        secure=session_cookie_secure(state),
+        samesite="lax",
+        max_age=TOKEN_TTL_SECONDS,
+    )
+
+
+def delete_session_cookie(response: Response, state: WebState) -> None:
+    response.delete_cookie(COOKIE_NAME, secure=session_cookie_secure(state), samesite="lax")
+
+
+def session_cookie_secure(state: WebState) -> bool:
+    return bool(state.webui.get("cookie_secure", False))
 
 
 def verify_session(request: Request, state: WebState) -> str | None:

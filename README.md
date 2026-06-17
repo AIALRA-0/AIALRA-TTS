@@ -99,7 +99,7 @@ python -m ecse_localizer worker --remote-base-url $env:REMOTE_PUBLIC_BASE_URL --
 
 `worker.max_concurrent_jobs` defaults to `1`. Increase it only after smoke testing GPU memory use; the long-running worker can claim multiple jobs in parallel using per-slot worker IDs such as `local-windows-worker-1` and `local-windows-worker-2`.
 
-For Contabo production, set `webui.execution_mode: "worker_queue"` in the remote config. In this mode the web server only queues jobs; the Windows worker claims them and runs local GPU/CPU processing. If the worker heartbeat is missing or stale, the WebUI keeps the job queued and shows `等待 worker` instead of claiming the task has started.
+For Contabo production, set `webui.execution_mode: "worker_queue"` and `webui.cookie_secure: true` in the remote config. In this mode the web server only queues jobs; the Windows worker claims them and runs local GPU/CPU processing. If the worker heartbeat is missing or stale, the WebUI keeps the job queued and shows `等待 worker` instead of claiming the task has started.
 
 Worker API authentication supports signed requests. Production remote config should set `webui.worker_auth_mode: "hmac"` and `webui.worker_require_nonce: true` so worker heartbeat, claim, and status requests must include `X-Worker-Timestamp`, `X-Worker-Nonce`, and `X-Worker-Signature`; the shared secret stays in `WORKER_SHARED_TOKEN` and is not sent as a plaintext header. The nonce is part of the signature and is remembered for the timestamp window, so replaying a captured signed request is rejected. Local development can keep `hmac_or_token` for compatibility with older scripts.
 

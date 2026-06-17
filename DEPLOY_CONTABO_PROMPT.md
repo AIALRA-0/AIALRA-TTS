@@ -42,6 +42,7 @@ Deployment steps:
    - Set `webui.execution_mode=worker_queue` on Contabo.
    - Keep `webui.allow_remote_media_uploads=false` on Contabo unless a deliberate short-lived cache policy is approved.
    - Keep `webui.allow_worker_path_submission=false`; users should select opaque `worker-ref:<id>` options published by the Windows worker, not paste Windows filesystem paths into the public web app.
+   - Keep `webui.cookie_secure=true` on Contabo so browser session cookies are sent only over HTTPS.
    - Do not copy local `config.yaml`; use template values and environment variables only.
 5. Run the deployment guard before starting the public service:
    ```bash

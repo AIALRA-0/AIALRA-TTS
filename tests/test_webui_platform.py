@@ -68,6 +68,7 @@ def test_webui_login_project_and_quota(tmp_path):
 
     response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
     assert response.status_code == 200
+    assert "; secure" not in response.headers["set-cookie"].lower()
 
     response = client.get("/api/projects")
     assert response.status_code == 200
@@ -134,6 +135,25 @@ def test_webui_login_project_and_quota(tmp_path):
     assert "asr" in caps
     assert "translation" in caps
     assert "tts" in caps
+
+
+def test_webui_secure_session_cookie_when_configured(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["cookie_secure"] = True
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+
+    assert response.status_code == 200
+    cookie = response.headers["set-cookie"].lower()
+    assert "httponly" in cookie
+    assert "samesite=lax" in cookie
+    assert "; secure" in cookie
 
 
 def test_webui_admin_can_update_user_quota_and_disable(tmp_path):

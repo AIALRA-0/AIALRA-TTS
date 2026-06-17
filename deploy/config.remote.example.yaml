@@ -30,6 +30,7 @@ webui:
   username: "${WEBUI_ADMIN_USERNAME}"
   password: "${WEBUI_ADMIN_PASSWORD}"
   session_secret: "${WEBUI_SESSION_SECRET}"
+  cookie_secure: true
   bind_local_only: false
   upload_dir: "/srv/aialra/previews/uploads"
   allow_remote_media_uploads: false
