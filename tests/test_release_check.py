@@ -29,6 +29,7 @@ version = "{pyproject_version}"
         ".env.example",
         "licenses_report.md",
         "tools/secret_scan.ps1",
+        "tools/check_powershell_syntax.ps1",
         "config.example.yaml",
         "08_deploy_check.ps1",
         "09_worker_healthcheck.ps1",

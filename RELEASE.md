@@ -20,6 +20,7 @@ Run locally before tagging:
 python -m pytest -q
 python -m compileall .\src\ecse_localizer
 node --check .\src\ecse_localizer\static\app.js
+.\tools\check_powershell_syntax.ps1
 python -m ecse_localizer translation-sample --output ".\runs\translation_quality_sample"
 python -m ecse_localizer remote-smoke --output ".\runs\remote_smoke"
 python -m ecse_localizer worker-health --skip-remote

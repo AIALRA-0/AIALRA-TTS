@@ -41,6 +41,10 @@ jobs:
         shell: pwsh
         run: node --check .\src\ecse_localizer\static\app.js
 
+      - name: Check PowerShell scripts
+        shell: pwsh
+        run: .\tools\check_powershell_syntax.ps1
+
       - name: Secret scan
         shell: pwsh
         run: .\tools\secret_scan.ps1

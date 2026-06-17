@@ -178,12 +178,13 @@ Before committing:
 
 ```powershell
 .\tools\secret_scan.ps1
+.\tools\check_powershell_syntax.ps1
 .\12_platform_check.ps1
 .\11_remote_smoke.ps1
 .\10_release_check.ps1
 ```
 
-The public template files are `config.example.yaml` and `.env.example`. Release rules live in `RELEASE.md`; CI runs tests, compile checks, WebUI JS syntax, secret scan, translation sample, remote worker smoke, worker health, aggregate platform check, and release metadata gates on GitHub. CI explicitly uses `config.example.yaml`; never commit local `config.yaml`.
+The public template files are `config.example.yaml` and `.env.example`. Release rules live in `RELEASE.md`; CI runs tests, compile checks, WebUI JS syntax, PowerShell syntax, secret scan, translation sample, remote worker smoke, worker health, aggregate platform check, and release metadata gates on GitHub. CI explicitly uses `config.example.yaml`; never commit local `config.yaml`.
 
 ## Useful Commands
 
