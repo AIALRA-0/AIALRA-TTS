@@ -1459,6 +1459,41 @@ def test_worker_queue_process_one_rejects_raw_worker_path_by_default(tmp_path):
     assert "worker-media" not in response.text
 
 
+def test_worker_queue_video_options_expose_only_safe_worker_ref_ids(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    win_root = "C:" + "\\Users\\Alice\\Desktop"
+    state.store.record_worker_heartbeat(
+        {
+            "status": "online",
+            "worker_id": "worker-1",
+            "media_refs": [
+                {"ref_id": "safe_ref-1", "name": "safe.mp4", "size": 10, "media_type": "video/mp4"},
+                {"ref_id": "../escape", "name": f"{win_root}\\secret.mp4", "size": 10, "media_type": "video/mp4"},
+            ],
+        }
+    )
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    response = client.get("/api/videos")
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert "worker-ref:safe_ref-1" in serialized
+    assert "worker-ref:../escape" not in serialized
+    assert "Alice" not in serialized
+    assert "secret.mp4" not in serialized
+
+
 def test_worker_queue_process_one_accepts_worker_ref_without_paths(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

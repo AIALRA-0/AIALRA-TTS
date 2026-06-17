@@ -367,6 +367,28 @@ def test_worker_heartbeat_redacts_message_and_media_ref_names(tmp_path):
     assert updated["max_concurrent_jobs"] == 3
 
 
+def test_worker_heartbeat_rejects_unsafe_media_ref_ids(tmp_path):
+    store = PlatformStore(make_config(tmp_path))
+    store.bootstrap()
+    win_path_ref = "C:" + "\\Users\\Alice\\Desktop\\lecture.mp4"
+
+    row = store.record_worker_heartbeat(
+        {
+            "status": "online",
+            "worker_id": "worker-1",
+            "media_refs": [
+                {"ref_id": "valid_ref-1.2", "name": "lecture.mp4", "size": 10, "media_type": "video/mp4"},
+                {"ref_id": win_path_ref, "name": "path.mp4", "size": 10, "media_type": "video/mp4"},
+                {"ref_id": "../escape", "name": "escape.mp4", "size": 10, "media_type": "video/mp4"},
+                {"ref_id": "bad ref", "name": "space.mp4", "size": 10, "media_type": "video/mp4"},
+            ],
+        }
+    )
+
+    assert [item["ref_id"] for item in row["media_refs"]] == ["valid_ref-1.2"]
+    assert win_path_ref not in json.dumps(row, ensure_ascii=False)
+
+
 def test_worker_heartbeat_concurrency_defaults_and_clamps(tmp_path):
     store = PlatformStore(make_config(tmp_path))
     store.bootstrap()

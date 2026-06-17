@@ -774,9 +774,12 @@ def sanitize_worker_media_refs(value: Any) -> list[dict[str, Any]]:
     for item in value[:1000]:
         if not isinstance(item, dict) or not item.get("ref_id"):
             continue
+        ref_id = safe_worker_ref_id(item.get("ref_id"))
+        if not ref_id:
+            continue
         rows.append(
             {
-                "ref_id": str(item.get("ref_id") or "")[:80],
+                "ref_id": ref_id,
                 "name": safe_worker_media_name(item.get("name") or "worker-media"),
                 "size": int(max(0, coerce_float(item.get("size")))),
                 "mtime": max(0, coerce_float(item.get("mtime"))),
@@ -784,6 +787,11 @@ def sanitize_worker_media_refs(value: Any) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+def safe_worker_ref_id(value: Any) -> str:
+    text = str(value or "").strip()[:80]
+    return text if re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", text) else ""
 
 
 def safe_worker_media_name(value: Any) -> str:
