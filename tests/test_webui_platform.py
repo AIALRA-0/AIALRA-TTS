@@ -207,6 +207,53 @@ def test_upload_disabled_by_default_for_worker_queue(tmp_path):
     assert "Windows worker" in response.text
 
 
+def test_artifact_download_urls_are_user_scoped(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    app = create_app(config_path)
+    state = app.state.web
+    state.store.create_user("student.one", "long-enough-password")
+    state.store.create_user("student.two", "another-long-password")
+
+    output = Path(state.config["output_dir"])
+    one_video = output / "one_zh_dub.mp4"
+    one_report = output / "one_report.json"
+    two_video = output / "two_zh_dub.mp4"
+    two_report = output / "two_report.json"
+    one_video.write_bytes(b"student one mp4")
+    two_video.write_bytes(b"student two mp4")
+    one_report.write_text(
+        json.dumps({"name": "one", "user": "student.one", "outputs": {"zh_dub_mp4": str(one_video)}}),
+        encoding="utf-8",
+    )
+    two_report.write_text(
+        json.dumps({"name": "two", "user": "student.two", "outputs": {"zh_dub_mp4": str(two_video)}}),
+        encoding="utf-8",
+    )
+
+    student_one = TestClient(app)
+    response = student_one.post("/api/login", json={"username": "student.one", "password": "long-enough-password"})
+    assert response.status_code == 200
+    artifacts = student_one.get("/api/artifacts").json()["artifacts"]
+    names = {item["name"] for item in artifacts}
+    assert "one_zh_dub.mp4" in names
+    assert "two_zh_dub.mp4" not in names
+    download_url = next(item["download_url"] for item in artifacts if item["name"] == "one_zh_dub.mp4")
+
+    anonymous = TestClient(app)
+    response = anonymous.get(download_url)
+    assert response.status_code == 200
+    assert response.content == b"student one mp4"
+
+    student_two = TestClient(app)
+    response = student_two.post("/api/login", json={"username": "student.two", "password": "another-long-password"})
+    assert response.status_code == 200
+    response = student_two.get(download_url)
+    assert response.status_code == 401
+    assert "Invalid signed URL" in response.text
+
+
 def test_worker_queue_submit_reports_waiting_worker(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
