@@ -222,6 +222,7 @@ python -m ecse_localizer repair-fidelity --report "<VIDEO_ROOT>\_localizer_outpu
 python -m ecse_localizer translation-sample --output ".\runs\translation_quality_sample"
 python -m ecse_localizer remote-smoke --output ".\runs\remote_smoke"
 python -m ecse_localizer platform-check --output ".\runs\platform_check"
+python -m ecse_localizer progress-checklist --output ".\runs\progress_checklist"
 python -m ecse_localizer tts-health
 python -m ecse_localizer worker-status
 python -m ecse_localizer worker-health --skip-remote
