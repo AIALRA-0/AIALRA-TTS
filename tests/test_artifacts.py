@@ -219,9 +219,29 @@ def test_delete_preview_manifest_record_removes_thumbnail(tmp_path):
     preview_dir.mkdir()
     preview = preview_dir / "demo_preview.mp4"
     thumbnail = preview_dir / "demo_thumb.jpg"
+    other = preview_dir / "other_preview.mp4"
     preview.write_bytes(b"small mp4")
     thumbnail.write_bytes(b"jpg")
+    other.write_bytes(b"other")
+    manifest = preview_dir / "preview_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "previews": [
+                    {
+                        "id": "preview-1",
+                        "name": "demo",
+                        "preview_path": str(preview),
+                        "thumbnail_path": str(thumbnail),
+                    },
+                    {"id": "preview-2", "name": "other", "preview_path": str(other)},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
     row = {
+        "id": "preview-1",
         "remote_preview": True,
         "path": str(preview),
         "thumbnail_path": str(thumbnail),
@@ -232,6 +252,10 @@ def test_delete_preview_manifest_record_removes_thumbnail(tmp_path):
     assert result["bytes"] == len(b"small mp4") + len(b"jpg")
     assert not preview.exists()
     assert not thumbnail.exists()
+    assert result["manifest"]["removed"] == 1
+    saved = json.loads(manifest.read_text(encoding="utf-8"))
+    assert [item["id"] for item in saved["previews"]] == ["preview-2"]
+    assert other.exists()
 
 
 def test_safe_delete_stays_inside_managed_roots(tmp_path):

@@ -337,7 +337,8 @@ def safe_delete_artifact_record(row: dict[str, Any], config: dict[str, Any]) -> 
                 deleted.append(safe_delete_artifact(path, config))
             except ValueError as exc:
                 deleted.append({"deleted": False, "path": str(path), "error": str(exc)})
-        return {"items": deleted, "bytes": sum(int(item.get("bytes", 0) or 0) for item in deleted)}
+        manifest = prune_preview_manifest_record(config, row)
+        return {"items": deleted, "bytes": sum(int(item.get("bytes", 0) or 0) for item in deleted), "manifest": manifest}
     if row.get("kind") != "report_bundle":
         return {"items": [safe_delete_artifact(row["path"], config)]}
     report_path = Path(str(row.get("report") or row.get("path")))
@@ -362,6 +363,62 @@ def safe_delete_artifact_record(row: dict[str, Any], config: dict[str, Any]) -> 
         except ValueError as exc:
             deleted.append({"deleted": False, "path": str(path), "error": str(exc)})
     return {"items": deleted, "bytes": sum(int(item.get("bytes", 0) or 0) for item in deleted)}
+
+
+def prune_preview_manifest_record(config: dict[str, Any], deleted_row: dict[str, Any]) -> dict[str, Any]:
+    manifest_path = preview_manifest_path(config)
+    if not manifest_path.exists():
+        return {"removed": 0, "manifest": str(manifest_path)}
+    try:
+        data = read_json(manifest_path)
+    except Exception as exc:
+        return {"removed": 0, "manifest": str(manifest_path), "error": str(exc)}
+    raw_rows = data.get("previews", data) if isinstance(data, dict) else data
+    if not isinstance(raw_rows, list):
+        return {"removed": 0, "manifest": str(manifest_path)}
+
+    target_ids, target_paths = preview_manifest_match_keys(deleted_row)
+    kept: list[dict[str, Any]] = []
+    removed = 0
+    for raw in raw_rows:
+        if isinstance(raw, dict) and preview_manifest_row_matches(raw, target_ids=target_ids, target_paths=target_paths):
+            removed += 1
+            continue
+        if isinstance(raw, dict):
+            kept.append(raw)
+    if removed:
+        if isinstance(data, dict):
+            updated = dict(data)
+            updated["previews"] = kept
+            write_json(manifest_path, updated)
+        else:
+            write_json(manifest_path, kept)
+    return {"removed": removed, "manifest": str(manifest_path)}
+
+
+def preview_manifest_match_keys(row: dict[str, Any]) -> tuple[set[str], set[str]]:
+    ids = {str(row.get("id") or "").strip()} - {""}
+    paths: set[str] = set()
+    for key in ["path", "preview_path", "thumbnail_path"]:
+        value = row.get(key)
+        if value:
+            paths.add(normalized_manifest_path(value))
+    return ids, paths
+
+
+def preview_manifest_row_matches(row: dict[str, Any], *, target_ids: set[str], target_paths: set[str]) -> bool:
+    row_id = str(row.get("id") or "").strip()
+    if row_id and row_id in target_ids:
+        return True
+    _, row_paths = preview_manifest_match_keys(row)
+    return bool(row_paths & target_paths)
+
+
+def normalized_manifest_path(value: Any) -> str:
+    try:
+        return str(Path(str(value)).resolve()).lower()
+    except OSError:
+        return str(value).strip().lower()
 
 
 def cleanup_expired_files(config: dict[str, Any], *, older_than_days: int = 7, dry_run: bool = True) -> dict[str, Any]:

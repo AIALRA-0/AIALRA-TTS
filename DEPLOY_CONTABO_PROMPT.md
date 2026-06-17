@@ -156,7 +156,7 @@ Deployment steps:
    - preview thumbnails use signed `variant=thumbnail` URLs
    - worker preview uploads reject unsigned bodies, reject disallowed suffixes, and return HTTP 413 when the remote quota would be exceeded
    - worker full-output refs expose no Windows path, show a request-cache action before download, and cached full files obey `webui.worker_artifact_cache_max_upload_mb` plus `remote_quota_bytes`
-   - artifact deletion refuses paths outside managed output/run/upload/preview roots
+   - artifact deletion refuses paths outside managed output/run/upload/preview roots and prunes matching preview/cache manifest rows
 
 Do not push `.env`, production config, logs, media, model weights, IP addresses, server hostnames, or credentials back to GitHub.
 
