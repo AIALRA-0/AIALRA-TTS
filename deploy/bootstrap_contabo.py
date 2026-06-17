@@ -16,6 +16,7 @@ ENV_KEYS = {
     "WEBUI_ADMIN_USERNAME",
     "WEBUI_ADMIN_PASSWORD",
     "REMOTE_PUBLIC_BASE_URL",
+    "REMOTE_PUBLIC_HOST",
     "WORKER_TUNNEL_MODE",
     "WORKER_SHARED_TOKEN",
 }
@@ -91,6 +92,8 @@ def build_env_text(
     admin_password: str | None = None,
     port: str = "7861",
 ) -> str:
+    public_base_url = public_base_url.rstrip("/")
+    public_host = public_host_from_url(public_base_url)
     values = {
         "APP_ENV": "remote",
         "WEBUI_HOST": "0.0.0.0",
@@ -99,7 +102,8 @@ def build_env_text(
         "WEBUI_DOWNLOAD_SECRET": random_secret(),
         "WEBUI_ADMIN_USERNAME": admin_username,
         "WEBUI_ADMIN_PASSWORD": admin_password or random_secret(24),
-        "REMOTE_PUBLIC_BASE_URL": public_base_url.rstrip("/"),
+        "REMOTE_PUBLIC_BASE_URL": public_base_url,
+        "REMOTE_PUBLIC_HOST": public_host,
         "WORKER_TUNNEL_MODE": "reverse-tunnel",
         "WORKER_SHARED_TOKEN": random_secret(),
     }
@@ -116,6 +120,7 @@ def build_env_text(
         "WEBUI_ADMIN_USERNAME",
         "WEBUI_ADMIN_PASSWORD",
         "REMOTE_PUBLIC_BASE_URL",
+        "REMOTE_PUBLIC_HOST",
         "WORKER_TUNNEL_MODE",
         "WORKER_SHARED_TOKEN",
     ]:
@@ -160,6 +165,13 @@ def validate_public_base_url(value: str, *, allow_http: bool = False) -> None:
     if parsed.scheme not in allowed or not parsed.netloc:
         expected = "https://your-domain.example" if not allow_http else "https://your-domain.example or http://private-host"
         raise ValueError(f"--public-base-url must look like {expected}")
+
+
+def public_host_from_url(value: str) -> str:
+    parsed = urlparse(value)
+    if not parsed.netloc:
+        raise ValueError("--public-base-url must include a host")
+    return parsed.netloc
 
 
 if __name__ == "__main__":

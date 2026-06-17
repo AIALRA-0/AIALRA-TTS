@@ -32,6 +32,7 @@ def test_bootstrap_contabo_generates_env_and_remote_config(tmp_path):
     assert values["WEBUI_HOST"] == "0.0.0.0"
     assert values["WEBUI_ADMIN_USERNAME"] == "owner"
     assert values["REMOTE_PUBLIC_BASE_URL"] == "https://localizer.example.com"
+    assert values["REMOTE_PUBLIC_HOST"] == "localizer.example.com"
     assert values["WEBUI_SESSION_SECRET"].startswith("change-me") is False
     assert values["WEBUI_DOWNLOAD_SECRET"].startswith("change-me") is False
     assert values["WORKER_SHARED_TOKEN"].startswith("change-me") is False

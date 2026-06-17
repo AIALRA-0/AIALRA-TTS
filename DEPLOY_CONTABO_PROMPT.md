@@ -49,6 +49,8 @@ Deployment steps:
    ```
    Treat any `ERROR` as a hard stop. The check validates placeholder secrets, worker HMAC/nonce enforcement, remote media upload policy, privacy flags, signed URL TTL, remote quota bounds, private IPs, and Windows path leakage without printing secret values.
 6. Run the web service behind Caddy or Nginx with HTTPS.
+   - Use `deploy/Caddyfile.example` for Caddy; it reads `REMOTE_PUBLIC_HOST` from `.env`.
+   - Use `deploy/nginx.conf.example` for Nginx; replace `localizer.example.invalid` on the server only.
 7. Restrict upload size at reverse proxy and application level.
 8. Configure persistent volumes only for:
    - metadata database or JSON store
@@ -160,6 +162,7 @@ The repository includes:
 - `deploy/docker-compose.yml`
 - `deploy/Dockerfile.web`
 - `deploy/Caddyfile.example`
+- `deploy/nginx.conf.example`
 - `deploy/config.remote.example.yaml`
 - `deploy/bootstrap_contabo.py`
 - `deploy/systemd/aialra-web.service`

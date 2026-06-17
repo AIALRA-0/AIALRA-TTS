@@ -134,6 +134,7 @@ Contabo deployment templates live in `deploy/`:
 - `deploy/docker-compose.yml`
 - `deploy/Dockerfile.web`
 - `deploy/Caddyfile.example`
+- `deploy/nginx.conf.example`
 - `deploy/config.remote.example.yaml`
 - `deploy/bootstrap_contabo.py`
 - `deploy/REMOTE_TUNNEL_GUIDE.md`

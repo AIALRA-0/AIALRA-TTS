@@ -18,6 +18,7 @@ REQUIRED_FILES = [
     "deploy/docker-compose.yml",
     "deploy/Dockerfile.web",
     "deploy/Caddyfile.example",
+    "deploy/nginx.conf.example",
     "deploy/bootstrap_contabo.py",
     ".env.example",
     "licenses_report.md",
