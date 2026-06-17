@@ -1,6 +1,18 @@
 {$REMOTE_PUBLIC_HOST} {
-  encode zstd gzip
-  reverse_proxy 127.0.0.1:7861
+  @notEvents {
+    not path /api/events
+  }
+  encode @notEvents zstd gzip
+
+  handle /api/events {
+    reverse_proxy 127.0.0.1:7861 {
+      flush_interval -1
+    }
+  }
+
+  handle {
+    reverse_proxy 127.0.0.1:7861
+  }
 
   request_body {
     max_size 1024MB

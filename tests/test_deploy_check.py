@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from ecse_localizer.cli import main
 from ecse_localizer.deploy_check import check_deploy_config
@@ -56,6 +57,22 @@ def test_deploy_check_accepts_hardened_remote_config():
 
     assert result["pass"] is True
     assert result["errors"] == 0
+
+
+def test_reverse_proxy_examples_keep_sse_unbuffered():
+    root = Path(__file__).parents[1]
+    nginx = (root / "deploy" / "nginx.conf.example").read_text(encoding="utf-8")
+    caddy = (root / "deploy" / "Caddyfile.example").read_text(encoding="utf-8")
+    prompt = (root / "DEPLOY_CONTABO_PROMPT.md").read_text(encoding="utf-8")
+
+    assert "location /api/events" in nginx
+    assert "proxy_buffering off;" in nginx
+    assert "proxy_cache off;" in nginx
+    assert 'add_header X-Accel-Buffering "no" always;' in nginx
+    assert "handle /api/events" in caddy
+    assert "flush_interval -1" in caddy
+    assert "encode @notEvents zstd gzip" in caddy
+    assert "dedicated `/api/events` reverse-proxy rule" in prompt
 
 
 def test_deploy_check_rejects_placeholders_and_unsafe_remote_mode():

@@ -54,6 +54,7 @@ Deployment steps:
 6. Run the web service behind Caddy or Nginx with HTTPS.
    - Use `deploy/Caddyfile.example` for Caddy; it reads `REMOTE_PUBLIC_HOST` from `.env`.
    - Use `deploy/nginx.conf.example` for Nginx; replace `localizer.example.invalid` on the server only.
+   - Keep the dedicated `/api/events` reverse-proxy rule. It disables buffering/caching for authenticated Server-Sent Events so job, worker, queue, quota, GPU/CPU, and disk metrics update live instead of waiting for proxy buffers.
 7. Restrict upload size at reverse proxy and application level.
 8. Configure persistent volumes only for:
    - metadata database or JSON store
@@ -141,6 +142,7 @@ Deployment steps:
    - replaying the same signed worker request with the same nonce is rejected, including after a WebUI restart within the configured timestamp window
    - job submission while the worker is offline shows a queued/waiting state and records the worker status at submit time
    - GPU/CPU metrics update
+   - `/api/events` streams authenticated live status updates through the public reverse proxy; if the stream is stopped, the browser UI must fall back to polling without losing task visibility
    - dashboard metrics in `worker_queue` mode come from the Windows worker heartbeat and contain no Windows path fields
    - remote job records contain only redacted worker log tails and command summaries
    - worker heartbeat messages and worker media options expose no Windows usernames or source paths
