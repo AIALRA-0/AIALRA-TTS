@@ -613,8 +613,22 @@ def run_coherence_pass(
         rows = data.get("segments", [])
         by_id = {int(row.get("id")): row for row in rows if str(row.get("id", "")).isdigit()}
         for sid, row in by_id.items():
+            source_item = next((item for item in protected if int(item.get("id", -1)) == sid), {})
             zh = str(row.get("zh_lecture", "")).strip()
             if not is_usable_zh(zh) or is_forbidden_non_translation(zh):
+                continue
+            current = rewrite_by_id.get(sid, {})
+            rejection_flags = coherence_rejection_flags(
+                str(source_item.get("text", "")),
+                str(current.get("zh_lecture", "")),
+                zh,
+                config,
+            )
+            if rejection_flags:
+                kept = dict(current)
+                kept["id"] = sid
+                kept["flags"] = sanitize_flags(kept.get("flags", [])) + rejection_flags
+                rewrite_by_id[sid] = kept
                 continue
             merged = dict(rewrite_by_id.get(sid, {}))
             merged["id"] = sid
@@ -626,6 +640,29 @@ def run_coherence_pass(
         if logger:
             logger.warning("Coherence pass failed; keeping first rewrite: %s", exc)
         return rewrite_by_id
+
+
+def coherence_rejection_flags(source_text: str, previous_zh: str, candidate_zh: str, config: dict) -> list[str]:
+    flags: list[str] = []
+    source_placeholders = placeholder_tokens(source_text)
+    if source_placeholders:
+        previous_placeholders = placeholder_tokens(previous_zh)
+        candidate_placeholders = placeholder_tokens(candidate_zh)
+        dropped = sorted(source_placeholders - candidate_placeholders)
+        if dropped and source_placeholders.issubset(previous_placeholders):
+            flags.append("COHERENCE_REJECTED_FIDELITY_GUARD")
+            flags.append("COHERENCE_DROPPED_PROTECTED_PLACEHOLDER:" + ",".join(dropped[:6]))
+    previous_quality = set(assess_translation_quality(source_text, previous_zh, previous_zh, config))
+    candidate_quality = set(assess_translation_quality(source_text, candidate_zh, previous_zh, config))
+    high_candidate = candidate_quality & {"SUMMARY_STYLE_TRANSLATION", "REVIEW_COMMENTARY_LEAK"}
+    if high_candidate and not (previous_quality & high_candidate):
+        flags.append("COHERENCE_REJECTED_QUALITY_GUARD")
+        flags.extend(sorted("COHERENCE_INTRODUCED_" + flag for flag in high_candidate))
+    return flags
+
+
+def placeholder_tokens(text: str) -> set[str]:
+    return set(re.findall(r"<KEEP_\d{3}>", text or ""))
 
 
 def restore_and_repair_protected_terms(text: str, mapping: dict[str, str], source: str) -> str:

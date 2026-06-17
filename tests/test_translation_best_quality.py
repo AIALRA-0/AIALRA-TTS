@@ -140,6 +140,40 @@ def test_llm_chunk_flags_missing_protected_terms():
     assert "https://example.com" in missing_flags[0]
 
 
+def test_coherence_pass_cannot_drop_protected_placeholders():
+    config = {"translation": {"max_zh_chars_per_second": 80, "max_zh_chars_per_subtitle_line": 80}}
+    segments = [
+        Segment(
+            1,
+            0.0,
+            2.0,
+            "Use Vout = Vin * R2 / (R1 + R2) before running sensor_readout.py.",
+        )
+    ]
+    fake = FakeCoherenceDropsProtectedClient()
+
+    results = request_llm_chunk(
+        segments,
+        0,
+        segments,
+        "",
+        config,
+        fake,
+        "literal",
+        "rewrite",
+        "style",
+        "coherence",
+        {},
+    )
+
+    _, literal, zh, flags, _ = results[0]
+    assert "Vout=Vin*R2/(R1+R2)" in literal
+    assert "Vout=Vin*R2/(R1+R2)" in zh
+    assert "sensor_readout.py" in zh
+    assert "COHERENCE_REJECTED_FIDELITY_GUARD" in flags
+    assert not any(flag.startswith("MISSING_PROTECTED_TERM") for flag in flags)
+
+
 class FakeLLMClient:
     model = "qwen2.5:14b-instruct"
 
@@ -153,3 +187,17 @@ class FakeLLMClient:
         if "zh_literal" in schema:
             return {"segments": [{"id": sid, "zh_literal": f"忠实翻译{sid}", "flags": []} for sid in ids]}
         return {"segments": [{"id": sid, "zh_lecture": f"自然讲解{sid}", "flags": []} for sid in ids]}
+
+
+class FakeCoherenceDropsProtectedClient:
+    model = "qwen2.5:14b-instruct"
+
+    def json_chat(self, _system, user, schema):
+        payload = json.loads(user)
+        segment = payload["segments"][0]
+        sid = int(segment["id"])
+        if "zh_literal" in schema:
+            return {"segments": [{"id": sid, "zh_literal": "先使用<KEEP_001>，再运行<KEEP_002>。", "flags": []}]}
+        if "更连贯自然" in schema:
+            return {"segments": [{"id": sid, "zh_lecture": "先使用分压器公式，再运行脚本。", "flags": ["COHERENCE_REWRITE"]}]}
+        return {"segments": [{"id": sid, "zh_lecture": "先使用<KEEP_001>，再运行<KEEP_002>。", "flags": []}]}
