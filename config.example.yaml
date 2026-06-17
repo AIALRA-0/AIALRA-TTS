@@ -172,6 +172,9 @@ webui:
   worker_token: "change-me-generate-a-long-random-token"
   worker_auth_mode: "hmac_or_token"
   worker_signature_max_skew_seconds: 300
+  worker_requeue_stale_jobs: true
+  worker_job_heartbeat_timeout_seconds: 300
+  worker_job_max_auto_retries: 2
   download_secret: "change-me-generate-a-long-random-download-secret"
   signed_url_ttl_seconds: 900
   cleanup_older_than_days: 7

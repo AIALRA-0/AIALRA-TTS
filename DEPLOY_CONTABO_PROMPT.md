@@ -53,6 +53,7 @@ Deployment steps:
    - set `webui.worker_auth_mode: "hmac"` and require `X-Worker-Timestamp` + `X-Worker-Signature` for worker heartbeat/API
    - treat `WORKER_SHARED_TOKEN` as an HMAC secret; do not send it as a plaintext production header
    - mark worker offline after missed heartbeats
+   - enable stale worker-job recovery with `webui.worker_requeue_stale_jobs=true`, choose a conservative `webui.worker_job_heartbeat_timeout_seconds`, and cap retries with `webui.worker_job_max_auto_retries`
    - on Windows, run:
      ```powershell
      .\06_worker_heartbeat.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN" -Loop
@@ -64,6 +65,7 @@ Deployment steps:
    - queued job metadata for source language, target subtitle language, TTS language, quality mode, and style is applied on the Windows worker through a generated local job config under `runs/worker_job_configs`.
    - if the Windows worker heartbeat is missing or stale, new jobs must stay `queued` and the UI must show that they are waiting for the local worker, not that GPU processing has already started.
    - during long jobs, the worker posts `running` status updates with best-effort progress, GPU/CPU/disk metrics, and a short log tail; do not require Contabo to read Windows log files directly.
+   - if a claimed/running worker job becomes stale, the WebUI should move it to `retrying` so the restored Windows worker can claim it again; after the configured retry cap, it should become `failed`.
    - after successful jobs, the worker may upload a low-bitrate MP4 preview and JPG thumbnail to `/api/worker/jobs/{job_id}/preview`; this endpoint must require HMAC signatures, enforce `webui.worker_preview_max_upload_mb`, count files against `remote_quota_bytes`, and never store Windows source paths in the manifest.
    - after successful jobs, the worker registers opaque full-output artifact refs; users request full downloads by queuing an `upload_artifact_cache` worker action, and the worker uploads only that selected file to `/api/worker/jobs/{job_id}/artifact-cache` as temporary remote cache.
    - or install the scheduled task:
@@ -91,6 +93,7 @@ Deployment steps:
    - worker offline status appears when the tunnel is stopped
    - users cannot see each other's jobs
    - jobs move through `queued/claimed/running/retrying/done/failed/cancelled/deleted`
+   - stale `claimed/running` worker jobs are automatically requeued up to the configured cap, then marked failed
    - older JSON job records without the current schema are normalized on read and remain visible/retryable when their state allows it
    - running jobs refresh progress/log-tail summaries without exposing local Windows paths or full logs
    - failed jobs can be retried without rewriting the base config

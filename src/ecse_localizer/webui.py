@@ -1114,6 +1114,7 @@ def worker_hmac_signature(worker_token: str, *, timestamp: str, method: str, pat
 
 def claim_worker_job(state: WebState, worker_id: str) -> dict[str, Any] | None:
     with state.lock:
+        requeue_stale_worker_jobs_locked(state)
         for path in sorted(state.job_dir.glob("*.json"), key=lambda p: p.stat().st_mtime):
             try:
                 record = normalize_job_record(state, read_json(path), path=path, persist=True)
@@ -1134,6 +1135,67 @@ def claim_worker_job(state: WebState, worker_id: str) -> dict[str, Any] | None:
             write_json(path, record)
             return record
     return None
+
+
+def requeue_stale_worker_jobs(state: WebState) -> list[dict[str, Any]]:
+    with state.lock:
+        return requeue_stale_worker_jobs_locked(state)
+
+
+def requeue_stale_worker_jobs_locked(state: WebState) -> list[dict[str, Any]]:
+    webui = state.webui
+    if not bool(webui.get("worker_requeue_stale_jobs", True)):
+        return []
+    timeout_seconds = max(30, int(webui.get("worker_job_heartbeat_timeout_seconds", 300) or 300))
+    max_auto_retries = max(0, int(webui.get("worker_job_max_auto_retries", 2) or 0))
+    now_epoch = time.time()
+    changed: list[dict[str, Any]] = []
+    for path in sorted(state.job_dir.glob("*.json"), key=lambda p: p.stat().st_mtime):
+        try:
+            record = normalize_job_record(state, read_json(path), path=path, persist=False)
+        except Exception:
+            continue
+        if record.get("dispatch_target") != "worker":
+            continue
+        status = str(record.get("status") or "")
+        if status not in {"claimed", "running"}:
+            continue
+        age_seconds = int(now_epoch - path.stat().st_mtime)
+        if age_seconds < timeout_seconds:
+            continue
+        retry_count = int(record.get("retry_count") or 0)
+        previous_status = status
+        reason = f"Worker job stale for {age_seconds}s without status update"
+        if retry_count < max_auto_retries:
+            record.update(
+                {
+                    "status": "retrying",
+                    "retry_count": retry_count + 1,
+                    "previous_status": previous_status,
+                    "last_claimed_by": record.get("claimed_by"),
+                    "claimed_by": None,
+                    "claimed_at": None,
+                    "pid": None,
+                    "worker_requeue_reason": reason,
+                    "worker_requeued_at": iso_now(),
+                    "updated_at": iso_now(),
+                }
+            )
+        else:
+            record.update(
+                {
+                    "status": "failed",
+                    "previous_status": previous_status,
+                    "ended_at": iso_now(),
+                    "returncode": -2,
+                    "error": f"{reason}; max auto retries reached",
+                    "updated_at": iso_now(),
+                }
+            )
+        record = normalize_job_record(state, record, path=path, persist=False)
+        write_json(path, record)
+        changed.append(record)
+    return changed
 
 
 def worker_status_changes(body: dict[str, Any]) -> dict[str, Any]:
@@ -1705,6 +1767,8 @@ def update_job(state: WebState, job_id: str, changes: dict[str, Any]) -> None:
 
 
 def list_jobs(state: WebState, user: str | None = None, *, include_deleted: bool = False) -> list[dict[str, Any]]:
+    if str(state.webui.get("execution_mode", "")) == "worker_queue":
+        requeue_stale_worker_jobs(state)
     records = []
     for path in sorted(state.job_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:

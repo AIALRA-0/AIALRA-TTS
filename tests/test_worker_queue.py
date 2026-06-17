@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from types import SimpleNamespace
 from pathlib import Path
@@ -19,6 +20,7 @@ from ecse_localizer.webui import (
     list_jobs,
     require_worker_token,
     read_job,
+    requeue_stale_worker_jobs,
     retry_job_record,
     save_worker_artifact_cache_upload,
     save_worker_preview_upload,
@@ -392,6 +394,76 @@ def test_retry_worker_job_requeues_failed_record(tmp_path):
     assert claimed["status"] == "claimed"
 
 
+def test_stale_claimed_worker_job_is_requeued_and_claimable(tmp_path):
+    state = WebState(write_config(tmp_path))
+    state.webui["worker_job_heartbeat_timeout_seconds"] = 30
+    record = create_job_record(
+        state,
+        "audit",
+        "Audit input directory",
+        ["python", "-m", "ecse_localizer", "--config", "remote.yaml", "audit", "--input", "x"],
+        user="admin",
+        metadata={"worker_args": ["audit", "--input", "x"]},
+        dispatch_target="worker",
+    )
+    update_job(state, record["id"], {"status": "claimed", "claimed_by": "worker-dead"})
+    make_job_file_stale(state, record["id"], seconds=120)
+
+    changed = requeue_stale_worker_jobs(state)
+
+    assert changed[0]["id"] == record["id"]
+    assert changed[0]["status"] == "retrying"
+    assert changed[0]["retry_count"] == 1
+    assert changed[0]["last_claimed_by"] == "worker-dead"
+    assert changed[0]["claimed_by"] is None
+    claimed = claim_worker_job(state, "worker-new")
+    assert claimed["id"] == record["id"]
+    assert claimed["status"] == "claimed"
+    assert claimed["claimed_by"] == "worker-new"
+
+
+def test_fresh_running_worker_job_is_not_requeued(tmp_path):
+    state = WebState(write_config(tmp_path))
+    state.webui["worker_job_heartbeat_timeout_seconds"] = 300
+    record = create_job_record(
+        state,
+        "audit",
+        "Audit input directory",
+        ["python", "-m", "ecse_localizer", "--config", "remote.yaml", "audit", "--input", "x"],
+        user="admin",
+        metadata={"worker_args": ["audit", "--input", "x"]},
+        dispatch_target="worker",
+    )
+    update_job(state, record["id"], {"status": "running", "claimed_by": "worker-1", "retry_count": 0})
+
+    assert requeue_stale_worker_jobs(state) == []
+    assert read_job(state, record["id"])["status"] == "running"
+
+
+def test_stale_worker_job_fails_after_max_auto_retries(tmp_path):
+    state = WebState(write_config(tmp_path))
+    state.webui["worker_job_heartbeat_timeout_seconds"] = 30
+    state.webui["worker_job_max_auto_retries"] = 1
+    record = create_job_record(
+        state,
+        "audit",
+        "Audit input directory",
+        ["python", "-m", "ecse_localizer", "--config", "remote.yaml", "audit", "--input", "x"],
+        user="admin",
+        metadata={"worker_args": ["audit", "--input", "x"]},
+        dispatch_target="worker",
+    )
+    update_job(state, record["id"], {"status": "running", "claimed_by": "worker-1", "retry_count": 1})
+    make_job_file_stale(state, record["id"], seconds=120)
+
+    changed = requeue_stale_worker_jobs(state)
+
+    assert changed[0]["status"] == "failed"
+    assert changed[0]["returncode"] == -2
+    assert "max auto retries" in changed[0]["error"]
+    assert claim_worker_job(state, "worker-new") is None
+
+
 def test_worker_client_helpers_redact_local_config():
     job = {"metadata": {"worker_args": ["audit", "--input", "x"]}}
     assert worker_args(job) == ["audit", "--input", "x"]
@@ -404,6 +476,12 @@ def test_worker_client_helpers_redact_local_config():
         "audit",
     ]
     assert summarize_result({"pass": True, "report": r"C:\secret\demo_report.json"}) == {"pass": True, "report": "demo_report.json"}
+
+
+def make_job_file_stale(state: WebState, job_id: str, *, seconds: int) -> None:
+    path = state.job_dir / f"{job_id}.json"
+    old_epoch = time.time() - seconds
+    os.utime(path, (old_epoch, old_epoch))
 
 
 def test_preview_source_prefers_video_output(tmp_path):

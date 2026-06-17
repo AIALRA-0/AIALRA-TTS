@@ -98,6 +98,8 @@ Queued jobs carry only portable worker arguments plus non-secret job metadata su
 
 While a worker job is running, the Windows worker periodically reports a remote-safe status payload: `running`, `worker_id`, `pid`, best-effort `progress`, system metrics, and a log tail. Contabo stores only that summary; full logs stay on the Windows worker.
 
+If a worker-claimed job stops reporting status, the WebUI can recover it automatically. With `webui.worker_requeue_stale_jobs: true`, records stuck in `claimed` or `running` longer than `webui.worker_job_heartbeat_timeout_seconds` are moved to `retrying` and become claimable again; after `webui.worker_job_max_auto_retries`, the record is marked `failed` instead of looping forever.
+
 After a successful worker job, set `worker.upload_previews: true` to have the worker create and upload a preview cache item. The default preview is 854px wide at about 700k video bitrate and 96k AAC audio; adjust `worker.preview_max_width`, `worker.preview_video_bitrate`, `worker.preview_audio_bitrate`, and `worker.preview_max_seconds` to fit the remote storage quota.
 
 Full-output downloads in remote mode are request-based. The Windows worker keeps a local artifact registry under `runs/worker_artifacts/registry.json`, receives `upload_artifact_cache` jobs, and uploads only the requested file to `/api/worker/jobs/{job_id}/artifact-cache` using HMAC. Treat that remote cache as temporary storage, not the source of truth.
