@@ -66,6 +66,7 @@ Deployment steps:
    - login works
    - project creation works
    - project folders can be created and selected for jobs
+   - parameter templates can be listed, created, selected, and applied to queued worker jobs
    - user quota is enforced
    - project quota usage is visible for generated managed artifacts
    - worker heartbeat appears online

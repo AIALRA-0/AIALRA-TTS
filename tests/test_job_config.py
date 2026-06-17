@@ -35,6 +35,36 @@ def test_job_overrides_apply_language_style_and_quality():
     assert "worker_args" not in out["job"]["metadata"]
 
 
+def test_job_overrides_apply_template_runtime_params():
+    out = apply_job_overrides(
+        {"translation": {}, "tts": {}, "mux": {}},
+        {
+            "template_id": "tpl_1",
+            "tts_speed": 1.1,
+            "tts_emotion": "calm",
+            "tts_end_gap_seconds": 0.35,
+            "tts_min_audio_gap_seconds": 0.12,
+            "tts_speaker_gender": "female",
+            "mux_keep_original_audio": False,
+            "mux_original_audio_volume": 0.05,
+            "mux_hard_subtitle": False,
+            "mux_soft_subtitle": True,
+            "max_subtitle_line_chars": 24,
+        },
+    )
+    assert out["tts"]["speed"] == 1.1
+    assert out["tts"]["emotion"] == "calm"
+    assert out["tts"]["end_gap_seconds"] == 0.35
+    assert out["tts"]["min_audio_gap_seconds"] == 0.12
+    assert out["tts"]["speaker_gender"] == "female"
+    assert out["mux"]["keep_original_audio"] is False
+    assert out["mux"]["original_audio_volume"] == 0.05
+    assert out["mux"]["hard_subtitle"] is False
+    assert out["mux"]["soft_subtitle"] is True
+    assert out["translation"]["max_zh_chars_per_subtitle_line"] == 24
+    assert out["job"]["metadata"]["template_id"] == "tpl_1"
+
+
 def test_write_job_config_omits_runtime_project_root(tmp_path: Path):
     path = write_job_config({"project_root": "private", "asr": {"language": "en"}}, {"source_language": "auto"}, job_id="job:1", root=tmp_path)
     data = yaml.safe_load(path.read_text(encoding="utf-8"))

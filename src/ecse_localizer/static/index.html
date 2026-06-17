@@ -79,6 +79,14 @@
               <select id="jobFolder"></select>
             </label>
             <label>
+              参数模板
+              <select id="jobTemplate"></select>
+            </label>
+            <label>
+              保存模板名
+              <input id="templateName" placeholder="例如：中文高质量授课" />
+            </label>
+            <label>
               任务类型
               <select id="jobType">
                 <option value="audit">Audit 扫描</option>
@@ -130,12 +138,49 @@
               风格参数
               <input id="jobStyle" placeholder="自然中文授课、清晰、稍有情绪" />
             </label>
+            <label>
+              TTS 语速
+              <input id="jobTtsSpeed" type="number" min="0.8" max="1.2" step="0.05" value="1.0" />
+            </label>
+            <label>
+              TTS 情绪
+              <input id="jobTtsEmotion" value="clear_engaged_teaching" />
+            </label>
+            <label>
+              句尾留白秒数
+              <input id="jobEndGap" type="number" min="0" max="2" step="0.05" value="0.2" />
+            </label>
+            <label>
+              最小音频间隔
+              <input id="jobMinAudioGap" type="number" min="0" max="1" step="0.01" value="0.08" />
+            </label>
+            <label>
+              配音性别
+              <select id="jobSpeakerGender">
+                <option value="auto">auto</option>
+                <option value="female">female</option>
+                <option value="male">male</option>
+              </select>
+            </label>
+            <label>
+              字幕每行字数
+              <input id="jobMaxLineChars" type="number" min="12" max="42" value="22" />
+            </label>
             <label class="check-row">
               <input id="jobForce" type="checkbox" />
               <span>Force 重跑</span>
             </label>
+            <label class="check-row">
+              <input id="jobHardSubtitle" type="checkbox" checked />
+              <span>硬字幕</span>
+            </label>
+            <label class="check-row">
+              <input id="jobSoftSubtitle" type="checkbox" checked />
+              <span>软字幕</span>
+            </label>
             <div class="form-actions">
               <button type="submit">启动任务</button>
+              <button id="saveTemplateBtn" type="button" class="secondary">保存模板</button>
             </div>
           </form>
         </section>
@@ -292,6 +337,6 @@
     </div>
 
     <div id="toast" class="toast" hidden></div>
-    <script src="/assets/app.js?v=20260617-platform3"></script>
+    <script src="/assets/app.js?v=20260617-platform4"></script>
   </body>
 </html>

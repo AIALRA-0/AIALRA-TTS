@@ -30,6 +30,7 @@ def apply_job_overrides(config: dict[str, Any], metadata: dict[str, Any] | None)
         out.setdefault("translation", {})["quality_mode"] = quality_mode
     if style:
         out.setdefault("translation", {})["style"] = style
+    apply_optional_overrides(out, meta)
 
     out.setdefault("job", {})["metadata"] = {
         key: value
@@ -43,6 +44,17 @@ def apply_job_overrides(config: dict[str, Any], metadata: dict[str, Any] | None)
             "target_tts_language",
             "quality_mode",
             "style",
+            "template_id",
+            "tts_speed",
+            "tts_emotion",
+            "tts_end_gap_seconds",
+            "tts_min_audio_gap_seconds",
+            "tts_speaker_gender",
+            "mux_keep_original_audio",
+            "mux_original_audio_volume",
+            "mux_hard_subtitle",
+            "mux_soft_subtitle",
+            "max_subtitle_line_chars",
         }
     }
     return out
@@ -67,6 +79,50 @@ def write_job_config(
 def clean_value(value: Any) -> str:
     text = str(value or "").strip()
     return text
+
+
+def apply_optional_overrides(config: dict[str, Any], meta: dict[str, Any]) -> None:
+    set_float(config, ["tts", "speed"], meta.get("tts_speed"))
+    set_text(config, ["tts", "emotion"], meta.get("tts_emotion"))
+    set_float(config, ["tts", "end_gap_seconds"], meta.get("tts_end_gap_seconds"))
+    set_float(config, ["tts", "min_audio_gap_seconds"], meta.get("tts_min_audio_gap_seconds"))
+    set_text(config, ["tts", "speaker_gender"], meta.get("tts_speaker_gender"))
+    set_bool(config, ["mux", "keep_original_audio"], meta.get("mux_keep_original_audio"))
+    set_float(config, ["mux", "original_audio_volume"], meta.get("mux_original_audio_volume"))
+    set_bool(config, ["mux", "hard_subtitle"], meta.get("mux_hard_subtitle"))
+    set_bool(config, ["mux", "soft_subtitle"], meta.get("mux_soft_subtitle"))
+    line_chars = meta.get("max_subtitle_line_chars")
+    if line_chars not in {None, ""}:
+        config.setdefault("translation", {})["max_zh_chars_per_subtitle_line"] = int(max(12, min(42, float(line_chars))))
+
+
+def set_text(config: dict[str, Any], path: list[str], value: Any) -> None:
+    text = clean_value(value)
+    if text:
+        set_nested(config, path, text)
+
+
+def set_float(config: dict[str, Any], path: list[str], value: Any) -> None:
+    if value in {None, ""}:
+        return
+    set_nested(config, path, float(value))
+
+
+def set_bool(config: dict[str, Any], path: list[str], value: Any) -> None:
+    if value in {None, ""}:
+        return
+    if isinstance(value, bool):
+        parsed = value
+    else:
+        parsed = str(value).lower() in {"1", "true", "yes", "on"}
+    set_nested(config, path, parsed)
+
+
+def set_nested(config: dict[str, Any], path: list[str], value: Any) -> None:
+    cur = config
+    for key in path[:-1]:
+        cur = cur.setdefault(key, {})
+    cur[path[-1]] = value
 
 
 def safe_filename(value: str) -> str:

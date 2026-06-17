@@ -49,6 +49,7 @@ def test_create_invited_user(tmp_path):
     assert "password_hash" not in user
     assert store.verify_user("student.one", "long-enough-password")
     assert store.list_projects("student.one")[0]["name"] == "Default"
+    assert store.list_templates("student.one")[0]["name"] == "Best Quality Mandarin"
 
 
 def test_project_folder_create_and_validation(tmp_path):
@@ -63,3 +64,32 @@ def test_project_folder_create_and_validation(tmp_path):
     saved = next(item for item in projects if item["id"] == project["id"])
     assert saved["quota_project_bytes"] == 2 * 1024 * 1024 * 1024
     assert any(item["id"] == folder["id"] for item in saved["folders"])
+
+
+def test_parameter_templates_are_user_scoped_and_sanitized(tmp_path):
+    store = PlatformStore(make_config(tmp_path))
+    store.bootstrap()
+
+    default_template = store.list_templates("admin")[0]
+    assert default_template["params"]["quality_mode"] == "best_quality"
+
+    template = store.create_template(
+        "admin",
+        "Fast Cantonese",
+        {
+            "target_subtitle_language": "zh-HK",
+            "target_tts_language": "yue",
+            "quality_mode": "fast",
+            "tts_speed": "1.1",
+            "mux_hard_subtitle": "false",
+            "unknown_secret": "must-drop",
+        },
+    )
+    assert template["params"]["tts_speed"] == 1.1
+    assert template["params"]["mux_hard_subtitle"] is False
+    assert "unknown_secret" not in template["params"]
+    assert store.get_template("admin", template["id"])["name"] == "Fast Cantonese"
+
+    deleted = store.delete_template("admin", template["id"])
+    assert deleted["id"] == template["id"]
+    assert store.get_template("admin", template["id"]) is None

@@ -69,19 +69,45 @@ def test_webui_login_project_and_quota(tmp_path):
     folder = response.json()["folder"]
     assert folder["name"] == "Week 1"
 
+    response = client.get("/api/templates")
+    assert response.status_code == 200
+    assert response.json()["templates"]
+
+    response = client.post(
+        "/api/templates",
+        json={
+            "name": "Japanese Template",
+            "params": {
+                "source_language": "auto",
+                "target_subtitle_language": "ja",
+                "target_tts_language": "ja",
+                "quality_mode": "balanced",
+                "tts_speed": 1.1,
+                "mux_hard_subtitle": False,
+                "max_subtitle_line_chars": 18,
+            },
+        },
+    )
+    assert response.status_code == 200
+    template = response.json()["template"]
+
     response = client.post(
         "/api/jobs",
         json={
             "type": "audit",
             "project_id": project["id"],
             "folder_id": folder["id"],
-            "source_language": "auto",
-            "target_subtitle_language": "zh-CN",
-            "target_tts_language": "zh-CN",
+            "template_id": template["id"],
         },
     )
     assert response.status_code == 200
-    assert response.json()["job"]["metadata"]["folder_id"] == folder["id"]
+    metadata = response.json()["job"]["metadata"]
+    assert metadata["folder_id"] == folder["id"]
+    assert metadata["template_id"] == template["id"]
+    assert metadata["target_subtitle_language"] == "ja"
+    assert metadata["tts_speed"] == 1.1
+    assert metadata["mux_hard_subtitle"] is False
+    assert metadata["max_subtitle_line_chars"] == 18
 
     response = client.get("/api/quota")
     assert response.status_code == 200

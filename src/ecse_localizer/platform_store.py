@@ -15,6 +15,23 @@ from .utils import PROJECT_ROOT, ensure_dir, read_json, write_json
 
 PBKDF2_ROUNDS = 210_000
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{2,64}$")
+TEMPLATE_PARAM_KEYS = {
+    "source_language",
+    "target_subtitle_language",
+    "target_tts_language",
+    "quality_mode",
+    "style",
+    "tts_speed",
+    "tts_emotion",
+    "tts_end_gap_seconds",
+    "tts_min_audio_gap_seconds",
+    "tts_speaker_gender",
+    "mux_keep_original_audio",
+    "mux_original_audio_volume",
+    "mux_hard_subtitle",
+    "mux_soft_subtitle",
+    "max_subtitle_line_chars",
+}
 
 
 class PlatformStore:
@@ -31,6 +48,7 @@ class PlatformStore:
         self.root = ensure_dir(web.get("platform_dir") or PROJECT_ROOT / "runs" / "platform")
         self.users_path = self.root / "users.json"
         self.projects_path = self.root / "projects.json"
+        self.templates_path = self.root / "templates.json"
         self.worker_path = self.root / "worker_status.json"
 
     def bootstrap(self) -> None:
@@ -55,7 +73,9 @@ class PlatformStore:
             )
             self._save(self.users_path, users)
         for user in users.get("users", []):
-            self.ensure_default_project(str(user.get("username", "")))
+            username = str(user.get("username", ""))
+            self.ensure_default_project(username)
+            self.ensure_default_template(username)
 
     def verify_user(self, username: str, password: str) -> dict[str, Any] | None:
         user = self.get_user(username, include_hash=True)
@@ -104,6 +124,7 @@ class PlatformStore:
         users.setdefault("users", []).append(row)
         self._save(self.users_path, users)
         self.ensure_default_project(username)
+        self.ensure_default_template(username)
         return public_user(row)
 
     def list_projects(self, username: str, *, admin: bool = False) -> list[dict[str, Any]]:
@@ -176,6 +197,100 @@ class PlatformStore:
         folder = folder_id or "root"
         if not any(item.get("id") == folder for item in project.get("folders", [])):
             raise ValueError("Folder not found")
+
+    def list_templates(self, username: str, *, admin: bool = False) -> list[dict[str, Any]]:
+        self.ensure_default_template(username)
+        data = self._load(self.templates_path, {"templates": []})
+        rows = data.get("templates", [])
+        if admin:
+            return [dict(row) for row in rows]
+        return [dict(row) for row in rows if row.get("owner") == username or row.get("shared")]
+
+    def get_template(self, username: str, template_id: str, *, admin: bool = False) -> dict[str, Any] | None:
+        for row in self.list_templates(username, admin=admin):
+            if row.get("id") == template_id:
+                return row
+        return None
+
+    def create_template(
+        self,
+        username: str,
+        name: str,
+        params: dict[str, Any],
+        *,
+        description: str = "",
+        shared: bool = False,
+        admin: bool = False,
+    ) -> dict[str, Any]:
+        clean = clean_name(name, default="Untitled Template")
+        row = {
+            "id": f"tpl_{uuid.uuid4().hex[:12]}",
+            "owner": username,
+            "name": clean,
+            "description": description[:500],
+            "shared": bool(shared and admin),
+            "params": sanitize_template_params(params),
+            "created_at": iso_now(),
+            "updated_at": iso_now(),
+        }
+        data = self._load(self.templates_path, {"templates": []})
+        data.setdefault("templates", []).append(row)
+        self._save(self.templates_path, data)
+        return row
+
+    def delete_template(self, username: str, template_id: str, *, admin: bool = False) -> dict[str, Any]:
+        data = self._load(self.templates_path, {"templates": []})
+        kept = []
+        deleted: dict[str, Any] | None = None
+        for row in data.get("templates", []):
+            if row.get("id") == template_id:
+                if not admin and row.get("owner") != username:
+                    raise ValueError("Template not found")
+                deleted = row
+                continue
+            kept.append(row)
+        if not deleted:
+            raise ValueError("Template not found")
+        data["templates"] = kept
+        self._save(self.templates_path, data)
+        return deleted
+
+    def ensure_default_template(self, username: str) -> dict[str, Any] | None:
+        if not username:
+            return None
+        data = self._load(self.templates_path, {"templates": []})
+        for row in data.get("templates", []):
+            if row.get("owner") == username:
+                return row
+        row = {
+            "id": f"tpl_{uuid.uuid4().hex[:12]}",
+            "owner": username,
+            "name": "Best Quality Mandarin",
+            "description": "Default high-quality Chinese lecture localization settings.",
+            "shared": False,
+            "params": {
+                "source_language": "auto",
+                "target_subtitle_language": "zh-CN",
+                "target_tts_language": "zh-CN",
+                "quality_mode": "best_quality",
+                "style": "natural_chinese_lecture",
+                "tts_speed": 1.0,
+                "tts_emotion": "clear_engaged_teaching",
+                "tts_end_gap_seconds": 0.2,
+                "tts_min_audio_gap_seconds": 0.08,
+                "tts_speaker_gender": "auto",
+                "mux_keep_original_audio": False,
+                "mux_original_audio_volume": 0.08,
+                "mux_hard_subtitle": True,
+                "mux_soft_subtitle": True,
+                "max_subtitle_line_chars": 22,
+            },
+            "created_at": iso_now(),
+            "updated_at": iso_now(),
+        }
+        data.setdefault("templates", []).append(row)
+        self._save(self.templates_path, data)
+        return row
 
     def ensure_default_project(self, username: str) -> dict[str, Any] | None:
         if not username:
@@ -311,6 +426,36 @@ def safe_id(value: str) -> str:
 def clean_name(value: str, *, default: str) -> str:
     text = re.sub(r"[\x00-\x1f<>:\"/\\|?*]+", " ", value or "").strip()
     return re.sub(r"\s+", " ", text)[:120] or default
+
+
+def sanitize_template_params(params: dict[str, Any]) -> dict[str, Any]:
+    raw = params if isinstance(params, dict) else {}
+    out: dict[str, Any] = {}
+    for key, value in raw.items():
+        if key not in TEMPLATE_PARAM_KEYS:
+            continue
+        if key in {"tts_speed", "tts_end_gap_seconds", "tts_min_audio_gap_seconds", "mux_original_audio_volume"}:
+            out[key] = coerce_float(value)
+        elif key in {"mux_keep_original_audio", "mux_hard_subtitle", "mux_soft_subtitle"}:
+            out[key] = coerce_bool(value)
+        elif key == "max_subtitle_line_chars":
+            out[key] = int(max(12, min(42, coerce_float(value))))
+        else:
+            out[key] = str(value or "").strip()
+    return out
+
+
+def coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).lower() in {"1", "true", "yes", "on"}
+
+
+def coerce_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def gb_to_bytes(value: float) -> int:

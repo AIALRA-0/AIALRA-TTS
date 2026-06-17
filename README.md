@@ -41,9 +41,11 @@ Open:
 http://127.0.0.1:7861
 ```
 
-Set real credentials in local `config.yaml` or `.env`; never commit them. The WebUI supports uploads, task history, project/folder metadata, project quotas, common tuning parameters, logs, quota checks, local worker health/metrics, failed-job retry, and soft-deleting job records.
+Set real credentials in local `config.yaml` or `.env`; never commit them. The WebUI supports uploads, task history, project/folder metadata, project quotas, reusable parameter templates, common tuning parameters, logs, quota checks, local worker health/metrics, failed-job retry, and soft-deleting job records.
 
 Per-job language, quality, and style settings are written to generated job config files under `runs/`. The base `config.yaml` stays local and is not mutated by submitted jobs.
+
+Parameter templates store non-secret generation settings such as source language, target subtitle/TTS language, quality mode, teaching style, TTS speed/emotion, pause settings, subtitle length, and hard/soft subtitle preferences. Templates live under `runs/platform/` and are ignored by git.
 
 The WebUI also has a `产物` page for generated artifacts. It can list reports, subtitles, WAV/MP4 outputs, show local preview links for media, create short-lived signed download URLs, delete managed output files, and run cleanup dry-runs. Deletion is restricted to managed output, run, and upload directories; it refuses to touch the original video root.
 

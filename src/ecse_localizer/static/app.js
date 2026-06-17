@@ -5,6 +5,7 @@ const state = {
   projects: [],
   users: [],
   artifacts: [],
+  templates: [],
   selectedJob: null,
   jobTimer: null,
 };
@@ -126,6 +127,8 @@ function bindEvents() {
   $("projectForm").addEventListener("submit", createProject);
   $("folderForm").addEventListener("submit", createFolder);
   $("jobProject").addEventListener("change", renderFolderOptions);
+  $("jobTemplate").addEventListener("change", applySelectedTemplate);
+  $("saveTemplateBtn").addEventListener("click", saveCurrentTemplate);
   $("userForm").addEventListener("submit", createUser);
   $("refreshArtifactsBtn").addEventListener("click", loadArtifacts);
   $("cleanupDryRunBtn").addEventListener("click", cleanupDryRun);
@@ -150,7 +153,7 @@ function showTab(name) {
 }
 
 async function refreshAll() {
-  const results = await Promise.allSettled([loadDashboard(), loadVideos(), loadReports(), refreshJobs(), loadProjects(), loadUsers(), loadArtifacts(), loadTuning()]);
+  const results = await Promise.allSettled([loadDashboard(), loadVideos(), loadReports(), refreshJobs(), loadProjects(), loadUsers(), loadArtifacts(), loadTemplates(), loadTuning()]);
   const failed = results.filter((item) => item.status === "rejected");
   if (failed.length) {
     console.warn("Partial refresh failed:", failed.map((item) => item.reason));
@@ -229,6 +232,70 @@ async function loadProjects() {
   } catch (error) {
     console.warn("Project load failed:", error);
   }
+}
+
+async function loadTemplates() {
+  try {
+    const data = await api("/api/templates");
+    state.templates = data.templates || [];
+    renderTemplateOptions();
+  } catch (error) {
+    console.warn("Template load failed:", error);
+  }
+}
+
+function renderTemplateOptions() {
+  const select = $("jobTemplate");
+  if (!select) return;
+  const selected = select.value;
+  select.innerHTML = "";
+  for (const template of state.templates) {
+    const option = document.createElement("option");
+    option.value = template.id;
+    option.textContent = `${template.shared ? "[共享] " : ""}${template.name}`;
+    select.appendChild(option);
+  }
+  if (selected && state.templates.some((item) => item.id === selected)) {
+    select.value = selected;
+  }
+  if (!select.value && state.templates.length) {
+    select.value = state.templates[0].id;
+    applySelectedTemplate();
+  }
+}
+
+function applySelectedTemplate() {
+  const template = state.templates.find((item) => item.id === $("jobTemplate").value);
+  if (!template) return;
+  applyTemplateParams(template.params || {});
+}
+
+function applyTemplateParams(params) {
+  setValue("jobSourceLanguage", params.source_language);
+  setValue("jobSubtitleLanguage", params.target_subtitle_language);
+  setValue("jobTtsLanguage", params.target_tts_language);
+  setValue("jobQualityMode", params.quality_mode);
+  setValue("jobStyle", params.style);
+  setValue("jobTtsSpeed", params.tts_speed);
+  setValue("jobTtsEmotion", params.tts_emotion);
+  setValue("jobEndGap", params.tts_end_gap_seconds);
+  setValue("jobMinAudioGap", params.tts_min_audio_gap_seconds);
+  setValue("jobSpeakerGender", params.tts_speaker_gender);
+  setValue("jobMaxLineChars", params.max_subtitle_line_chars);
+  setChecked("jobHardSubtitle", params.mux_hard_subtitle);
+  setChecked("jobSoftSubtitle", params.mux_soft_subtitle);
+}
+
+function setValue(id, value) {
+  if (value === undefined || value === null || value === "") return;
+  const el = $(id);
+  if (el) el.value = value;
+}
+
+function setChecked(id, value) {
+  if (value === undefined || value === null || value === "") return;
+  const el = $(id);
+  if (el) el.checked = Boolean(value);
 }
 
 function renderProjectOptions() {
@@ -368,6 +435,44 @@ async function createUser(event) {
     await loadUsers();
   } catch (error) {
     toast(`创建用户失败：${error.message}`);
+  }
+}
+
+function currentTemplateParams() {
+  return {
+    source_language: $("jobSourceLanguage").value || "auto",
+    target_subtitle_language: $("jobSubtitleLanguage").value || "zh-CN",
+    target_tts_language: $("jobTtsLanguage").value || "zh-CN",
+    quality_mode: $("jobQualityMode").value || "best_quality",
+    style: $("jobStyle").value || "",
+    tts_speed: Number($("jobTtsSpeed").value || 1.0),
+    tts_emotion: $("jobTtsEmotion").value || "clear_engaged_teaching",
+    tts_end_gap_seconds: Number($("jobEndGap").value || 0.2),
+    tts_min_audio_gap_seconds: Number($("jobMinAudioGap").value || 0.08),
+    tts_speaker_gender: $("jobSpeakerGender").value || "auto",
+    mux_keep_original_audio: false,
+    mux_original_audio_volume: 0.08,
+    mux_hard_subtitle: $("jobHardSubtitle").checked,
+    mux_soft_subtitle: $("jobSoftSubtitle").checked,
+    max_subtitle_line_chars: Number($("jobMaxLineChars").value || 22),
+  };
+}
+
+async function saveCurrentTemplate() {
+  const name = $("templateName").value.trim();
+  if (!name) {
+    toast("请先填写模板名");
+    return;
+  }
+  try {
+    const result = await api("/api/templates", { method: "POST", body: JSON.stringify({ name, params: currentTemplateParams() }) });
+    state.templates = result.templates || state.templates;
+    $("templateName").value = "";
+    renderTemplateOptions();
+    $("jobTemplate").value = result.template.id;
+    toast("模板已保存");
+  } catch (error) {
+    toast(`保存模板失败：${error.message}`);
   }
 }
 
@@ -553,6 +658,8 @@ async function startJob(event) {
     target_tts_language: $("jobTtsLanguage").value || "zh-CN",
     quality_mode: $("jobQualityMode").value || "best_quality",
     style: $("jobStyle").value || "",
+    template_id: $("jobTemplate").value || "",
+    ...currentTemplateParams(),
   };
   try {
     const result = await api("/api/jobs", { method: "POST", body: JSON.stringify(payload) });

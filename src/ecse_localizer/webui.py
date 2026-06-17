@@ -309,6 +309,34 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         state.reload_config()
         return {"ok": True}
 
+    @app.get("/api/templates")
+    def templates(user: str = Depends(require_user)) -> dict[str, Any]:
+        return {"templates": state.store.list_templates(user, admin=is_admin(state, user))}
+
+    @app.post("/api/templates")
+    async def create_template(request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
+        body = await request.json()
+        try:
+            template = state.store.create_template(
+                user,
+                str(body.get("name", "")),
+                body.get("params") if isinstance(body.get("params"), dict) else {},
+                description=str(body.get("description", "")),
+                shared=bool(body.get("shared", False)),
+                admin=is_admin(state, user),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "template": template, "templates": state.store.list_templates(user, admin=is_admin(state, user))}
+
+    @app.delete("/api/templates/{template_id}")
+    def delete_template(template_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
+        try:
+            deleted = state.store.delete_template(user, template_id, admin=is_admin(state, user))
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"ok": True, "deleted": deleted, "templates": state.store.list_templates(user, admin=is_admin(state, user))}
+
     @app.get("/api/projects")
     def projects(user: str = Depends(require_user)) -> dict[str, Any]:
         return {"projects": projects_with_usage(state, user)}
@@ -436,7 +464,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         execution_mode = str(state.webui.get("execution_mode", "local_subprocess"))
         worker_queue = execution_mode == "worker_queue" or bool(body.get("queue_for_worker"))
         command, title = build_job_command(job_type, body, state, validate_paths=not worker_queue)
-        metadata = job_metadata_from_body(body)
+        template_params = template_params_for_job(state, user, body)
+        metadata = job_metadata_from_body(body, template_params=template_params)
         validate_job_project(state, user, metadata)
         if worker_queue:
             metadata["worker_args"] = worker_args_from_command(command)
@@ -649,16 +678,48 @@ def worker_status_changes(body: dict[str, Any]) -> dict[str, Any]:
     return changes
 
 
-def job_metadata_from_body(body: dict[str, Any]) -> dict[str, Any]:
-    return {
+def template_params_for_job(state: WebState, user: str, body: dict[str, Any]) -> dict[str, Any]:
+    template_id = str(body.get("template_id") or "")
+    if not template_id:
+        return {}
+    template = state.store.get_template(user, template_id, admin=is_admin(state, user))
+    if not template:
+        raise HTTPException(status_code=400, detail="Template not found")
+    return dict(template.get("params") or {})
+
+
+def job_metadata_from_body(body: dict[str, Any], *, template_params: dict[str, Any] | None = None) -> dict[str, Any]:
+    template = template_params or {}
+    metadata = {
         "project_id": str(body.get("project_id") or ""),
         "folder_id": str(body.get("folder_id") or "root"),
-        "source_language": str(body.get("source_language") or "auto"),
-        "target_subtitle_language": str(body.get("target_subtitle_language") or "zh-CN"),
-        "target_tts_language": str(body.get("target_tts_language") or "zh-CN"),
-        "quality_mode": str(body.get("quality_mode") or "best_quality"),
-        "style": str(body.get("style") or ""),
+        "template_id": str(body.get("template_id") or ""),
+        "source_language": str(template_value(body, template, "source_language", "auto")),
+        "target_subtitle_language": str(template_value(body, template, "target_subtitle_language", "zh-CN")),
+        "target_tts_language": str(template_value(body, template, "target_tts_language", "zh-CN")),
+        "quality_mode": str(template_value(body, template, "quality_mode", "best_quality")),
+        "style": str(template_value(body, template, "style", "")),
     }
+    for key in [
+        "tts_speed",
+        "tts_emotion",
+        "tts_end_gap_seconds",
+        "tts_min_audio_gap_seconds",
+        "tts_speaker_gender",
+        "mux_keep_original_audio",
+        "mux_original_audio_volume",
+        "mux_hard_subtitle",
+        "mux_soft_subtitle",
+        "max_subtitle_line_chars",
+    ]:
+        value = template_value(body, template, key, None)
+        if value is not None and value != "":
+            metadata[key] = value
+    return metadata
+
+
+def template_value(body: dict[str, Any], template: dict[str, Any], key: str, default: Any) -> Any:
+    return body[key] if key in body else template.get(key, default)
 
 
 def validate_job_project(state: WebState, user: str, metadata: dict[str, Any]) -> None:
