@@ -1214,7 +1214,7 @@ function renderArtifacts() {
       preview.addEventListener("click", () => previewArtifact(artifact));
       actions.appendChild(preview);
     }
-    if (artifact.path) {
+    if (artifact.deletable || artifact.path) {
       const del = document.createElement("button");
       del.type = "button";
       del.className = "danger";

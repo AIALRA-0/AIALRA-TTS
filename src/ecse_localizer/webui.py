@@ -259,6 +259,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         rows = filter_artifacts_for_user(rows, user, admin=is_admin(state, user))
         rows = filter_artifact_records(rows, project_id=project_id, folder_id=folder_id, job_id=job_id, kind=kind)
         rows = with_signed_urls(rows[:300], secret=download_secret(state), username=user, ttl_seconds=int(state.webui.get("signed_url_ttl_seconds", 900)))
+        rows = public_artifact_records(state, user, rows)
         return {"artifacts": rows, "quota": state.store.quota_status(user)}
 
     @app.get("/api/artifacts/{artifact_id}/download")
@@ -301,7 +302,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             deleted = safe_delete_artifact_record(row, state.config)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"ok": True, "artifact": row, "deleted": deleted, "quota": state.store.quota_status(user)}
+        admin = is_admin(state, user)
+        return {
+            "ok": True,
+            "artifact": row if admin else public_artifact_record(row),
+            "deleted": deleted if admin else public_delete_result(deleted),
+            "quota": state.store.quota_status(user),
+        }
 
     @app.post("/api/artifacts/{artifact_id}/request-cache")
     def request_artifact_cache(artifact_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
@@ -824,6 +831,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         rows = filter_artifacts_for_user(rows, user, admin=is_admin(state, user))
         rows = filter_artifact_records(rows, job_id=job_id)
         rows = with_signed_urls(rows[:300], secret=download_secret(state), username=user, ttl_seconds=int(state.webui.get("signed_url_ttl_seconds", 900)))
+        rows = public_artifact_records(state, user, rows)
         return {"job": public_job_record(record), "artifacts": rows, "quota": state.store.quota_status(user)}
 
     @app.get("/api/jobs/{job_id}/log")
@@ -2242,6 +2250,50 @@ def public_report_record(state: WebState, user: str, row: dict[str, Any]) -> dic
     for key in ["video", "zh_dub_mp4", "hard_sub"]:
         if out.get(key):
             out[key] = file_display_name(str(out[key]))
+    return out
+
+
+def public_artifact_records(state: WebState, user: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if is_admin(state, user):
+        return rows
+    return [public_artifact_record(row) for row in rows]
+
+
+def public_artifact_record(row: dict[str, Any]) -> dict[str, Any]:
+    out = dict(row)
+    name = file_display_name(str(out.get("name") or out.get("path") or out.get("id") or "artifact"))
+    out["name"] = name
+    out["deletable"] = bool(out.get("path")) and not bool(out.get("source_deleted"))
+    if out.get("remote_worker_artifact") and not out.get("path"):
+        out["display_path"] = f"Windows worker: {name}"
+    elif out.get("remote_cache"):
+        out["display_path"] = f"remote cache: {name}"
+    elif out.get("remote_preview"):
+        out["display_path"] = f"preview cache: {name}"
+    elif out.get("kind") == "report_bundle":
+        out["display_path"] = f"report bundle: {name}"
+    else:
+        out["display_path"] = f"generated output: {name}"
+    for key in ["path", "report", "thumbnail_path", "preview_path", "source_path"]:
+        out.pop(key, None)
+    return out
+
+
+def public_delete_result(value: Any) -> Any:
+    if isinstance(value, list):
+        return [public_delete_result(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    out: dict[str, Any] = {}
+    for key, item in value.items():
+        if key in {"path", "manifest"}:
+            out[key] = file_display_name(str(item))
+        elif key == "error":
+            out[key] = sanitize_remote_text(str(item))
+        elif isinstance(item, (dict, list)):
+            out[key] = public_delete_result(item)
+        else:
+            out[key] = item
     return out
 
 

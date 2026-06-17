@@ -1084,6 +1084,49 @@ def test_artifact_download_urls_are_user_scoped(tmp_path):
     assert "Login or signed token required" in response.text
 
 
+def test_artifact_api_redacts_paths_for_non_admin_but_keeps_actions(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    app = create_app(config_path)
+    state = app.state.web
+    state.store.create_user("student.one", "long-enough-password")
+
+    output = Path(state.config["output_dir"])
+    video = output / "one_zh_dub.mp4"
+    report = output / "one_report.json"
+    video.write_bytes(b"student one mp4")
+    report.write_text(
+        json.dumps({"name": "one", "user": "student.one", "outputs": {"zh_dub_mp4": str(video)}}),
+        encoding="utf-8",
+    )
+
+    client = TestClient(app)
+    response = client.post("/api/login", json={"username": "student.one", "password": "long-enough-password"})
+    assert response.status_code == 200
+    response = client.get("/api/artifacts")
+    assert response.status_code == 200
+    payload = response.json()
+    rendered = json.dumps(payload, ensure_ascii=False)
+    assert str(video) not in rendered
+    assert str(report) not in rendered
+
+    artifact = next(item for item in payload["artifacts"] if item["name"] == "one_zh_dub.mp4")
+    assert "path" not in artifact
+    assert "report" not in artifact
+    assert artifact["display_path"] == "generated output: one_zh_dub.mp4"
+    assert artifact["deletable"] is True
+    assert artifact["download_url"]
+
+    response = client.delete(f"/api/artifacts/{artifact['id']}")
+    assert response.status_code == 200
+    rendered_delete = json.dumps(response.json(), ensure_ascii=False)
+    assert str(video) not in rendered_delete
+    assert str(report) not in rendered_delete
+    assert "path" not in response.json()["artifact"]
+    assert not video.exists()
+
+
 def test_artifacts_endpoint_filters_by_project_folder_job_and_kind(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
