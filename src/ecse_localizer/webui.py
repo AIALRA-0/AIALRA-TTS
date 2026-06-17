@@ -439,6 +439,23 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"ok": True, "template": template, "templates": state.store.list_templates(user, admin=is_admin(state, user))}
 
+    @app.patch("/api/templates/{template_id}")
+    async def update_template(template_id: str, request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
+        body = await request.json()
+        try:
+            template = state.store.update_template(
+                user,
+                template_id,
+                name=str(body["name"]) if "name" in body else None,
+                params=body.get("params") if isinstance(body.get("params"), dict) else None,
+                description=str(body["description"]) if "description" in body else None,
+                shared=bool(body["shared"]) if "shared" in body else None,
+                admin=is_admin(state, user),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "template": template, "templates": state.store.list_templates(user, admin=is_admin(state, user))}
+
     @app.delete("/api/templates/{template_id}")
     def delete_template(template_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
         try:

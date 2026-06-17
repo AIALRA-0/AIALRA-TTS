@@ -339,6 +339,38 @@ class PlatformStore:
         self._save(self.templates_path, data)
         return row
 
+    def update_template(
+        self,
+        username: str,
+        template_id: str,
+        *,
+        name: str | None = None,
+        params: dict[str, Any] | None = None,
+        description: str | None = None,
+        shared: bool | None = None,
+        admin: bool = False,
+    ) -> dict[str, Any]:
+        data = self._load(self.templates_path, {"templates": []})
+        for row in data.get("templates", []):
+            if row.get("id") != template_id:
+                continue
+            if not admin and row.get("owner") != username:
+                raise ValueError("Template not found")
+            if name is not None:
+                row["name"] = clean_name(name, default=str(row.get("name") or "Untitled Template"))
+            if description is not None:
+                row["description"] = description[:500]
+            if params is not None:
+                row["params"] = sanitize_template_params(params)
+            if shared is not None:
+                if not admin and bool(shared):
+                    raise ValueError("Only admins can share templates")
+                row["shared"] = bool(shared)
+            row["updated_at"] = iso_now()
+            self._save(self.templates_path, data)
+            return dict(row)
+        raise ValueError("Template not found")
+
     def delete_template(self, username: str, template_id: str, *, admin: bool = False) -> dict[str, Any]:
         data = self._load(self.templates_path, {"templates": []})
         kept = []

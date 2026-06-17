@@ -151,6 +151,50 @@ def test_webui_login_project_and_quota(tmp_path):
     assert "tts" in caps
 
 
+def test_template_update_api_applies_to_worker_job_metadata(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    project = client.get("/api/projects").json()["projects"][0]
+    response = client.post(
+        "/api/templates",
+        json={"name": "Reusable", "params": {"quality_mode": "fast", "tts_speed": 0.95}},
+    )
+    assert response.status_code == 200
+    template = response.json()["template"]
+
+    response = client.patch(
+        f"/api/templates/{template['id']}",
+        json={
+            "name": "Reusable tuned",
+            "params": {"quality_mode": "best_quality", "tts_speed": "1.15", "unknown_secret": "drop"},
+        },
+    )
+
+    assert response.status_code == 200
+    updated = response.json()["template"]
+    assert updated["name"] == "Reusable tuned"
+    assert updated["params"]["quality_mode"] == "best_quality"
+    assert updated["params"]["tts_speed"] == 1.15
+    assert "unknown_secret" not in updated["params"]
+
+    response = client.post("/api/jobs", json={"type": "audit", "project_id": project["id"], "template_id": template["id"]})
+
+    assert response.status_code == 200
+    metadata = response.json()["job"]["metadata"]
+    assert metadata["template_id"] == template["id"]
+    assert metadata["quality_mode"] == "best_quality"
+    assert metadata["tts_speed"] == 1.15
+
+
 def test_project_and_folder_archive_api_hides_targets(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

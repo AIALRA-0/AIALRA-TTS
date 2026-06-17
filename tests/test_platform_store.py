@@ -207,6 +207,41 @@ def test_parameter_templates_are_user_scoped_and_sanitized(tmp_path):
     assert store.get_template("admin", template["id"]) is None
 
 
+def test_parameter_template_update_preserves_scope_and_sanitizes(tmp_path):
+    store = PlatformStore(make_config(tmp_path))
+    store.bootstrap()
+    template = store.create_template("admin", "Reusable", {"quality_mode": "fast", "unknown_secret": "drop"})
+
+    updated = store.update_template(
+        "admin",
+        template["id"],
+        name="Reusable tuned",
+        params={"quality_mode": "best_quality", "tts_speed": "1.15", "unknown_secret": "drop"},
+    )
+
+    assert updated["name"] == "Reusable tuned"
+    assert updated["params"]["quality_mode"] == "best_quality"
+    assert updated["params"]["tts_speed"] == 1.15
+    assert "unknown_secret" not in updated["params"]
+    assert updated["updated_at"]
+
+    try:
+        store.update_template("student.one", template["id"], params={"quality_mode": "fast"})
+    except ValueError as exc:
+        assert "Template not found" in str(exc)
+    else:
+        raise AssertionError("non-owner should not update another user's template")
+
+    store.create_user("student.one", "long-enough-password")
+    own = store.create_template("student.one", "Private", {"quality_mode": "balanced"})
+    try:
+        store.update_template("student.one", own["id"], shared=True)
+    except ValueError as exc:
+        assert "Only admins" in str(exc)
+    else:
+        raise AssertionError("non-admin should not share templates")
+
+
 def test_worker_heartbeat_redacts_message_and_media_ref_names(tmp_path):
     store = PlatformStore(make_config(tmp_path))
     store.bootstrap()

@@ -149,6 +149,7 @@ function bindEvents() {
     if (el) el.addEventListener("input", renderLanguageCapabilities);
   });
   $("saveTemplateBtn").addEventListener("click", saveCurrentTemplate);
+  $("updateTemplateBtn").addEventListener("click", updateCurrentTemplate);
   $("userForm").addEventListener("submit", createUser);
   $("refreshArtifactsBtn").addEventListener("click", loadArtifacts);
   $("cleanupDryRunBtn").addEventListener("click", cleanupDryRun);
@@ -869,6 +870,29 @@ async function saveCurrentTemplate() {
     toast("模板已保存");
   } catch (error) {
     toast(`保存模板失败：${error.message}`);
+  }
+}
+
+async function updateCurrentTemplate() {
+  const templateId = $("jobTemplate").value;
+  const current = state.templates.find((item) => item.id === templateId);
+  if (!current) {
+    toast("请先选择一个模板");
+    return;
+  }
+  try {
+    const name = $("templateName").value.trim() || current.name;
+    const result = await api(`/api/templates/${encodeURIComponent(templateId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name, params: currentTemplateParams() }),
+    });
+    state.templates = result.templates || state.templates;
+    $("templateName").value = "";
+    renderTemplateOptions();
+    $("jobTemplate").value = result.template.id;
+    toast("模板已更新");
+  } catch (error) {
+    toast(`更新模板失败：${error.message}`);
   }
 }
 

@@ -110,7 +110,7 @@ Deployment steps:
    - project creation works
    - project folders can be created and selected for jobs
    - project and folder archive actions hide targets from selectors and reject them for new jobs without erasing historical job metadata
-   - parameter templates can be listed, created, selected, and applied to queued worker jobs
+   - parameter templates can be listed, created, updated, selected, and applied to queued worker jobs
    - the task form displays ASR/subtitle/TTS language support hints from the online Windows worker heartbeat when available, otherwise from configured fallback capabilities
    - the task form can queue both `fidelity_audit` and `repair_fidelity`; repair jobs must use the selected report and default to its sibling `*_fidelity_report.json`
    - user quota is enforced

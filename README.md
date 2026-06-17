@@ -45,7 +45,7 @@ Set real credentials in local `config.yaml` or `.env`; never commit them. The We
 
 Per-job language, quality, and style settings are written to generated job config files under `runs/`. The base `config.yaml` stays local and is not mutated by submitted jobs.
 
-Parameter templates store non-secret generation settings such as source language, target subtitle/TTS language, quality mode, teaching style, TTS speed/emotion, pause settings, subtitle length, and hard/soft subtitle preferences. Templates live under `runs/platform/` and are ignored by git.
+Parameter templates store non-secret generation settings such as source language, target subtitle/TTS language, quality mode, teaching style, TTS speed/emotion, pause settings, subtitle length, and hard/soft subtitle preferences. Users can create a new template or update the currently selected template after tuning the task form; template params are sanitized through a fixed allowlist before they are saved. Templates live under `runs/platform/` and are ignored by git.
 
 The task form shows local language capability hints for ASR, subtitle translation, and TTS. In worker-queue mode, an online Windows worker can publish its detected `language_capabilities` through heartbeat/claim calls, and the Contabo UI uses that live worker view first. If no worker capability heartbeat is online, hints fall back to `asr.supported_languages`, `translation.supported_target_languages`, `translation.allow_unlisted_targets`, and `tts.supported_languages`, plus the detected local LLM/TTS backend. Unlisted subtitle targets can be queued when the local LLM is available, but they are flagged as QA-required; TTS targets must be supported by the active local TTS backend.
 
