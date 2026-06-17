@@ -454,6 +454,15 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Job not found")
         changes = worker_status_changes(body)
         update_job(state, job_id, changes)
+        state.store.record_worker_heartbeat(
+            {
+                "status": "online",
+                "worker_id": str(body.get("worker_id") or record.get("claimed_by") or "local-windows-worker"),
+                "version": str(body.get("version") or ""),
+                "metrics": body.get("metrics") if isinstance(body.get("metrics"), dict) else {},
+                "message": f"job {job_id} {changes.get('status')}",
+            }
+        )
         updated = read_job(state, job_id)
         return {"ok": True, "job": updated}
 
@@ -475,6 +484,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Job not found")
         log_path = Path(record.get("log", ""))
         if not log_path.exists():
+            if record.get("log_tail"):
+                return PlainTextResponse(str(record.get("log_tail") or ""), media_type="text/plain; charset=utf-8")
             return PlainTextResponse("")
         return PlainTextResponse(tail_text(log_path, max(20, min(2000, lines))), media_type="text/plain; charset=utf-8")
 
@@ -708,7 +719,19 @@ def worker_status_changes(body: dict[str, Any]) -> dict[str, Any]:
         changes.setdefault("started_at", iso_now())
     if status in {"done", "failed", "cancelled", "deleted"}:
         changes["ended_at"] = iso_now()
-    for key in ["returncode", "pid", "progress", "error", "log_tail", "result", "result_report", "result_video"]:
+    for key in [
+        "returncode",
+        "pid",
+        "progress",
+        "error",
+        "log_tail",
+        "result",
+        "result_report",
+        "result_video",
+        "worker_id",
+        "metrics",
+        "command",
+    ]:
         if key in body:
             changes[key] = body[key]
     result = body.get("result")

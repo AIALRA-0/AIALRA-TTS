@@ -58,6 +58,7 @@ Deployment steps:
      ```
    - queued job metadata for source language, target subtitle language, TTS language, quality mode, and style is applied on the Windows worker through a generated local job config under `runs/worker_job_configs`.
    - if the Windows worker heartbeat is missing or stale, new jobs must stay `queued` and the UI must show that they are waiting for the local worker, not that GPU processing has already started.
+   - during long jobs, the worker posts `running` status updates with best-effort progress, GPU/CPU/disk metrics, and a short log tail; do not require Contabo to read Windows log files directly.
    - or install the scheduled task:
      ```powershell
      .\install_worker_heartbeat_task.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
@@ -77,6 +78,7 @@ Deployment steps:
    - worker offline status appears when the tunnel is stopped
    - users cannot see each other's jobs
    - jobs move through `queued/claimed/running/retrying/done/failed/cancelled/deleted`
+   - running jobs refresh progress/log-tail summaries without exposing local Windows paths or full logs
    - failed jobs can be retried without rewriting the base config
    - deleted jobs are soft-deleted from normal history before any physical artifact cleanup
    - a queued job can be claimed through `/api/worker/jobs/claim`

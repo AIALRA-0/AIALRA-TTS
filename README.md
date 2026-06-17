@@ -82,6 +82,8 @@ For Contabo production, set `webui.execution_mode: "worker_queue"` in the remote
 
 Queued jobs carry only portable worker arguments plus non-secret job metadata such as source language, target subtitle language, TTS language, quality mode, style, and the worker availability state at submit time. The Windows worker applies those values to a local generated job config before running the CLI.
 
+While a worker job is running, the Windows worker periodically reports a remote-safe status payload: `running`, `worker_id`, `pid`, best-effort `progress`, system metrics, and a log tail. Contabo stores only that summary; full logs stay on the Windows worker.
+
 Optional Windows Scheduled Tasks:
 
 ```powershell

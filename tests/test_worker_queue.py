@@ -16,7 +16,7 @@ from ecse_localizer.webui import (
     worker_status_payload,
     worker_status_changes,
 )
-from ecse_localizer.worker_client import redacted_command, summarize_result, worker_args
+from ecse_localizer.worker_client import extract_progress_from_text, redacted_command, summarize_result, worker_args
 
 
 def write_config(tmp_path: Path) -> Path:
@@ -108,6 +108,32 @@ def test_worker_status_changes_extracts_result_paths_as_fields():
     assert changes["status"] == "done"
     assert changes["result_report"] == "demo_report.json"
     assert changes["result_video"] == "demo.mp4"
+
+
+def test_worker_status_changes_preserves_running_progress_and_metrics():
+    changes = worker_status_changes(
+        {
+            "status": "running",
+            "worker_id": "worker-1",
+            "pid": 123,
+            "progress": 42,
+            "log_tail": "processed 4/10 segments",
+            "metrics": {"cpu": {"percent": 55}},
+            "command": ["python", "-m", "ecse_localizer", "--config", "<local-config>", "audit"],
+        }
+    )
+    assert changes["status"] == "running"
+    assert changes["worker_id"] == "worker-1"
+    assert changes["progress"] == 42
+    assert changes["log_tail"].endswith("segments")
+    assert changes["metrics"]["cpu"]["percent"] == 55
+    assert changes["command"][-1] == "audit"
+
+
+def test_worker_progress_parser_handles_percent_and_fraction():
+    assert extract_progress_from_text("overall progress: 37%") == 37
+    assert extract_progress_from_text("processed segment 3/12") == 25
+    assert extract_progress_from_text("nothing parseable") is None
 
 
 def test_soft_delete_job_hides_record_from_default_history(tmp_path):

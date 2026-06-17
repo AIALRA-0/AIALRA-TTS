@@ -11,7 +11,7 @@ except RuntimeError as exc:  # Starlette may require optional httpx2.
 else:
     TESTCLIENT_IMPORT_ERROR = None
 
-from ecse_localizer.webui import create_app
+from ecse_localizer.webui import create_app, create_job_record, update_job
 
 
 def write_config(tmp_path: Path) -> Path:
@@ -32,6 +32,7 @@ def write_config(tmp_path: Path) -> Path:
             "platform_dir": str(tmp_path / "platform"),
             "upload_dir": str(tmp_path / "uploads"),
             "job_dir": str(tmp_path / "jobs"),
+            "worker_token": "worker-token",
             "max_upload_mb": 1,
             "default_local_quota_gb": 1,
             "default_remote_quota_gb": 1,
@@ -179,3 +180,81 @@ def test_worker_queue_submit_reports_waiting_worker(tmp_path):
     assert payload["job"]["queued_for_worker"] is True
     assert payload["job"]["metadata"]["worker_status_at_submit"]["available"] is False
     assert payload["job"]["metadata"]["worker_args"][0] == "audit"
+
+
+def test_worker_log_endpoint_returns_remote_log_tail_when_file_missing(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    app = create_app(write_config(tmp_path))
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+
+    record = create_job_record(
+        state,
+        "audit",
+        "Remote audit",
+        ["python", "-m", "ecse_localizer", "audit"],
+        user="admin",
+        metadata={},
+        dispatch_target="worker",
+    )
+    update_job(
+        state,
+        record["id"],
+        {
+            "log": str(tmp_path / "missing-worker.log"),
+            "log_tail": "line one\nprocessed segment 3/12\nline three",
+            "progress": 25,
+        },
+    )
+
+    response = client.get(f"/api/jobs/{record['id']}/log")
+    assert response.status_code == 200
+    assert "processed segment 3/12" in response.text
+
+
+def test_worker_status_update_refreshes_heartbeat_and_job_progress(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    app = create_app(write_config(tmp_path))
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+
+    record = create_job_record(
+        state,
+        "audit",
+        "Remote audit",
+        ["python", "-m", "ecse_localizer", "audit"],
+        user="admin",
+        metadata={},
+        dispatch_target="worker",
+    )
+    response = client.post(
+        f"/api/worker/jobs/{record['id']}/status",
+        headers={"x-worker-token": "worker-token"},
+        json={
+            "status": "running",
+            "worker_id": "worker-1",
+            "progress": 33,
+            "log_tail": "overall progress: 33%",
+            "metrics": {"gpu": [{"available": True, "util_percent": 50}]},
+        },
+    )
+    assert response.status_code == 200
+    job = response.json()["job"]
+    assert job["status"] == "running"
+    assert job["progress"] == 33
+    assert job["log_tail"] == "overall progress: 33%"
+
+    response = client.get("/api/dashboard")
+    assert response.status_code == 200
+    worker = response.json()["worker"]
+    assert worker["status"] == "online"
+    assert worker["worker_id"] == "worker-1"
+    assert worker["heartbeat_online"] is True

@@ -760,6 +760,7 @@ function renderJobs() {
     const item = document.createElement("div");
     item.className = "job-item";
     const workerLine = workerJobLine(job);
+    const progressLine = jobProgressLine(job);
     item.innerHTML = `
       <div class="job-title">
         <span>${escapeHtml(job.title || job.type)}</span>
@@ -768,6 +769,7 @@ function renderJobs() {
       <div class="job-meta">${escapeHtml(job.created_at || "")} · ${escapeHtml(job.id)}</div>
       <div class="job-meta">${escapeHtml(job.user || "")} · ${escapeHtml(job.metadata?.project_id || "")} · ${escapeHtml(job.metadata?.quality_mode || "")}</div>
       ${workerLine ? `<div class="job-meta">${escapeHtml(workerLine)}</div>` : ""}
+      ${progressLine ? `<div class="job-meta">${escapeHtml(progressLine)}</div>` : ""}
       <div class="job-actions"></div>
     `;
     const actions = item.querySelector(".job-actions");
@@ -799,6 +801,18 @@ function renderJobs() {
     });
     list.appendChild(item);
   }
+}
+
+function jobProgressLine(job) {
+  const progress = Number(job.progress);
+  if (Number.isFinite(progress)) {
+    return `进度：${Math.max(0, Math.min(100, Math.round(progress)))}%`;
+  }
+  const tail = String(job.log_tail || "").trim().split(/\r?\n/).filter(Boolean);
+  if (tail.length && ["claimed", "running", "retrying", "failed"].includes(job.status)) {
+    return `日志：${tail[tail.length - 1].slice(0, 120)}`;
+  }
+  return "";
 }
 
 function workerJobLine(job) {

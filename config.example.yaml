@@ -159,3 +159,7 @@ webui:
   download_secret: "change-me-generate-a-long-random-download-secret"
   signed_url_ttl_seconds: 900
   cleanup_older_than_days: 7
+
+worker:
+  status_interval_seconds: 15
+  log_tail_lines: 160
