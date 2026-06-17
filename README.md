@@ -149,7 +149,7 @@ On a fresh Contabo clone, generate local-only deployment files without printing 
 python3 deploy/bootstrap_contabo.py --public-base-url https://your-domain.example --admin-username admin
 ```
 
-This creates `.env` and `deploy/config.remote.yaml`; both are ignored by git and must stay off GitHub.
+This creates `.env` and `deploy/config.remote.yaml`; both are ignored by git and must stay off GitHub. The generated remote config is rendered from `deploy/config.remote.example.yaml` with local deployment secrets, so it can be checked directly without exporting environment variables first.
 
 Before putting the remote WebUI behind a public domain, run the deployment guard on the target config:
 

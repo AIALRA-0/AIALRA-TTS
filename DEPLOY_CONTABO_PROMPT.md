@@ -19,7 +19,7 @@ Deployment steps:
    git clone https://github.com/AIALRA-0/AIALRA-TTS.git
    cd AIALRA-TTS
    ```
-2. Generate local-only deployment files. This writes `.env` and `deploy/config.remote.yaml`, refuses to overwrite existing files unless `--force` is passed, and does not print generated secrets:
+2. Generate local-only deployment files. This writes `.env` and a rendered `deploy/config.remote.yaml`, refuses to overwrite existing files unless `--force` is passed, and does not print generated secrets:
    ```bash
    python3 deploy/bootstrap_contabo.py --public-base-url https://your-domain.example --admin-username admin
    ```
@@ -31,7 +31,7 @@ Deployment steps:
    - `REMOTE_PUBLIC_BASE_URL`
    - `WORKER_SHARED_TOKEN`
    - `WEBUI_DOWNLOAD_SECRET`
-4. Review the production config in `deploy/config.remote.yaml`.
+4. Review the production config in `deploy/config.remote.yaml`. It is rendered from `deploy/config.remote.example.yaml` with the generated local secrets, so `deploy-check` can read it directly.
    - Set `privacy.allow_cloud_api=false`.
    - Set `privacy.allow_upload_media=false`.
    - Set small Contabo remote quota defaults.
