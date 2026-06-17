@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 import uvicorn
@@ -1074,7 +1074,7 @@ def build_job_command(job_type: str, body: dict[str, Any], state: WebState, *, v
         video = str(body.get("video") or "")
         if not video or (validate_paths and not Path(video).exists()):
             raise HTTPException(status_code=400, detail="Video path is required")
-        return base + ["process-one", "--video", video], f"Process one: {Path(video).name}"
+        return base + ["process-one", "--video", video], f"Process one: {file_display_name(video)}"
     if job_type == "process_all":
         cmd = base + ["process-all", "--input", input_dir]
         if bool(body.get("force")):
@@ -1091,12 +1091,28 @@ def build_job_command(job_type: str, body: dict[str, Any], state: WebState, *, v
         run_dir = str(body.get("run_dir") or "")
         if run_dir:
             cmd += ["--run-dir", run_dir]
-        return cmd, f"Compact rerender: {Path(report).name}"
+        return cmd, f"Compact rerender: {file_display_name(report)}"
     if job_type == "fidelity_audit":
         report = str(body.get("report") or "")
         if not report or (validate_paths and not Path(report).exists()):
             raise HTTPException(status_code=400, detail="Report path is required")
-        return base + ["fidelity-audit", "--report", report], f"Fidelity audit: {Path(report).name}"
+        return base + ["fidelity-audit", "--report", report], f"Fidelity audit: {file_display_name(report)}"
+    if job_type == "repair_fidelity":
+        report = str(body.get("report") or "")
+        if not report or (validate_paths and not Path(report).exists()):
+            raise HTTPException(status_code=400, detail="Report path is required")
+        cmd = base + ["repair-fidelity", "--report", report]
+        fidelity_report = str(body.get("fidelity_report") or "")
+        if fidelity_report:
+            if validate_paths and not Path(fidelity_report).exists():
+                raise HTTPException(status_code=400, detail="Fidelity report path is invalid")
+            cmd += ["--fidelity-report", fidelity_report]
+        max_score = body.get("max_score")
+        if max_score not in (None, ""):
+            cmd += ["--max-score", str(max(1, min(5, int(max_score))))]
+        if bool(body.get("skip_high")):
+            cmd.append("--skip-high")
+        return cmd, f"Fidelity repair: {file_display_name(report)}"
     raise HTTPException(status_code=400, detail=f"Unsupported job type: {job_type}")
 
 
@@ -1267,7 +1283,7 @@ def infer_job_type(record: dict[str, Any]) -> str:
     command = normalize_command(record.get("command"))
     for item in command:
         normalized = item.replace("-", "_")
-        if normalized in {"audit", "smoke", "process_one", "process_all", "report", "compact_rerender", "fidelity_audit"}:
+        if normalized in {"audit", "smoke", "process_one", "process_all", "report", "compact_rerender", "fidelity_audit", "repair_fidelity"}:
             return normalized
     job_id = str(record.get("id") or "")
     match = re.match(r"webui_([A-Za-z0-9_]+)_\d{8}_\d{6}", job_id)
@@ -1277,8 +1293,19 @@ def infer_job_type(record: dict[str, Any]) -> str:
 def title_for_job(record: dict[str, Any]) -> str:
     job_type = str(record.get("type") or infer_job_type(record) or "unknown")
     if record.get("source_video"):
-        return f"{job_type}: {Path(str(record['source_video'])).name}"
+        return f"{job_type}: {file_display_name(str(record['source_video']))}"
     return f"Job: {job_type}"
+
+
+def file_display_name(path_text: str) -> str:
+    text = str(path_text or "").strip()
+    if not text:
+        return ""
+    windows_name = PureWindowsPath(text).name
+    posix_name = Path(text).name
+    if "\\" in text and windows_name:
+        return windows_name
+    return posix_name or windows_name or text
 
 
 def timestamp_from_path(path: Path | None) -> str | None:

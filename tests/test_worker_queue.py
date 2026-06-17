@@ -11,6 +11,8 @@ from ecse_localizer.webui import (
     command_with_config,
     create_job_record,
     enforce_active_job_limits,
+    file_display_name,
+    infer_job_type,
     list_jobs,
     read_job,
     retry_job_record,
@@ -62,6 +64,42 @@ def test_worker_args_are_portable(tmp_path):
     )
     args = worker_args_from_command(command)
     assert args == ["process-one", "--video", r"C:\worker-local\lecture.mp4"]
+
+
+def test_file_display_name_handles_windows_and_posix_paths():
+    assert file_display_name(r"C:\worker-local\outputs\lecture_report.json") == "lecture_report.json"
+    assert file_display_name("/srv/aialra/previews/lecture_report.json") == "lecture_report.json"
+
+
+def test_repair_fidelity_worker_args_are_portable(tmp_path):
+    state = WebState(write_config(tmp_path))
+    command, title = build_job_command(
+        "repair_fidelity",
+        {
+            "report": r"C:\worker-local\outputs\lecture_report.json",
+            "fidelity_report": r"C:\worker-local\outputs\lecture_fidelity_report.json",
+            "max_score": 2,
+            "skip_high": True,
+        },
+        state,
+        validate_paths=False,
+    )
+
+    assert title == "Fidelity repair: lecture_report.json"
+    assert worker_args_from_command(command) == [
+        "repair-fidelity",
+        "--report",
+        r"C:\worker-local\outputs\lecture_report.json",
+        "--fidelity-report",
+        r"C:\worker-local\outputs\lecture_fidelity_report.json",
+        "--max-score",
+        "2",
+        "--skip-high",
+    ]
+
+
+def test_infer_job_type_recognizes_repair_fidelity_command():
+    assert infer_job_type({"command": ["python", "-m", "ecse_localizer", "repair-fidelity", "--report", "x"]}) == "repair_fidelity"
 
 
 def test_worker_status_payload_marks_missing_worker_unavailable(tmp_path):

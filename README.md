@@ -107,7 +107,7 @@ Contabo deployment templates live in `deploy/`:
 - Subtitles: existing `.vtt/.srt/.ass` are preferred and normalized before ASR.
 - ASR: `whisperx` then `faster-whisper` when installed; existing subtitles avoid ASR when good enough.
 - Audio enhancement: ffmpeg loudnorm/highpass/lowpass always available; DeepFilterNet/ClearerVoice optional.
-- Translation: local Ollama/LM Studio OpenAI-compatible endpoint only. `best_quality` reconstructs spoken paragraphs before per-segment JSON translation, then applies a course style guide and coherence pass. Qwen 14B is preferred for quality; 7B is fallback.
+- Translation: local Ollama/LM Studio OpenAI-compatible endpoint only. `best_quality` reconstructs spoken paragraphs before per-segment JSON translation, then applies a course style guide and coherence pass. `fidelity-audit` reviews the finished report, and `repair-fidelity` rewrites only the failed/low-score segments before regenerating subtitles, TTS, muxed video, and QA. Qwen 14B is preferred for quality; 7B is fallback.
 - TTS: CosyVoice SFT is the preferred local Chinese backend; Piper is a lightweight fallback. Voice cloning stays disabled unless explicit consent files are present.
 - Subtitles: `.ass` means Advanced SubStation Alpha and is used for styled bilingual subtitles.
 
@@ -135,6 +135,8 @@ python -m ecse_localizer smoke --input "<VIDEO_ROOT>" --seconds 90
 python -m ecse_localizer process-one --video "<VIDEO_ROOT>\<lecture>.mp4"
 python -m ecse_localizer process-all --input "<VIDEO_ROOT>"
 python -m ecse_localizer report --output "<VIDEO_ROOT>\_localizer_output"
+python -m ecse_localizer fidelity-audit --report "<VIDEO_ROOT>\_localizer_output\<lecture>_report.json"
+python -m ecse_localizer repair-fidelity --report "<VIDEO_ROOT>\_localizer_output\<lecture>_report.json"
 python -m ecse_localizer tts-health
 python -m ecse_localizer worker-status
 python -m ecse_localizer worker-poll --remote-base-url "https://example.invalid" --worker-token "<token>" --once --dry-run

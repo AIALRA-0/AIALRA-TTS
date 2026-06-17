@@ -44,6 +44,7 @@ llm:
   json_repair: true
   translation_chunk_size: 8
   fidelity_chunk_size: 6
+  repair_chunk_size: 6
   low_capacity_models: ["0.5b", "1b"]
   low_capacity_bypass_segment_threshold: 120
 
