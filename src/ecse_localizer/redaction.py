@@ -52,11 +52,12 @@ SECRET_ASSIGNMENT_RE = re.compile(
 )
 PRIVATE_IPV4_RE = re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2\d|3[01]))(?:\.\d{1,3}){2}\b")
 TOKEN_RE = re.compile(r"\b(?:hf_|ghp_|github_pat_|sk-)[A-Za-z0-9_\-]{12,}\b")
+WORKER_REF_RE = re.compile(r"^worker-ref:[A-Za-z0-9_.-]{1,80}$")
 
 
 def is_remote_safe_reference(value: Any) -> bool:
     text = str(value or "").strip()
-    return bool(text.startswith("worker-ref:"))
+    return bool(WORKER_REF_RE.fullmatch(text))
 
 
 def sanitize_remote_text(value: Any) -> str:

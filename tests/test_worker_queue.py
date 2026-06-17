@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from ecse_localizer.redaction import is_remote_safe_reference, sanitize_remote_command
 from ecse_localizer.webui import (
     WebState,
     active_job_counts,
@@ -1072,6 +1073,16 @@ def test_worker_media_refs_skip_generated_output_dirs(monkeypatch, tmp_path):
     summaries = collect_worker_media_refs({"input_dir": str(tmp_path), "worker": {"max_media_refs": 10}})
 
     assert [row["name"] for row in summaries] == ["lecture.mp4"]
+
+
+def test_remote_safe_reference_requires_safe_worker_ref_id():
+    assert is_remote_safe_reference("worker-ref:media123")
+    assert is_remote_safe_reference("worker-ref:safe_ref-1.2")
+    assert not is_remote_safe_reference("worker-ref:../escape")
+    assert not is_remote_safe_reference("worker-ref:bad ref")
+    assert not is_remote_safe_reference("worker-ref:")
+    assert sanitize_remote_command(["process-one", "--video", "worker-ref:media123"])[2] == "worker-ref:media123"
+    assert sanitize_remote_command(["process-one", "--video", "worker-ref:../escape"])[2] == "<local-path>"
 
 
 def test_upload_worker_artifact_cache_sends_signed_binary_without_plaintext_token(monkeypatch, tmp_path):

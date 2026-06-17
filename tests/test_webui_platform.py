@@ -1521,6 +1521,29 @@ def test_worker_queue_process_one_accepts_worker_ref_without_paths(tmp_path):
     assert "worker-media" not in json.dumps(payload, ensure_ascii=False)
 
 
+def test_worker_queue_process_one_rejects_unsafe_worker_ref(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    project = client.get("/api/projects").json()["projects"][0]
+    response = client.post(
+        "/api/jobs",
+        json={"type": "process_one", "video": "worker-ref:../escape", "project_id": project["id"], "folder_id": "root"},
+    )
+
+    assert response.status_code == 400
+    assert "worker-ref" in response.text
+    assert not client.get("/api/jobs").json()["jobs"]
+
+
 def test_worker_queue_raw_worker_path_opt_in_redacts_browser_responses(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
