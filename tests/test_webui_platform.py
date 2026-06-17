@@ -117,6 +117,8 @@ def test_static_job_history_has_deleted_filter_and_restore_action():
     assert "function viewJobArtifacts(job)" in js
     assert "async function restoreJob(jobId)" in js
     assert '`/api/jobs/${encodeURIComponent(jobId)}/restore`' in js
+    assert "delete_files=true" in js
+    assert "同时删除生成文件和远端缓存" in js
 
 
 def test_static_artifact_history_has_scope_filters():
@@ -794,6 +796,7 @@ def test_deleted_job_artifacts_hide_from_normal_page_but_remain_job_scoped(tmp_p
 
     response = client.delete(f"/api/jobs/{record['id']}")
     assert response.status_code == 200
+    assert video.exists()
 
     response = client.get("/api/artifacts")
     assert response.status_code == 200
@@ -807,6 +810,76 @@ def test_deleted_job_artifacts_hide_from_normal_page_but_remain_job_scoped(tmp_p
     deleted_video = next(item for item in deleted_artifacts if item["name"] == "lecture_zh_dub.mp4")
     assert "download_url" not in deleted_video
     assert deleted_video["download_disabled_reason"] == "source_job_deleted"
+
+
+def test_delete_job_can_delete_files_and_release_remote_quota(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    output = Path(state.config["output_dir"])
+    video = output / "lecture_zh_dub.mp4"
+    video.write_bytes(b"mp4")
+    report = output / "lecture_report.json"
+    report_md = output / "lecture_report.md"
+    report.write_text(json.dumps({"name": "lecture", "outputs": {"zh_dub_mp4": str(video)}}), encoding="utf-8")
+    report_md.write_text("report", encoding="utf-8")
+    preview_dir = output / "previews"
+    preview_dir.mkdir()
+    preview = preview_dir / "lecture_preview.mp4"
+    thumbnail = preview_dir / "lecture_thumb.jpg"
+    preview.write_bytes(b"preview")
+    thumbnail.write_bytes(b"thumb")
+    manifest = preview_dir / "preview_manifest.json"
+    record = create_job_record(
+        state,
+        "process_one",
+        "Lecture",
+        ["python", "-m", "ecse_localizer", "process-one"],
+        user="admin",
+        metadata={"project_id": "course", "folder_id": "root"},
+        dispatch_target="worker",
+    )
+    manifest.write_text(
+        json.dumps(
+            {
+                "previews": [
+                    {
+                        "id": "preview-1",
+                        "owner": "admin",
+                        "job_id": record["id"],
+                        "preview_path": str(preview),
+                        "thumbnail_path": str(thumbnail),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    update_job(state, record["id"], {"status": "done", "returncode": 0, "result_report": str(report), "result_video": str(video)})
+
+    assert client.get("/api/quota").json()["remote_used_bytes"] == len(b"previewthumb")
+    response = client.delete(f"/api/jobs/{record['id']}?delete_files=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["job"]["status"] == "deleted"
+    assert payload["job"]["files_deleted_bytes"] >= len(b"mp4previewthumb")
+    assert payload["deleted_files"]["bytes"] >= len(b"mp4previewthumb")
+    assert payload["quota"]["remote_used_bytes"] == 0
+    assert not video.exists()
+    assert not report.exists()
+    assert not report_md.exists()
+    assert not preview.exists()
+    assert not thumbnail.exists()
+    assert read_json(manifest)["previews"] == []
+    saved_job = read_job(state, record["id"])
+    assert saved_job and saved_job["files_deleted_by"] == "admin"
 
 
 def test_ownerless_legacy_jobs_are_admin_only(tmp_path):

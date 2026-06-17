@@ -1641,16 +1641,21 @@ async function restoreJob(jobId) {
 }
 
 async function deleteJob(jobId) {
-  if (!confirm("删除任务记录？这会从历史列表隐藏该任务，但不会直接删除产物文件。")) return;
+  if (!confirm("删除任务记录？这会从历史列表隐藏该任务。")) return;
+  const deleteFiles = confirm("是否同时删除生成文件和远端缓存以释放空间？\n选择“取消”则只删除任务记录。");
   try {
-    await api(`/api/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" });
+    const query = deleteFiles ? "?delete_files=true" : "";
+    const result = await api(`/api/jobs/${encodeURIComponent(jobId)}${query}`, { method: "DELETE" });
     if (state.selectedJob === jobId) {
       state.selectedJob = null;
       $("selectedJobLine").textContent = "未选择任务";
       $("jobLog").textContent = "";
     }
-    toast("任务记录已软删除");
+    const deletedBytes = result.deleted_files?.bytes || 0;
+    toast(deleteFiles ? `任务和产物已删除，释放 ${formatBytes(deletedBytes)}` : "任务记录已软删除");
     await refreshJobs();
+    await loadArtifacts();
+    await loadDashboard();
   } catch (error) {
     toast(`删除失败：${error.message}`);
   }

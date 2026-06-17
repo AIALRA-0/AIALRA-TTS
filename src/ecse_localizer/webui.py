@@ -1003,12 +1003,34 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return {"ok": True, "job": public_job_record(restored)}
 
     @app.delete("/api/jobs/{job_id}")
-    def delete_job(job_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
+    def delete_job(job_id: str, delete_files: bool = False, user: str = Depends(require_user)) -> dict[str, Any]:
         record = read_job(state, job_id)
         if not record or not can_access_record(state, user, record):
             raise HTTPException(status_code=404, detail="Job not found")
         deleted = soft_delete_job(state, job_id, deleted_by=user)
-        return {"ok": True, "job": public_job_record(deleted)}
+        deleted_files = None
+        if delete_files:
+            deleted_files = delete_job_artifact_files(state, deleted, user, admin=is_admin(state, user))
+            update_job(
+                state,
+                job_id,
+                {
+                    "files_deleted_at": iso_now(),
+                    "files_deleted_by": user,
+                    "files_deleted_bytes": int(deleted_files.get("bytes", 0) or 0),
+                    "files_deleted_count": int(deleted_files.get("count", 0) or 0),
+                    "updated_at": iso_now(),
+                },
+            )
+            deleted = read_job(state, job_id) or deleted
+        payload: dict[str, Any] = {
+            "ok": True,
+            "job": public_job_record(deleted),
+            "quota": state.store.quota_status(user),
+        }
+        if deleted_files is not None:
+            payload["deleted_files"] = deleted_files if is_admin(state, user) else public_delete_result(deleted_files)
+        return payload
 
     return app
 
@@ -2004,6 +2026,50 @@ def project_artifact_usage(state: WebState, user: str, *, admin: bool) -> dict[s
         seen_paths.add(key)
         usage[project_id] = usage.get(project_id, 0) + int(row.get("size", 0) or 0)
     return usage
+
+
+def delete_job_artifact_files(state: WebState, record: dict[str, Any], user: str, *, admin: bool) -> dict[str, Any]:
+    job_id = str(record.get("id") or "")
+    rows = filter_artifacts_for_user(
+        artifact_catalog(state.config, list_jobs(state, None, include_deleted=True), include_deleted=True),
+        user,
+        admin=admin,
+    )
+    job_rows = filter_artifact_records(rows, job_id=job_id)
+    has_report_bundle = any(row.get("kind") == "report_bundle" for row in job_rows)
+    deleted: list[dict[str, Any]] = []
+    for row in sorted(job_rows, key=job_artifact_delete_priority):
+        if row.get("remote_worker_artifact") and not row.get("path"):
+            continue
+        if has_report_bundle and row.get("report") and row.get("kind") != "report_bundle" and not row.get("remote_preview"):
+            continue
+        if not row.get("path") and not row.get("remote_preview"):
+            continue
+        try:
+            result = safe_delete_artifact_record(row, state.config)
+        except ValueError as exc:
+            result = {"items": [{"deleted": False, "error": str(exc)}], "bytes": 0}
+        deleted.append(
+            {
+                "artifact_id": row.get("id"),
+                "kind": row.get("kind"),
+                "name": row.get("name"),
+                "result": result,
+            }
+        )
+    return {
+        "count": len(deleted),
+        "bytes": sum(int(item.get("result", {}).get("bytes", 0) or 0) for item in deleted),
+        "items": deleted,
+    }
+
+
+def job_artifact_delete_priority(row: dict[str, Any]) -> tuple[int, str]:
+    if row.get("kind") == "report_bundle":
+        return (0, str(row.get("id") or ""))
+    if row.get("remote_preview"):
+        return (1, str(row.get("id") or ""))
+    return (2, str(row.get("id") or ""))
 
 
 def worker_status_payload(state: WebState) -> dict[str, Any]:
