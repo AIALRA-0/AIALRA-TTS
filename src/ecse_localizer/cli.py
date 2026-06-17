@@ -4,6 +4,7 @@ import argparse
 import json
 import shutil
 import sys
+import time
 import traceback
 from pathlib import Path
 from typing import Any
@@ -108,6 +109,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--worker-id", default="local-windows-worker")
     p.add_argument("--skip-remote", action="store_true")
     p.add_argument("--json", action="store_true")
+    p = sub.add_parser("worker")
+    p.add_argument("--remote-base-url", required=True)
+    p.add_argument("--worker-token", required=True)
+    p.add_argument("--worker-id", default="local-windows-worker")
+    p.add_argument("--interval-seconds", type=int, default=15)
+    p.add_argument("--heartbeat-interval-seconds", type=int, default=60)
+    p.add_argument("--once", action="store_true")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--no-heartbeat", action="store_true")
+    p.add_argument("--heartbeat-only", action="store_true")
     p = sub.add_parser("cleanup")
     p.add_argument("--older-than-days", type=int, default=7)
     p.add_argument("--apply", action="store_true", help="Delete files. Without this flag cleanup is a dry run.")
@@ -163,6 +174,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_worker_status(args, config)
         if args.command == "worker-health":
             return cmd_worker_health(args, config)
+        if args.command == "worker":
+            return cmd_worker(args, config)
         if args.command == "cleanup":
             return cmd_cleanup(args, config)
         if args.command == "worker-poll":
@@ -373,6 +386,63 @@ def cmd_cleanup(args: argparse.Namespace, config: dict[str, Any]) -> int:
     result = cleanup_expired_files(config, older_than_days=args.older_than_days, dry_run=not args.apply)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
+
+
+def cmd_worker(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    if args.once:
+        heartbeat = {"sent": False, "skipped": True}
+        if not args.no_heartbeat:
+            heartbeat = send_worker_heartbeat(args, config)
+        poll_result = None
+        if not args.heartbeat_only:
+            poll_result = poll_once(
+                remote_base_url=args.remote_base_url,
+                worker_token=args.worker_token,
+                worker_id=args.worker_id,
+                config=config,
+                config_path=args.config,
+                dry_run=args.dry_run,
+            )
+        print(json.dumps({"ok": True, "heartbeat": heartbeat, "poll": poll_result}, ensure_ascii=False, indent=2))
+        return 0
+    worker_loop(args, config)
+    return 0
+
+
+def worker_loop(args: argparse.Namespace, config: dict[str, Any]) -> None:
+    last_heartbeat = 0.0
+    while True:
+        now = time.time()
+        if not args.no_heartbeat and now - last_heartbeat >= max(5, args.heartbeat_interval_seconds):
+            try:
+                send_worker_heartbeat(args, config)
+                last_heartbeat = now
+            except Exception as exc:
+                print(f"worker heartbeat warning: {type(exc).__name__}", file=sys.stderr)
+        if not args.heartbeat_only:
+            try:
+                poll_once(
+                    remote_base_url=args.remote_base_url,
+                    worker_token=args.worker_token,
+                    worker_id=args.worker_id,
+                    config=config,
+                    config_path=args.config,
+                    dry_run=args.dry_run,
+                )
+            except Exception as exc:
+                print(f"worker poll warning: {type(exc).__name__}", file=sys.stderr)
+        sleep_seconds = args.heartbeat_interval_seconds if args.heartbeat_only else args.interval_seconds
+        time.sleep(max(5, int(sleep_seconds or 15)))
+
+
+def send_worker_heartbeat(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]:
+    payload = build_worker_status_payload(config, worker_id=args.worker_id)
+    response = post_worker_heartbeat(args.remote_base_url, args.worker_token, payload)
+    return {
+        "sent": True,
+        "ok": bool(response.get("ok", True)) if isinstance(response, dict) else True,
+        "worker": response.get("worker", {}) if isinstance(response, dict) else {},
+    }
 
 
 def cmd_worker_poll(args: argparse.Namespace, config: dict[str, Any]) -> int:

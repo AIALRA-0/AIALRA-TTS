@@ -70,6 +70,10 @@ Deployment steps:
      ```powershell
      .\07_worker_poll.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
      ```
+   - preferred direct worker entry:
+     ```powershell
+     python -m ecse_localizer worker --remote-base-url "https://your-domain.example" --worker-token "$env:WORKER_SHARED_TOKEN"
+     ```
    - queued job metadata for source language, target subtitle language, TTS language, quality mode, and style is applied on the Windows worker through a generated local job config under `runs/worker_job_configs`.
    - if the Windows worker heartbeat is missing or stale, new jobs must stay `queued` and the UI must show that they are waiting for the local worker, not that GPU processing has already started.
    - during long jobs, the worker posts `running` status updates with best-effort progress, GPU/CPU/disk metrics, local managed-storage byte counts, and a short log tail; do not require Contabo to read Windows log files directly.

@@ -93,6 +93,12 @@ Windows worker queue polling:
 .\07_worker_poll.ps1 -RemoteBaseUrl $env:REMOTE_PUBLIC_BASE_URL -WorkerToken $env:WORKER_SHARED_TOKEN
 ```
 
+The preferred long-running worker entry is now the unified worker mode. It sends HMAC-signed heartbeats and claims queued jobs from the same process:
+
+```powershell
+python -m ecse_localizer worker --remote-base-url $env:REMOTE_PUBLIC_BASE_URL --worker-token $env:WORKER_SHARED_TOKEN
+```
+
 For Contabo production, set `webui.execution_mode: "worker_queue"` in the remote config. In this mode the web server only queues jobs; the Windows worker claims them and runs local GPU/CPU processing. If the worker heartbeat is missing or stale, the WebUI keeps the job queued and shows `等待 worker` instead of claiming the task has started.
 
 Worker API authentication supports signed requests. Production remote config should set `webui.worker_auth_mode: "hmac"` and `webui.worker_require_nonce: true` so worker heartbeat, claim, and status requests must include `X-Worker-Timestamp`, `X-Worker-Nonce`, and `X-Worker-Signature`; the shared secret stays in `WORKER_SHARED_TOKEN` and is not sent as a plaintext header. The nonce is part of the signature and is remembered for the timestamp window, so replaying a captured signed request is rejected. Local development can keep `hmac_or_token` for compatibility with older scripts.
@@ -183,6 +189,7 @@ python -m ecse_localizer platform-check --output ".\runs\platform_check"
 python -m ecse_localizer tts-health
 python -m ecse_localizer worker-status
 python -m ecse_localizer worker-health --skip-remote
+python -m ecse_localizer worker --remote-base-url "https://example.invalid" --worker-token "<token>" --once --dry-run
 python -m ecse_localizer worker-poll --remote-base-url "https://example.invalid" --worker-token "<token>" --once --dry-run
 python -m ecse_localizer --config deploy/config.remote.yaml deploy-check
 python -m ecse_localizer release-check

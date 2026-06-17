@@ -1,0 +1,114 @@
+import json
+from pathlib import Path
+
+import yaml
+
+from ecse_localizer.cli import main
+
+
+def write_config(tmp_path: Path) -> Path:
+    config = {
+        "input_dir": str(tmp_path / "input"),
+        "output_dir": str(tmp_path / "output"),
+        "work_dir": str(tmp_path / "runs"),
+        "privacy": {
+            "allow_cloud_api": False,
+            "allow_upload_media": False,
+            "allow_voice_clone_without_consent": False,
+        },
+        "webui": {
+            "platform_dir": str(tmp_path / "platform"),
+            "job_dir": str(tmp_path / "jobs"),
+            "upload_dir": str(tmp_path / "uploads"),
+        },
+    }
+    Path(config["input_dir"]).mkdir()
+    Path(config["output_dir"]).mkdir()
+    Path(config["work_dir"]).mkdir()
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    return path
+
+
+def test_worker_once_sends_heartbeat_then_polls(monkeypatch, tmp_path, capsys):
+    calls = []
+
+    def fake_build_payload(config, *, worker_id):
+        calls.append(("build", worker_id))
+        return {"worker_id": worker_id, "privacy": config["privacy"], "metrics": {}, "capabilities": {}}
+
+    def fake_heartbeat(remote_base_url, worker_token, payload):
+        calls.append(("heartbeat", remote_base_url, worker_token, payload["worker_id"]))
+        return {"ok": True, "worker": {"status": "online"}}
+
+    def fake_poll_once(**kwargs):
+        calls.append(("poll", kwargs["remote_base_url"], kwargs["worker_token"], kwargs["worker_id"], kwargs["dry_run"]))
+        return {"ok": True, "claimed": False}
+
+    monkeypatch.setattr("ecse_localizer.cli.build_worker_status_payload", fake_build_payload)
+    monkeypatch.setattr("ecse_localizer.cli.post_worker_heartbeat", fake_heartbeat)
+    monkeypatch.setattr("ecse_localizer.cli.poll_once", fake_poll_once)
+
+    rc = main(
+        [
+            "--config",
+            str(write_config(tmp_path)),
+            "worker",
+            "--remote-base-url",
+            "https://remote.example",
+            "--worker-token",
+            "worker-token",
+            "--worker-id",
+            "worker-1",
+            "--once",
+            "--dry-run",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    assert rc == 0
+    assert payload["heartbeat"]["ok"] is True
+    assert payload["poll"] == {"ok": True, "claimed": False}
+    assert calls == [
+        ("build", "worker-1"),
+        ("heartbeat", "https://remote.example", "worker-token", "worker-1"),
+        ("poll", "https://remote.example", "worker-token", "worker-1", True),
+    ]
+    assert "worker-token" not in output
+
+
+def test_worker_once_can_skip_heartbeat(monkeypatch, tmp_path, capsys):
+    calls = []
+
+    def fake_heartbeat(*args, **kwargs):
+        raise AssertionError("heartbeat should be skipped")
+
+    def fake_poll_once(**kwargs):
+        calls.append(("poll", kwargs["worker_id"], kwargs["dry_run"]))
+        return {"ok": True, "claimed": False}
+
+    monkeypatch.setattr("ecse_localizer.cli.post_worker_heartbeat", fake_heartbeat)
+    monkeypatch.setattr("ecse_localizer.cli.poll_once", fake_poll_once)
+
+    rc = main(
+        [
+            "--config",
+            str(write_config(tmp_path)),
+            "worker",
+            "--remote-base-url",
+            "https://remote.example",
+            "--worker-token",
+            "worker-token",
+            "--worker-id",
+            "worker-1",
+            "--once",
+            "--dry-run",
+            "--no-heartbeat",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert payload["heartbeat"] == {"sent": False, "skipped": True}
+    assert calls == [("poll", "worker-1", True)]

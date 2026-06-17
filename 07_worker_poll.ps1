@@ -3,8 +3,10 @@ param(
   [string]$WorkerToken = $env:WORKER_SHARED_TOKEN,
   [string]$WorkerId = "local-windows-worker",
   [int]$IntervalSeconds = 15,
+  [int]$HeartbeatIntervalSeconds = 60,
   [switch]$Once,
-  [switch]$DryRun
+  [switch]$DryRun,
+  [switch]$NoHeartbeat
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,13 +19,16 @@ if (-not $WorkerToken) { throw "WorkerToken is required. Set WORKER_SHARED_TOKEN
 $argsList = @(
   "-m", "ecse_localizer",
   "--config", (Join-Path $ProjectRoot "config.yaml"),
-  "worker-poll",
+  "worker",
   "--remote-base-url", $RemoteBaseUrl,
   "--worker-token", $WorkerToken,
   "--worker-id", $WorkerId,
-  "--interval-seconds", [string]$IntervalSeconds
+  "--interval-seconds", [string]$IntervalSeconds,
+  "--heartbeat-interval-seconds", [string]$HeartbeatIntervalSeconds
 )
 if ($Once) { $argsList += "--once" }
 if ($DryRun) { $argsList += "--dry-run" }
+if ($NoHeartbeat) { $argsList += "--no-heartbeat" }
 
 & $Py @argsList
+exit $LASTEXITCODE
