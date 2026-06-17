@@ -13,6 +13,7 @@ from ecse_localizer.webui import (
     soft_delete_job,
     update_job,
     worker_args_from_command,
+    worker_status_payload,
     worker_status_changes,
 )
 from ecse_localizer.worker_client import redacted_command, summarize_result, worker_args
@@ -56,6 +57,17 @@ def test_worker_args_are_portable(tmp_path):
     )
     args = worker_args_from_command(command)
     assert args == ["process-one", "--video", r"C:\worker-local\lecture.mp4"]
+
+
+def test_worker_status_payload_marks_missing_worker_unavailable(tmp_path):
+    state = WebState(write_config(tmp_path))
+    payload = worker_status_payload(state)
+    assert payload["execution_mode"] == "worker_queue"
+    assert payload["worker_required"] is True
+    assert payload["heartbeat_online"] is False
+    assert payload["available"] is False
+    assert payload["status"] == "local"
+    assert "queued jobs will wait" in payload["message"]
 
 
 def test_command_with_config_replaces_only_config_path(tmp_path):

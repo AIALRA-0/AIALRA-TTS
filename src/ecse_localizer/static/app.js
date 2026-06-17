@@ -176,7 +176,9 @@ async function loadDashboard() {
   const gpu = (data.metrics?.gpu || [])[0] || {};
   $("metricGpu").textContent = gpu.available ? `${Math.round(gpu.util_percent)}% / ${Math.round(gpu.memory_used_percent)}%` : "未检测";
   $("metricQuota").textContent = data.quota ? `${formatBytes(data.quota.local_used_bytes)} / ${formatBytes(data.quota.local_quota_bytes)}` : "-";
-  $("metricWorker").textContent = data.worker?.status || "local";
+  const workerMetric = $("metricWorker");
+  workerMetric.textContent = workerLabel(data.worker);
+  workerMetric.title = data.worker?.message || "";
   $("metricDisk").textContent = data.metrics?.disk ? `${Math.round(data.metrics.disk.used_percent)}%` : "-";
   state.projects = data.projects || [];
   renderProjectOptions();
@@ -184,6 +186,16 @@ async function loadDashboard() {
   renderProjects();
   state.reports = data.latest_reports || [];
   renderReports();
+}
+
+function workerLabel(worker) {
+  if (!worker) return "local";
+  if (worker.execution_mode === "worker_queue") {
+    if (worker.heartbeat_online) return worker.age_seconds != null ? `online ${worker.age_seconds}s` : "online";
+    if (worker.status === "offline") return "离线等待";
+    return "等待 worker";
+  }
+  return worker.status === "online" ? "online" : "local";
 }
 
 async function loadVideos() {
@@ -707,7 +719,7 @@ async function startJob(event) {
   };
   try {
     const result = await api("/api/jobs", { method: "POST", body: JSON.stringify(payload) });
-    toast(`任务已启动：${result.job.title}`);
+    toast(jobSubmitMessage(result));
     state.selectedJob = result.job.id;
     showTab("jobs");
     await refreshJobs();
@@ -715,6 +727,17 @@ async function startJob(event) {
   } catch (error) {
     toast(`启动失败：${error.message}`);
   }
+}
+
+function jobSubmitMessage(result) {
+  const job = result.job || {};
+  const title = job.title || job.type || "任务";
+  if (result.dispatch?.target === "worker") {
+    const worker = result.dispatch.worker || {};
+    if (worker.heartbeat_online) return `任务已排队，worker 在线：${title}`;
+    return `任务已排队，等待本地 worker：${title}`;
+  }
+  return `任务已启动：${title}`;
 }
 
 async function refreshJobs() {
@@ -736,6 +759,7 @@ function renderJobs() {
   for (const job of state.jobs) {
     const item = document.createElement("div");
     item.className = "job-item";
+    const workerLine = workerJobLine(job);
     item.innerHTML = `
       <div class="job-title">
         <span>${escapeHtml(job.title || job.type)}</span>
@@ -743,6 +767,7 @@ function renderJobs() {
       </div>
       <div class="job-meta">${escapeHtml(job.created_at || "")} · ${escapeHtml(job.id)}</div>
       <div class="job-meta">${escapeHtml(job.user || "")} · ${escapeHtml(job.metadata?.project_id || "")} · ${escapeHtml(job.metadata?.quality_mode || "")}</div>
+      ${workerLine ? `<div class="job-meta">${escapeHtml(workerLine)}</div>` : ""}
       <div class="job-actions"></div>
     `;
     const actions = item.querySelector(".job-actions");
@@ -774,6 +799,18 @@ function renderJobs() {
     });
     list.appendChild(item);
   }
+}
+
+function workerJobLine(job) {
+  if (job.dispatch_target !== "worker") return "";
+  const submitted = job.metadata?.worker_status_at_submit || job.worker_status_at_submit || {};
+  if (job.status === "queued" || job.status === "retrying") {
+    if (submitted.heartbeat_online === false) return `worker：等待本地 worker 心跳（提交时 ${submitted.status || "unknown"}）`;
+    return "worker：已排队，等待领取";
+  }
+  if (job.claimed_by) return `worker：${job.claimed_by}`;
+  if (submitted.status) return `worker：提交时 ${submitted.status}`;
+  return "worker：队列任务";
 }
 
 function canRetryJob(status) {

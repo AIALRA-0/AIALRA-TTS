@@ -176,7 +176,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             "llm": llm.__dict__,
             "quota": state.store.quota_status(user),
             "projects": state.store.list_projects(user, admin=is_admin(state, user)),
-            "worker": state.store.worker_status(),
+            "worker": worker_status_payload(state),
             "metrics": collect_system_metrics(state.config),
         }
 
@@ -376,7 +376,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.get("/api/metrics")
     def metrics(user: str = Depends(require_user)) -> dict[str, Any]:
-        return {"metrics": collect_system_metrics(state.config), "worker": state.store.worker_status(), "quota": state.store.quota_status(user)}
+        return {"metrics": collect_system_metrics(state.config), "worker": worker_status_payload(state), "quota": state.store.quota_status(user)}
 
     @app.get("/api/users")
     def users(user: str = Depends(require_user)) -> dict[str, Any]:
@@ -488,8 +488,12 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         template_params = template_params_for_job(state, user, body)
         metadata = job_metadata_from_body(body, template_params=template_params)
         validate_job_project(state, user, metadata)
+        worker_info: dict[str, Any] | None = None
         if worker_queue:
+            worker_info = worker_status_payload(state)
             metadata["worker_args"] = worker_args_from_command(command)
+            metadata["worker_status_at_submit"] = worker_info
+            metadata["worker_queue_note"] = worker_info["message"]
         record = create_job_record(
             state,
             job_type,
@@ -500,7 +504,15 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             dispatch_target="worker" if worker_queue else "local",
         )
         if worker_queue:
-            update_job(state, record["id"], {"status": "queued", "queued_for_worker": True})
+            update_job(
+                state,
+                record["id"],
+                {
+                    "status": "queued",
+                    "queued_for_worker": True,
+                    "worker_status_at_submit": worker_info,
+                },
+            )
             record = read_job(state, record["id"]) or record
         else:
             job_config_path = write_job_config(state.config, metadata, job_id=record["id"])
@@ -511,7 +523,15 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             record = read_job(state, record["id"]) or record
             thread = threading.Thread(target=run_job, args=(state, record["id"]), daemon=True)
             thread.start()
-        return {"ok": True, "job": record}
+        return {
+            "ok": True,
+            "job": record,
+            "dispatch": {
+                "target": "worker" if worker_queue else "local",
+                "queued": worker_queue,
+                "worker": worker_info,
+            },
+        }
 
     @app.post("/api/jobs/{job_id}/cancel")
     def cancel_job(job_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
@@ -789,6 +809,36 @@ def project_artifact_usage(state: WebState, user: str, *, admin: bool) -> dict[s
         seen_paths.add(key)
         usage[project_id] = usage.get(project_id, 0) + int(row.get("size", 0) or 0)
     return usage
+
+
+def worker_status_payload(state: WebState) -> dict[str, Any]:
+    row = dict(state.store.worker_status())
+    execution_mode = str(state.webui.get("execution_mode", "local_subprocess") or "local_subprocess")
+    status = str(row.get("status") or "unknown")
+    worker_required = execution_mode == "worker_queue"
+    heartbeat_online = status == "online"
+    available = heartbeat_online if worker_required else True
+    if worker_required:
+        if heartbeat_online:
+            message = "Worker online; queued jobs can be claimed."
+        elif status == "offline":
+            age = row.get("age_seconds")
+            message = f"Worker heartbeat is stale ({age}s); queued jobs will wait."
+        else:
+            message = "No worker heartbeat yet; queued jobs will wait for the Windows worker."
+    else:
+        message = "Local subprocess mode; worker queue is not required."
+    row.update(
+        {
+            "execution_mode": execution_mode,
+            "worker_required": worker_required,
+            "heartbeat_online": heartbeat_online,
+            "available": available,
+            "queue_accepting": True,
+            "message": message,
+        }
+    )
+    return row
 
 
 def worker_args_from_command(command: list[str]) -> list[str]:

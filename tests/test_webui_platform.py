@@ -148,3 +148,34 @@ def test_webui_admin_can_update_user_quota_and_disable(tmp_path):
 
     response = admin.patch("/api/users/admin", json={"role": "user"})
     assert response.status_code == 400
+
+
+def test_worker_queue_submit_reports_waiting_worker(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config["webui"]["worker_token"] = "worker-token"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+
+    response = client.get("/api/dashboard")
+    assert response.status_code == 200
+    worker = response.json()["worker"]
+    assert worker["execution_mode"] == "worker_queue"
+    assert worker["available"] is False
+
+    project = client.get("/api/projects").json()["projects"][0]
+    response = client.post("/api/jobs", json={"type": "audit", "project_id": project["id"], "folder_id": "root"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dispatch"]["target"] == "worker"
+    assert payload["dispatch"]["worker"]["available"] is False
+    assert payload["job"]["queued_for_worker"] is True
+    assert payload["job"]["metadata"]["worker_status_at_submit"]["available"] is False
+    assert payload["job"]["metadata"]["worker_args"][0] == "audit"
