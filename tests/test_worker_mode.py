@@ -112,3 +112,50 @@ def test_worker_once_can_skip_heartbeat(monkeypatch, tmp_path, capsys):
     assert rc == 0
     assert payload["heartbeat"] == {"sent": False, "skipped": True}
     assert calls == [("poll", "worker-1", True)]
+
+
+def test_worker_local_check_does_not_require_remote_or_token(monkeypatch, tmp_path, capsys):
+    def fake_build_payload(config, *, worker_id):
+        return {
+            "worker_id": worker_id,
+            "version": "test",
+            "privacy": config["privacy"],
+            "metrics": {
+                "cpu": {"load_percent": 10},
+                "memory": {"used_percent": 20},
+                "gpu": [{"available": True}],
+                "local_storage": {"managed_bytes": 0, "total_reported_bytes": 0, "roots": []},
+            },
+            "capabilities": {
+                "asr": {"available": True, "supported_languages": ["auto", "en"]},
+                "translation": {"available": True, "supported_target_languages": ["zh-CN"]},
+                "tts": {"available": True, "supported_languages": ["zh-CN"]},
+            },
+        }
+
+    def fake_heartbeat(*args, **kwargs):
+        raise AssertionError("local check must not send heartbeat")
+
+    def fake_poll_once(**kwargs):
+        raise AssertionError("local check must not poll remote")
+
+    monkeypatch.setattr("ecse_localizer.cli.build_worker_health_payload", fake_build_payload)
+    monkeypatch.setattr("ecse_localizer.cli.post_worker_heartbeat", fake_heartbeat)
+    monkeypatch.setattr("ecse_localizer.cli.poll_once", fake_poll_once)
+
+    rc = main(["--config", str(write_config(tmp_path)), "worker", "--local-check"])
+
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    assert rc == 0
+    assert payload["mode"] == "worker_local_check"
+    assert payload["health"]["pass"] is True
+    assert "worker-token" not in output
+    assert "C:\\Users" not in output
+
+
+def test_worker_remote_args_required_without_local_check(tmp_path, capsys):
+    rc = main(["--config", str(write_config(tmp_path)), "worker", "--once", "--dry-run"])
+
+    assert rc == 1
+    assert "requires --remote-base-url" in capsys.readouterr().err

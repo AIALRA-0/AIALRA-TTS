@@ -72,6 +72,7 @@ Deployment steps:
      ```
    - preferred direct worker entry:
      ```powershell
+     python -m ecse_localizer worker --local-check
      python -m ecse_localizer worker --remote-base-url "https://your-domain.example" --worker-token "$env:WORKER_SHARED_TOKEN"
      ```
    - queued job metadata for source language, target subtitle language, TTS language, quality mode, and style is applied on the Windows worker through a generated local job config under `runs/worker_job_configs`.

@@ -110,8 +110,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--skip-remote", action="store_true")
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("worker")
-    p.add_argument("--remote-base-url", required=True)
-    p.add_argument("--worker-token", required=True)
+    p.add_argument("--remote-base-url")
+    p.add_argument("--worker-token")
     p.add_argument("--worker-id", default="local-windows-worker")
     p.add_argument("--interval-seconds", type=int, default=15)
     p.add_argument("--heartbeat-interval-seconds", type=int, default=60)
@@ -119,6 +119,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--no-heartbeat", action="store_true")
     p.add_argument("--heartbeat-only", action="store_true")
+    p.add_argument("--local-check", action="store_true", help="Run local worker readiness checks without contacting the remote server.")
     p = sub.add_parser("cleanup")
     p.add_argument("--older-than-days", type=int, default=7)
     p.add_argument("--apply", action="store_true", help="Delete files. Without this flag cleanup is a dry run.")
@@ -389,6 +390,22 @@ def cmd_cleanup(args: argparse.Namespace, config: dict[str, Any]) -> int:
 
 
 def cmd_worker(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    if args.local_check:
+        payload = build_worker_health_payload(config, worker_id=args.worker_id)
+        health = assess_worker_health(payload, remote_checked=False)
+        result = {
+            "ok": bool(health["pass"]),
+            "mode": "worker_local_check",
+            "worker_id": args.worker_id,
+            "health": health,
+            "capabilities": payload.get("capabilities", {}),
+        }
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if health["pass"] else 2
+    if not args.remote_base_url:
+        raise RuntimeError("worker requires --remote-base-url unless --local-check is used")
+    if not args.worker_token:
+        raise RuntimeError("worker requires --worker-token unless --local-check is used")
     if args.once:
         heartbeat = {"sent": False, "skipped": True}
         if not args.no_heartbeat:

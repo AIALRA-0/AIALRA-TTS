@@ -96,6 +96,7 @@ Windows worker queue polling:
 The preferred long-running worker entry is now the unified worker mode. It sends HMAC-signed heartbeats and claims queued jobs from the same process:
 
 ```powershell
+python -m ecse_localizer worker --local-check
 python -m ecse_localizer worker --remote-base-url $env:REMOTE_PUBLIC_BASE_URL --worker-token $env:WORKER_SHARED_TOKEN
 ```
 
@@ -189,8 +190,9 @@ python -m ecse_localizer platform-check --output ".\runs\platform_check"
 python -m ecse_localizer tts-health
 python -m ecse_localizer worker-status
 python -m ecse_localizer worker-health --skip-remote
-python -m ecse_localizer worker --remote-base-url "https://example.invalid" --worker-token "<token>" --once --dry-run
-python -m ecse_localizer worker-poll --remote-base-url "https://example.invalid" --worker-token "<token>" --once --dry-run
+python -m ecse_localizer worker --local-check
+python -m ecse_localizer worker --remote-base-url "https://your-domain.example" --worker-token "<token>" --once --dry-run
+python -m ecse_localizer worker-poll --remote-base-url "https://your-domain.example" --worker-token "<token>" --once --dry-run
 python -m ecse_localizer --config deploy/config.remote.yaml deploy-check
 python -m ecse_localizer release-check
 python -m ecse_localizer cleanup --older-than-days 7
