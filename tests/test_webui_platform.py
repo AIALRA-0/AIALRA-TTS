@@ -16,7 +16,16 @@ else:
 from ecse_localizer.artifacts import artifact_catalog
 from ecse_localizer.platform_store import safe_worker_id
 from ecse_localizer.utils import read_json
-from ecse_localizer.webui import create_app, create_job_record, fields_from_config, list_all_video_records, read_job, resolve_video_reference, update_job
+from ecse_localizer.webui import (
+    create_app,
+    create_job_record,
+    fields_from_config,
+    list_all_video_records,
+    read_job,
+    resolve_video_reference,
+    safe_upload_name,
+    update_job,
+)
 from ecse_localizer.worker_client import worker_headers
 
 
@@ -68,6 +77,14 @@ def test_static_ui_does_not_expose_raw_worker_path_placeholder():
 
     assert r"D:\worker-media" not in html
     assert "jobWorkerVideoPath" in html
+
+
+def test_safe_upload_name_strips_paths_and_windows_reserved_names():
+    assert safe_upload_name(r"C:\private\lecture.mp4") == "lecture.mp4"
+    assert safe_upload_name("../private/lecture.mp4") == "lecture.mp4"
+    assert safe_upload_name("bad:name?.mp4") == "bad_name_.mp4"
+    assert safe_upload_name("CON.mp4") == "upload_CON.mp4"
+    assert safe_upload_name("nul.wav") == "upload_nul.wav"
 
 
 def test_static_settings_ui_is_admin_only():

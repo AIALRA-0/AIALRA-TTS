@@ -55,6 +55,14 @@ TOKEN_TTL_SECONDS = 12 * 60 * 60
 SAFE_HTTP_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 ACTIVE_JOB_STATUSES = {"queued", "claimed", "running", "retrying", "paused"}
 TERMINAL_JOB_STATUSES = {"done", "passed", "failed", "cancelled"}
+WINDOWS_RESERVED_FILE_STEMS = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
 JOB_SCHEMA_VERSION = 2
 NORMALIZED_JOB_STATUSES = {"queued", "claimed", "running", "paused", "retrying", "done", "failed", "cancelled", "deleted"}
 JOB_STATUS_ALIASES = {
@@ -2286,8 +2294,11 @@ def command_with_config(command: list[str], config_path: str | Path) -> list[str
 
 
 def safe_upload_name(name: str) -> str:
-    name = Path(name).name
+    name = Path(PureWindowsPath(str(name)).name).name
     cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", name).strip(" ._")
+    stem = Path(cleaned).stem.strip(" .").upper()
+    if stem in WINDOWS_RESERVED_FILE_STEMS:
+        cleaned = f"upload_{cleaned}"
     return cleaned[:180] or f"upload_{uuid.uuid4().hex[:8]}"
 
 
