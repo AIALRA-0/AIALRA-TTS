@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 import uuid
+from collections.abc import Mapping
 from pathlib import Path, PureWindowsPath
 from typing import Any
 from urllib.parse import urlparse
@@ -756,6 +757,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/api/worker/jobs/{job_id}/preview")
     async def worker_upload_preview(job_id: str, request: Request) -> dict[str, Any]:
+        enforce_worker_upload_content_length_limit(
+            request.headers,
+            state,
+            config_key="worker_preview_max_upload_mb",
+            default_mb=256,
+            label="Worker preview",
+        )
         body = await request.body()
         require_worker_token(request, state, body)
         record = read_job(state, job_id)
@@ -784,6 +792,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/api/worker/jobs/{job_id}/artifact-cache")
     async def worker_upload_artifact_cache(job_id: str, request: Request) -> dict[str, Any]:
+        enforce_worker_upload_content_length_limit(
+            request.headers,
+            state,
+            config_key="worker_artifact_cache_max_upload_mb",
+            default_mb=2048,
+            label="Worker artifact cache",
+        )
         body = await request.body()
         require_worker_token(request, state, body)
         record = read_job(state, job_id)
@@ -1195,6 +1210,32 @@ def upload_fits_quota(base_used_bytes: int, reserved_bytes: int, current_file_by
     if quota_bytes <= 0:
         return True
     return base_used_bytes + reserved_bytes + current_file_bytes <= quota_bytes
+
+
+def enforce_worker_upload_content_length_limit(
+    headers: Mapping[str, str],
+    state: WebState,
+    *,
+    config_key: str,
+    default_mb: float,
+    label: str,
+) -> None:
+    raw = headers.get("content-length") or headers.get("Content-Length")
+    if raw is None or str(raw).strip() == "":
+        return
+    try:
+        content_length = int(str(raw).strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid Content-Length") from exc
+    if content_length < 0:
+        raise HTTPException(status_code=400, detail="Invalid Content-Length")
+    configured_mb = state.webui.get(config_key, default_mb)
+    try:
+        max_bytes = int(float(configured_mb or default_mb) * 1024 * 1024)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail=f"Invalid {config_key}") from exc
+    if content_length > max_bytes:
+        raise HTTPException(status_code=413, detail=f"{label} exceeds {configured_mb or default_mb} MB")
 
 
 def browser_upload_policy(state: WebState) -> dict[str, Any]:

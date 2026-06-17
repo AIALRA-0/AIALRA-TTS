@@ -17,6 +17,7 @@ from ecse_localizer.webui import (
     create_job_record,
     enforce_artifact_cache_request_limits,
     enforce_active_job_limits,
+    enforce_worker_upload_content_length_limit,
     file_display_name,
     filter_job_records,
     infer_job_type,
@@ -1273,3 +1274,47 @@ def test_artifact_cache_request_preflight_enforces_single_file_limit_without_tes
         assert "Worker artifact cache exceeds 1 MB" in str(exc)
     else:
         raise AssertionError("expected artifact cache request to enforce cache size limit")
+
+
+def test_worker_preview_content_length_preflight_rejects_oversize_without_body(tmp_path):
+    config_path = write_config(tmp_path)
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    data["webui"]["worker_preview_max_upload_mb"] = 1
+    config_path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    state = WebState(config_path)
+
+    try:
+        enforce_worker_upload_content_length_limit(
+            {"content-length": str(2 * 1024 * 1024)},
+            state,
+            config_key="worker_preview_max_upload_mb",
+            default_mb=256,
+            label="Worker preview",
+        )
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 413
+        assert "Worker preview exceeds 1 MB" in str(exc)
+    else:
+        raise AssertionError("expected worker preview preflight to reject oversized content length")
+
+
+def test_worker_artifact_cache_content_length_preflight_rejects_oversize_without_body(tmp_path):
+    config_path = write_config(tmp_path)
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    data["webui"]["worker_artifact_cache_max_upload_mb"] = 1
+    config_path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    state = WebState(config_path)
+
+    try:
+        enforce_worker_upload_content_length_limit(
+            {"Content-Length": str(2 * 1024 * 1024)},
+            state,
+            config_key="worker_artifact_cache_max_upload_mb",
+            default_mb=2048,
+            label="Worker artifact cache",
+        )
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 413
+        assert "Worker artifact cache exceeds 1 MB" in str(exc)
+    else:
+        raise AssertionError("expected worker artifact cache preflight to reject oversized content length")
