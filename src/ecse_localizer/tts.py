@@ -159,6 +159,9 @@ def build_aligned_dub(
     min_audio_gap = float(tts_cfg.get("min_audio_gap_seconds", 0.08))
     flags: list[dict[str, Any]] = []
     audio_delays: list[float] = []
+    placements: list[dict[str, Any]] = []
+    audio_overlap_count = 0
+    truncated_audio_count = 0
     previous_audio_end: float | None = None
     backend_used = None
     prefer_cosyvoice = select_tts_backend(config) == "cosyvoice_sft"
@@ -175,7 +178,7 @@ def build_aligned_dub(
             if logger:
                 logger.warning("CosyVoice batch synthesis failed; falling back to Piper per segment: %s", exc)
 
-    for unit in units:
+    for index, unit in enumerate(units):
         if not unit.text.strip():
             continue
         clip = work / (f"seg_{unit.id:05d}_cosy.wav" if prefer_cosyvoice else f"seg_{unit.id:05d}.wav")
@@ -194,7 +197,20 @@ def build_aligned_dub(
             backend_used = backend_used or select_tts_backend(config)
 
         clip_dur = audio_duration(clip)
-        target = max(0.25, unit.duration - end_gap)
+        next_unit = units[index + 1] if index + 1 < len(units) else None
+        unconstrained_target = tts_unconstrained_target_duration(unit, video_duration, config)
+        target = tts_target_duration(unit, next_unit, video_duration, config)
+        if target < unconstrained_target - 0.01:
+            flags.append(
+                {
+                    "segment_id": unit.id,
+                    "segment_ids": unit.segment_ids,
+                    "type": "tts_slot_constrained",
+                    "unconstrained_target_duration": round(unconstrained_target, 3),
+                    "target_duration": round(target, 3),
+                    "next_start": round(next_unit.start, 3) if next_unit else None,
+                }
+            )
         final_clip = clip
         if clip_dur < target * min_fill:
             desired_duration = max(clip_dur, target * target_fill)
@@ -322,6 +338,9 @@ def build_aligned_dub(
         )
         scheduled_start = unit.start
         pcm_dur = audio_duration(pcm)
+        would_overlap = previous_audio_end is not None and scheduled_start < previous_audio_end + min_audio_gap
+        if would_overlap:
+            audio_overlap_count += 1
         if prevent_overlap and previous_audio_end is not None:
             scheduled_start = max(scheduled_start, previous_audio_end + min_audio_gap)
         scheduled_start = max(0.0, min(scheduled_start, video_duration))
@@ -329,7 +348,35 @@ def build_aligned_dub(
         if delay > 0.005:
             audio_delays.append(delay)
         overlay_pcm(mix, pcm, int(scheduled_start * sample_rate))
-        previous_audio_end = min(video_duration, scheduled_start + pcm_dur)
+        scheduled_end = scheduled_start + pcm_dur
+        clipped_end = min(video_duration, scheduled_end)
+        truncated = max(0.0, scheduled_end - video_duration)
+        if truncated > 0.01:
+            truncated_audio_count += 1
+            flags.append(
+                {
+                    "segment_id": unit.id,
+                    "segment_ids": unit.segment_ids,
+                    "type": "tts_audio_truncated_at_video_end",
+                    "scheduled_start": round(scheduled_start, 3),
+                    "pcm_duration": round(pcm_dur, 3),
+                    "truncated_seconds": round(truncated, 3),
+                }
+            )
+        placements.append(
+            {
+                "segment_id": unit.id,
+                "segment_ids": unit.segment_ids,
+                "original_start": round(unit.start, 3),
+                "original_end": round(unit.end, 3),
+                "scheduled_start": round(scheduled_start, 3),
+                "scheduled_end": round(clipped_end, 3),
+                "pcm_duration": round(pcm_dur, 3),
+                "delay_seconds": round(delay, 3),
+                "truncated_seconds": round(truncated, 3),
+            }
+        )
+        previous_audio_end = clipped_end
 
     final_out = Path(out_wav)
     raw_mix = final_out.with_name(final_out.stem + "_rawmix.wav")
@@ -370,9 +417,12 @@ def build_aligned_dub(
         "speaker": speaker_info.get("speaker"),
         "speaker_gender": speaker_info,
         "prevent_audio_overlap": prevent_overlap,
-        "audio_overlap_count": 0 if prevent_overlap else None,
+        "audio_overlap_count": 0 if prevent_overlap else audio_overlap_count,
+        "would_overlap_without_prevention_count": audio_overlap_count if prevent_overlap else None,
         "audio_delay_count": len(audio_delays),
         "max_audio_delay_seconds": round(max(audio_delays) if audio_delays else 0.0, 3),
+        "truncated_audio_count": truncated_audio_count,
+        "placements": placements[:200],
     }
 
 
@@ -442,6 +492,26 @@ def estimate_spoken_duration(text: str, chars_per_second: float) -> float:
     latin = sum(max(1, len(token) // 4) for token in re.findall(r"[A-Za-z0-9_.+-]+", text or ""))
     punctuation_pause = 0.12 * len(re.findall(r"[。！？!?；;]", text or ""))
     return (cjk + latin) / max(chars_per_second, 0.1) + punctuation_pause
+
+
+def tts_unconstrained_target_duration(unit: TTSUnit, video_duration: float, config: dict) -> float:
+    tts_cfg = config.get("tts", {})
+    end_gap = float(tts_cfg.get("end_gap_seconds", 0.2))
+    available = max(0.0, min(unit.end, video_duration) - max(0.0, unit.start))
+    return max(0.25, available - end_gap)
+
+
+def tts_target_duration(unit: TTSUnit, next_unit: TTSUnit | None, video_duration: float, config: dict) -> float:
+    target = tts_unconstrained_target_duration(unit, video_duration, config)
+    tts_cfg = config.get("tts", {})
+    if not bool(tts_cfg.get("prevent_audio_overlap", True)) or next_unit is None:
+        return target
+    min_gap = float(tts_cfg.get("min_audio_gap_seconds", 0.08))
+    next_start = min(max(0.0, next_unit.start), video_duration)
+    slot = next_start - max(0.0, unit.start) - max(0.0, min_gap)
+    if slot <= 0:
+        return 0.25
+    return max(0.25, min(target, slot))
 
 
 def select_tts_backend(config: dict) -> str:

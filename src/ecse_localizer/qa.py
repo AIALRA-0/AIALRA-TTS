@@ -71,6 +71,23 @@ def run_qa(
         )
     for flag in tts_info.get("flags", []):
         issues.append({"type": "tts_overrun", "severity": "medium", **flag})
+    prevented_overlaps = int(tts_info.get("would_overlap_without_prevention_count") or 0)
+    if prevented_overlaps:
+        issues.append(
+            {
+                "type": "tts_audio_overlap_prevented",
+                "severity": "medium",
+                "count": prevented_overlaps,
+                "max_audio_delay_seconds": float(tts_info.get("max_audio_delay_seconds") or 0),
+            }
+        )
+    truncated_audio = int(tts_info.get("truncated_audio_count") or 0)
+    if truncated_audio:
+        issues.append({"type": "tts_audio_truncated", "severity": "medium", "count": truncated_audio})
+    delay_warning = float(config.get("tts", {}).get("max_audio_delay_warning_seconds", 1.5))
+    max_delay = float(tts_info.get("max_audio_delay_seconds") or 0)
+    if max_delay > delay_warning:
+        issues.append({"type": "tts_audio_delay_high", "severity": "medium", "max_audio_delay_seconds": max_delay, "threshold": delay_warning})
 
     mp4 = outputs.get("zh_dub_mp4")
     if mp4 and Path(mp4).exists():

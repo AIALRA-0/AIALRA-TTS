@@ -153,6 +153,7 @@ It fails closed when production safety settings are missing: placeholder secrets
 - Translation: local Ollama/LM Studio OpenAI-compatible endpoint only. `best_quality` reconstructs spoken paragraphs before per-segment JSON translation, then applies a course style guide, coherence pass, and deterministic quality flags for summary-like translations, over-compression, repeated calques, unchanged literal rewrites, and missing protected technical tokens such as formulas, code/file names, URLs, acronyms, variables, and model names. `fidelity-audit` reviews the finished report, and `repair-fidelity` rewrites only the failed/low-score/quality-flagged segments before regenerating subtitles, TTS, muxed video, and QA. Qwen 14B is preferred for quality; 7B is fallback.
 - `translation-sample` writes a deterministic local JSON/Markdown comparison of the same source segment across `literal`, `lecture`, `coherence`, and `repair` stages. Use it as a quick quality gate before long video runs.
 - TTS: CosyVoice SFT is the preferred local Chinese backend; Piper is a lightweight fallback. Voice cloning stays disabled unless explicit consent files are present.
+- TTS alignment: each utterance is fit against its own subtitle window and the next utterance start; reports include placement metadata, prevented overlap counts, high delay warnings, and audio truncated at the video end.
 - Subtitles: `.ass` means Advanced SubStation Alpha and is used for styled bilingual subtitles.
 
 ## Privacy And Git Safety

@@ -58,6 +58,26 @@ def test_qa_reports_translation_quality_heuristics():
     assert issues[0]["severity"] == "high"
 
 
+def test_qa_reports_tts_alignment_metadata():
+    en = [Segment(1, 0.0, 2.0, "First sentence.")]
+    zh = [Segment(1, 0.0, 2.0, "第一句。")]
+    traces = [TranslationTrace(1, en[0].text, zh[0].text, zh[0].text, 2.0, 16, [])]
+    tts_info = {
+        "duration": 2.0,
+        "flags": [],
+        "would_overlap_without_prevention_count": 2,
+        "truncated_audio_count": 1,
+        "max_audio_delay_seconds": 2.0,
+    }
+
+    qa = run_qa({}, en, zh, {}, traces, tts_info, 2.0, {"tts": {"max_audio_delay_warning_seconds": 1.0}, "qa": {}})
+    issue_types = {issue["type"] for issue in qa["issues"]}
+
+    assert "tts_audio_overlap_prevented" in issue_types
+    assert "tts_audio_truncated" in issue_types
+    assert "tts_audio_delay_high" in issue_types
+
+
 def test_fidelity_heuristics_include_quality_flags_and_repair_selection():
     en = [{"id": 4, "text": "We derive Vout = Vin * R2 / (R1 + R2) and then use sensor_readout.py."}]
     zh = [{"id": 4, "text": "这一段主要围绕两个算法展开。"}]

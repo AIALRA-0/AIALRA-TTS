@@ -3,7 +3,7 @@ from array import array
 from ecse_localizer.align import overlap_count
 from ecse_localizer.compact import schedule_compact_units
 from ecse_localizer.subtitle_io import Segment, normalize_segments, write_bilingual_ass
-from ecse_localizer.tts import TTSUnit, make_tts_units, write_pcm
+from ecse_localizer.tts import TTSUnit, make_tts_units, tts_target_duration, tts_unconstrained_target_duration, write_pcm
 
 
 def test_normalize_removes_overlap():
@@ -41,6 +41,23 @@ def test_tts_grouping_merges_short_adjacent_segments():
     units = make_tts_units(segments, config)
     assert len(units) == 1
     assert units[0].segment_ids == [1, 2, 3]
+
+
+def test_tts_target_duration_respects_next_segment_start():
+    config = {"tts": {"end_gap_seconds": 0.2, "prevent_audio_overlap": True, "min_audio_gap_seconds": 0.1}}
+    unit = TTSUnit(1, 0.0, 3.0, "第一句。", [1])
+    next_unit = TTSUnit(2, 1.5, 3.5, "第二句。", [2])
+
+    assert tts_unconstrained_target_duration(unit, 10.0, config) == 2.8
+    assert tts_target_duration(unit, next_unit, 10.0, config) == 1.4
+
+
+def test_tts_target_duration_keeps_floor_for_tight_overlap():
+    config = {"tts": {"end_gap_seconds": 0.2, "prevent_audio_overlap": True, "min_audio_gap_seconds": 0.1}}
+    unit = TTSUnit(1, 1.0, 2.0, "第一句。", [1])
+    next_unit = TTSUnit(2, 1.05, 2.5, "第二句。", [2])
+
+    assert tts_target_duration(unit, next_unit, 10.0, config) == 0.25
 
 
 def test_ass_styles_keep_zh_and_en_on_separate_bands(tmp_path):

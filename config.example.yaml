@@ -102,6 +102,7 @@ tts:
   compact_lead_in_seconds: 0.0
   prevent_audio_overlap: true
   min_audio_gap_seconds: 0.08
+  max_audio_delay_warning_seconds: 1.5
   compact_subtitle_hold_seconds: 0.18
   compact_subtitle_gap_seconds: 0.04
   auto_detect_speaker_gender: true
