@@ -39,6 +39,7 @@ from .subtitle_io import (
 from .translate import translate_segments
 from .tts import build_aligned_dub, tts_health
 from .utils import PROJECT_ROOT, copy_text, ensure_dir, now_id, setup_logger, slugify, write_json
+from .worker_client import poll_loop, poll_once
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -86,6 +87,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p = sub.add_parser("cleanup")
     p.add_argument("--older-than-days", type=int, default=7)
     p.add_argument("--apply", action="store_true", help="Delete files. Without this flag cleanup is a dry run.")
+    p = sub.add_parser("worker-poll")
+    p.add_argument("--remote-base-url", required=True)
+    p.add_argument("--worker-token", required=True)
+    p.add_argument("--worker-id", default="local-windows-worker")
+    p.add_argument("--interval-seconds", type=int, default=15)
+    p.add_argument("--once", action="store_true")
+    p.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -119,6 +127,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_worker_status(config)
         if args.command == "cleanup":
             return cmd_cleanup(args, config)
+        if args.command == "worker-poll":
+            return cmd_worker_poll(args, config)
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         traceback.print_exc()
@@ -258,6 +268,29 @@ def cmd_worker_status(config: dict[str, Any]) -> int:
 def cmd_cleanup(args: argparse.Namespace, config: dict[str, Any]) -> int:
     result = cleanup_expired_files(config, older_than_days=args.older_than_days, dry_run=not args.apply)
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_worker_poll(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    if args.once or args.dry_run:
+        result = poll_once(
+            remote_base_url=args.remote_base_url,
+            worker_token=args.worker_token,
+            worker_id=args.worker_id,
+            config=config,
+            config_path=args.config,
+            dry_run=args.dry_run,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    poll_loop(
+        remote_base_url=args.remote_base_url,
+        worker_token=args.worker_token,
+        worker_id=args.worker_id,
+        config=config,
+        config_path=args.config,
+        interval_seconds=args.interval_seconds,
+    )
     return 0
 
 

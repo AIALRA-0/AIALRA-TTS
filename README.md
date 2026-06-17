@@ -64,10 +64,19 @@ $env:WORKER_SHARED_TOKEN="<generated-worker-token>"
 .\06_worker_heartbeat.ps1 -Loop
 ```
 
-Optional Windows Scheduled Task:
+Windows worker queue polling:
+
+```powershell
+.\07_worker_poll.ps1 -RemoteBaseUrl $env:REMOTE_PUBLIC_BASE_URL -WorkerToken $env:WORKER_SHARED_TOKEN
+```
+
+For Contabo production, set `webui.execution_mode: "worker_queue"` in the remote config. In this mode the web server only queues jobs; the Windows worker claims them and runs local GPU/CPU processing.
+
+Optional Windows Scheduled Tasks:
 
 ```powershell
 .\install_worker_heartbeat_task.ps1 -RemoteBaseUrl $env:REMOTE_PUBLIC_BASE_URL -WorkerToken $env:WORKER_SHARED_TOKEN
+.\install_worker_poll_task.ps1 -RemoteBaseUrl $env:REMOTE_PUBLIC_BASE_URL -WorkerToken $env:WORKER_SHARED_TOKEN
 ```
 
 Contabo deployment templates live in `deploy/`:
@@ -114,6 +123,7 @@ python -m ecse_localizer process-all --input "<VIDEO_ROOT>"
 python -m ecse_localizer report --output "<VIDEO_ROOT>\_localizer_output"
 python -m ecse_localizer tts-health
 python -m ecse_localizer worker-status
+python -m ecse_localizer worker-poll --remote-base-url "https://example.invalid" --worker-token "<token>" --once --dry-run
 python -m ecse_localizer cleanup --older-than-days 7
 ```
 

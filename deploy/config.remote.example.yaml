@@ -17,6 +17,7 @@ webui:
   enabled: true
   host: "0.0.0.0"
   port: 7861
+  execution_mode: "worker_queue"
   username: "${WEBUI_ADMIN_USERNAME}"
   password: "${WEBUI_ADMIN_PASSWORD}"
   session_secret: "${WEBUI_SESSION_SECRET}"

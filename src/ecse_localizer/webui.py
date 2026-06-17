@@ -352,12 +352,38 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/api/worker/heartbeat")
     async def worker_heartbeat(request: Request) -> dict[str, Any]:
-        token = request.headers.get("x-worker-token", "")
-        expected = str(state.webui.get("worker_token") or os.environ.get("WORKER_SHARED_TOKEN") or "")
-        if expected and not hmac.compare_digest(token, expected):
-            raise HTTPException(status_code=401, detail="Invalid worker token")
+        require_worker_token(request, state)
         payload = await request.json()
         return {"ok": True, "worker": state.store.record_worker_heartbeat(payload)}
+
+    @app.post("/api/worker/jobs/claim")
+    async def worker_claim_job(request: Request) -> dict[str, Any]:
+        require_worker_token(request, state)
+        body = await request.json()
+        worker_id = str(body.get("worker_id") or "local-windows-worker")
+        job = claim_worker_job(state, worker_id)
+        state.store.record_worker_heartbeat(
+            {
+                "status": "online",
+                "worker_id": worker_id,
+                "version": str(body.get("version") or ""),
+                "metrics": body.get("metrics") if isinstance(body.get("metrics"), dict) else {},
+                "message": "claim poll",
+            }
+        )
+        return {"ok": True, "job": job}
+
+    @app.post("/api/worker/jobs/{job_id}/status")
+    async def worker_update_job(job_id: str, request: Request) -> dict[str, Any]:
+        require_worker_token(request, state)
+        body = await request.json()
+        record = read_job(state, job_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Job not found")
+        changes = worker_status_changes(body)
+        update_job(state, job_id, changes)
+        updated = read_job(state, job_id)
+        return {"ok": True, "job": updated}
 
     @app.get("/api/jobs")
     def jobs(user: str = Depends(require_user)) -> dict[str, Any]:
@@ -384,10 +410,27 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     async def start_job(request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
         body = await request.json()
         job_type = str(body.get("type", ""))
-        command, title = build_job_command(job_type, body, state)
-        record = create_job_record(state, job_type, title, command, user=user, metadata=job_metadata_from_body(body))
-        thread = threading.Thread(target=run_job, args=(state, record["id"]), daemon=True)
-        thread.start()
+        execution_mode = str(state.webui.get("execution_mode", "local_subprocess"))
+        worker_queue = execution_mode == "worker_queue" or bool(body.get("queue_for_worker"))
+        command, title = build_job_command(job_type, body, state, validate_paths=not worker_queue)
+        metadata = job_metadata_from_body(body)
+        if worker_queue:
+            metadata["worker_args"] = worker_args_from_command(command)
+        record = create_job_record(
+            state,
+            job_type,
+            title,
+            command,
+            user=user,
+            metadata=metadata,
+            dispatch_target="worker" if worker_queue else "local",
+        )
+        if worker_queue:
+            update_job(state, record["id"], {"status": "queued", "queued_for_worker": True})
+            record = read_job(state, record["id"]) or record
+        else:
+            thread = threading.Thread(target=run_job, args=(state, record["id"]), daemon=True)
+            thread.start()
         return {"ok": True, "job": record}
 
     @app.post("/api/jobs/{job_id}/cancel")
@@ -496,6 +539,61 @@ def can_access_record(state: WebState, username: str, record: dict[str, Any]) ->
     return is_admin(state, username) or not record.get("user") or record.get("user") == username
 
 
+def require_worker_token(request: Request, state: WebState) -> None:
+    token = request.headers.get("x-worker-token", "")
+    expected = str(state.webui.get("worker_token") or os.environ.get("WORKER_SHARED_TOKEN") or "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="Worker token is not configured")
+    if not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="Invalid worker token")
+
+
+def claim_worker_job(state: WebState, worker_id: str) -> dict[str, Any] | None:
+    with state.lock:
+        for path in sorted(state.job_dir.glob("*.json"), key=lambda p: p.stat().st_mtime):
+            try:
+                record = read_json(path)
+            except Exception:
+                continue
+            if record.get("dispatch_target") != "worker":
+                continue
+            if record.get("status") not in {"queued", "retrying"}:
+                continue
+            record.update(
+                {
+                    "status": "claimed",
+                    "claimed_by": worker_id,
+                    "claimed_at": iso_now(),
+                    "updated_at": iso_now(),
+                }
+            )
+            write_json(path, record)
+            return record
+    return None
+
+
+def worker_status_changes(body: dict[str, Any]) -> dict[str, Any]:
+    allowed = {"queued", "claimed", "running", "retrying", "passed", "failed", "cancelled"}
+    status = str(body.get("status") or "").lower()
+    if status not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unsupported worker job status: {status}")
+    changes: dict[str, Any] = {"status": status, "updated_at": iso_now()}
+    if status == "running":
+        changes.setdefault("started_at", iso_now())
+    if status in {"passed", "failed", "cancelled"}:
+        changes["ended_at"] = iso_now()
+    for key in ["returncode", "pid", "progress", "error", "log_tail", "result", "result_report", "result_video"]:
+        if key in body:
+            changes[key] = body[key]
+    result = body.get("result")
+    if isinstance(result, dict):
+        if result.get("report"):
+            changes["result_report"] = result.get("report")
+        if result.get("video"):
+            changes["result_video"] = result.get("video")
+    return changes
+
+
 def job_metadata_from_body(body: dict[str, Any]) -> dict[str, Any]:
     return {
         "project_id": str(body.get("project_id") or ""),
@@ -506,6 +604,17 @@ def job_metadata_from_body(body: dict[str, Any]) -> dict[str, Any]:
         "quality_mode": str(body.get("quality_mode") or "best_quality"),
         "style": str(body.get("style") or ""),
     }
+
+
+def worker_args_from_command(command: list[str]) -> list[str]:
+    try:
+        idx = command.index("ecse_localizer")
+    except ValueError:
+        return command
+    args = command[idx + 1 :]
+    if len(args) >= 2 and args[0] == "--config":
+        args = args[2:]
+    return args
 
 
 def safe_upload_name(name: str) -> str:
@@ -617,7 +726,7 @@ def backup_config(config_path: Path) -> None:
     backup.write_text(config_path.read_text(encoding="utf-8"), encoding="utf-8")
 
 
-def build_job_command(job_type: str, body: dict[str, Any], state: WebState) -> tuple[list[str], str]:
+def build_job_command(job_type: str, body: dict[str, Any], state: WebState, *, validate_paths: bool = True) -> tuple[list[str], str]:
     py = sys.executable
     base = [py, "-m", "ecse_localizer", "--config", str(state.config_path)]
     input_dir = str(body.get("input_dir") or state.config.get("input_dir"))
@@ -629,7 +738,7 @@ def build_job_command(job_type: str, body: dict[str, Any], state: WebState) -> t
         return base + ["smoke", "--input", input_dir, "--seconds", seconds], f"Smoke test {seconds}s"
     if job_type == "process_one":
         video = str(body.get("video") or "")
-        if not video or not Path(video).exists():
+        if not video or (validate_paths and not Path(video).exists()):
             raise HTTPException(status_code=400, detail="Video path is required")
         return base + ["process-one", "--video", video], f"Process one: {Path(video).name}"
     if job_type == "process_all":
@@ -641,7 +750,7 @@ def build_job_command(job_type: str, body: dict[str, Any], state: WebState) -> t
         return base + ["report", "--output", output_dir], "Build report index"
     if job_type == "compact_rerender":
         report = str(body.get("report") or "")
-        if not report or not Path(report).exists():
+        if not report or (validate_paths and not Path(report).exists()):
             raise HTTPException(status_code=400, detail="Report path is required")
         tag = str(body.get("tag") or f"webui_{int(time.time())}")
         cmd = base + ["compact-rerender", "--report", report, "--tag", tag]
@@ -651,7 +760,7 @@ def build_job_command(job_type: str, body: dict[str, Any], state: WebState) -> t
         return cmd, f"Compact rerender: {Path(report).name}"
     if job_type == "fidelity_audit":
         report = str(body.get("report") or "")
-        if not report or not Path(report).exists():
+        if not report or (validate_paths and not Path(report).exists()):
             raise HTTPException(status_code=400, detail="Report path is required")
         return base + ["fidelity-audit", "--report", report], f"Fidelity audit: {Path(report).name}"
     raise HTTPException(status_code=400, detail=f"Unsupported job type: {job_type}")
@@ -665,6 +774,7 @@ def create_job_record(
     *,
     user: str,
     metadata: dict[str, Any] | None = None,
+    dispatch_target: str = "local",
 ) -> dict[str, Any]:
     job_id = now_id(f"webui_{job_type}") + "_" + uuid.uuid4().hex[:6]
     log_path = state.job_dir / f"{job_id}.log"
@@ -674,6 +784,8 @@ def create_job_record(
         "type": job_type,
         "title": title,
         "status": "queued",
+        "dispatch_target": dispatch_target,
+        "queued_for_worker": dispatch_target == "worker",
         "created_at": iso_now(),
         "started_at": None,
         "ended_at": None,

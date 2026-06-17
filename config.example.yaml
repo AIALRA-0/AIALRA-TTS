@@ -139,6 +139,7 @@ webui:
   enabled: true
   host: "127.0.0.1"
   port: 7861
+  execution_mode: "local_subprocess"
   username: "admin"
   password: "change-me-before-use"
   session_secret: "change-me-generate-a-long-random-secret"

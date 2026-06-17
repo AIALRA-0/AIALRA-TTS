@@ -25,11 +25,13 @@ Deployment steps:
    - `WEBUI_ADMIN_PASSWORD`
    - `REMOTE_PUBLIC_BASE_URL`
    - `WORKER_SHARED_TOKEN`
+   - `WEBUI_DOWNLOAD_SECRET`
 3. Create a production config from `config.example.yaml`.
    - Set `privacy.allow_cloud_api=false`.
    - Set `privacy.allow_upload_media=false`.
    - Set small Contabo remote quota defaults.
    - Keep full media storage on the Windows worker.
+   - Set `webui.execution_mode=worker_queue` on Contabo.
 4. Run the web service behind Caddy or Nginx with HTTPS.
 5. Restrict upload size at reverse proxy and application level.
 6. Configure persistent volumes only for:
@@ -48,9 +50,14 @@ Deployment steps:
      ```powershell
      .\06_worker_heartbeat.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN" -Loop
      ```
+   - to claim and execute queued jobs on Windows, run:
+     ```powershell
+     .\07_worker_poll.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
+     ```
    - or install the scheduled task:
      ```powershell
      .\install_worker_heartbeat_task.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
+     .\install_worker_poll_task.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
      ```
 9. Validate:
    - login works
@@ -60,6 +67,8 @@ Deployment steps:
    - GPU/CPU metrics update
    - worker offline status appears when the tunnel is stopped
    - users cannot see each other's jobs
+   - a queued job can be claimed through `/api/worker/jobs/claim`
+   - worker status updates through `/api/worker/jobs/{job_id}/status`
    - `/api/artifacts` lists only authorized artifacts
    - signed artifact download URLs expire and do not expose filesystem paths
    - artifact deletion refuses paths outside managed output/run/upload roots
