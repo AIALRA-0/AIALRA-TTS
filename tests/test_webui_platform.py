@@ -142,6 +142,14 @@ def test_static_job_history_has_deleted_filter_and_restore_action():
     assert "同时删除生成文件和远端缓存" in js
 
 
+def test_static_job_history_surfaces_refresh_errors():
+    js = (Path(__file__).parents[1] / "src" / "ecse_localizer" / "static" / "app.js").read_text(encoding="utf-8")
+
+    assert "jobsLoadError" in js
+    assert "任务状态刷新失败" in js
+    assert "请检查登录状态、Contabo WebUI 服务和 worker 队列 API" in js
+
+
 def test_static_artifact_history_has_scope_filters():
     static_root = Path(__file__).parents[1] / "src" / "ecse_localizer" / "static"
     html = (static_root / "index.html").read_text(encoding="utf-8")

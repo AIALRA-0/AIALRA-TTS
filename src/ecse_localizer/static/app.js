@@ -12,6 +12,7 @@ const state = {
   currentRole: "user",
   selectedJob: null,
   showArchivedProjects: false,
+  jobsLoadError: "",
   jobTimer: null,
   metricsTimer: null,
 };
@@ -1403,9 +1404,13 @@ async function refreshJobs() {
   try {
     const data = await api(`/api/jobs${jobFilterQuery()}`);
     state.jobs = data.jobs || [];
+    state.jobsLoadError = "";
     renderJobs();
     if (state.selectedJob) await loadJobLog(state.selectedJob, false);
-  } catch (_) {}
+  } catch (error) {
+    state.jobsLoadError = error.message || String(error);
+    renderJobs();
+  }
 }
 
 function jobFilterQuery() {
@@ -1424,6 +1429,20 @@ function jobFilterQuery() {
 function renderJobs() {
   const list = $("jobsList");
   list.innerHTML = "";
+  if (state.jobsLoadError) {
+    const item = document.createElement("div");
+    item.className = "job-item";
+    item.innerHTML = `
+      <div class="job-title">
+        <span>任务状态刷新失败</span>
+        <span class="status bad">error</span>
+      </div>
+      <div class="job-meta">${escapeHtml(state.jobsLoadError)}</div>
+      <div class="job-meta">请检查登录状态、Contabo WebUI 服务和 worker 队列 API。</div>
+    `;
+    list.appendChild(item);
+    return;
+  }
   if (!state.jobs.length) {
     list.textContent = "暂无任务";
     return;
