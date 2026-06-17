@@ -150,3 +150,6 @@ webui:
   default_local_quota_gb: 500
   default_remote_quota_gb: 10
   worker_token: "change-me-generate-a-long-random-token"
+  download_secret: "change-me-generate-a-long-random-download-secret"
+  signed_url_ttl_seconds: 900
+  cleanup_older_than_days: 7

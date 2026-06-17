@@ -55,6 +55,31 @@ button.secondary:hover {
   background: #dce4ef;
 }
 
+button.danger {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+button.danger:hover {
+  background: #fecaca;
+}
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 7px;
+  background: #e8edf5;
+  color: #1e2a37;
+  text-decoration: none;
+  font-weight: 650;
+}
+
+.button-link:hover {
+  background: #dce4ef;
+}
+
 input,
 select,
 textarea {
@@ -311,6 +336,38 @@ h2 {
   color: #475569;
   font-size: 12px;
   font-weight: 700;
+}
+
+.empty-line {
+  padding: 14px 12px;
+  color: var(--muted);
+}
+
+.artifact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.artifact-actions button,
+.artifact-actions .button-link {
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.preview-panel {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.preview-panel video,
+.preview-panel audio {
+  width: 100%;
+  max-height: 520px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0f172a;
 }
 
 .cell-path {

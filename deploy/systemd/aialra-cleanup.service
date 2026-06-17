@@ -1,0 +1,7 @@
+[Unit]
+Description=AIALRA Localizer cleanup managed run cache
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/aialra/AIALRA-TTS/deploy
+ExecStart=/usr/bin/docker compose exec -T aialra-web python -m ecse_localizer --config /app/config.yaml cleanup --older-than-days 7 --apply

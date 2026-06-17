@@ -4,6 +4,7 @@ const state = {
   jobs: [],
   projects: [],
   users: [],
+  artifacts: [],
   selectedJob: null,
   jobTimer: null,
 };
@@ -124,6 +125,8 @@ function bindEvents() {
   $("uploadForm").addEventListener("submit", uploadFiles);
   $("projectForm").addEventListener("submit", createProject);
   $("userForm").addEventListener("submit", createUser);
+  $("refreshArtifactsBtn").addEventListener("click", loadArtifacts);
+  $("cleanupDryRunBtn").addEventListener("click", cleanupDryRun);
   $("saveTuningBtn").addEventListener("click", saveTuning);
   $("reloadConfigBtn").addEventListener("click", loadRawConfig);
   $("saveConfigBtn").addEventListener("click", saveRawConfig);
@@ -137,6 +140,7 @@ function showTab(name) {
     loadProjects();
     loadUsers();
   }
+  if (name === "artifacts") loadArtifacts();
   if (name === "settings") {
     loadTuning();
     loadRawConfig();
@@ -144,7 +148,7 @@ function showTab(name) {
 }
 
 async function refreshAll() {
-  const results = await Promise.allSettled([loadDashboard(), loadVideos(), loadReports(), refreshJobs(), loadProjects(), loadUsers(), loadTuning()]);
+  const results = await Promise.allSettled([loadDashboard(), loadVideos(), loadReports(), refreshJobs(), loadProjects(), loadUsers(), loadArtifacts(), loadTuning()]);
   const failed = results.filter((item) => item.status === "rejected");
   if (failed.length) {
     console.warn("Partial refresh failed:", failed.map((item) => item.reason));
@@ -359,6 +363,103 @@ function renderVideos() {
       showTab("dashboard");
     });
     table.append(row([video.uploaded ? "上传" : "课程", name, formatBytes(video.size), btn]));
+  }
+}
+
+async function loadArtifacts() {
+  try {
+    const data = await api("/api/artifacts");
+    state.artifacts = data.artifacts || [];
+    renderArtifacts();
+  } catch (error) {
+    console.warn("Artifact load failed:", error);
+  }
+}
+
+function renderArtifacts() {
+  const table = $("artifactsTable");
+  if (!table) return;
+  table.innerHTML = "";
+  table.append(row(["类型", "文件", "大小", "操作"], true));
+  if (!state.artifacts.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-line";
+    empty.textContent = "暂无生成产物";
+    table.appendChild(empty);
+    return;
+  }
+  for (const artifact of state.artifacts.slice(0, 120)) {
+    const name = document.createElement("div");
+    name.innerHTML = `<strong>${escapeHtml(artifact.name)}</strong><div class="cell-path">${escapeHtml(artifact.path)}</div>`;
+    const actions = document.createElement("div");
+    actions.className = "artifact-actions";
+    if (artifact.download_url) {
+      const download = document.createElement("a");
+      download.className = "button-link";
+      download.href = artifact.download_url;
+      download.textContent = "下载";
+      download.target = "_blank";
+      actions.appendChild(download);
+    }
+    if (artifact.preview_url) {
+      const preview = document.createElement("button");
+      preview.type = "button";
+      preview.className = "secondary";
+      preview.textContent = "预览";
+      preview.addEventListener("click", () => previewArtifact(artifact));
+      actions.appendChild(preview);
+    }
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "danger";
+    del.textContent = "删除";
+    del.addEventListener("click", () => deleteArtifact(artifact));
+    actions.appendChild(del);
+    table.append(row([artifact.kind || "-", name, formatBytes(artifact.size || 0), actions]));
+  }
+}
+
+function previewArtifact(artifact) {
+  const panel = $("artifactPreview");
+  panel.innerHTML = "";
+  const title = document.createElement("h2");
+  title.textContent = artifact.name;
+  panel.appendChild(title);
+  if ((artifact.media_type || "").startsWith("video/")) {
+    const video = document.createElement("video");
+    video.controls = true;
+    video.src = artifact.preview_url;
+    panel.appendChild(video);
+  } else if ((artifact.media_type || "").startsWith("audio/")) {
+    const audio = document.createElement("audio");
+    audio.controls = true;
+    audio.src = artifact.preview_url;
+    panel.appendChild(audio);
+  } else {
+    panel.textContent = "该文件类型不支持内嵌预览。";
+  }
+}
+
+async function deleteArtifact(artifact) {
+  const ok = window.confirm(`删除本地生成文件？\n${artifact.name}`);
+  if (!ok) return;
+  try {
+    await api(`/api/artifacts/${encodeURIComponent(artifact.id)}`, { method: "DELETE" });
+    toast("已删除产物");
+    await loadArtifacts();
+    await loadDashboard();
+  } catch (error) {
+    toast(`删除失败：${error.message}`);
+  }
+}
+
+async function cleanupDryRun() {
+  try {
+    const result = await api("/api/cleanup", { method: "POST", body: JSON.stringify({ dry_run: true, older_than_days: 7 }) });
+    const bytes = formatBytes(result.cleanup?.bytes || 0);
+    toast(`清理预估：${result.cleanup?.count || 0} 个文件，${bytes}`);
+  } catch (error) {
+    toast(`清理预估失败：${error.message}`);
   }
 }
 

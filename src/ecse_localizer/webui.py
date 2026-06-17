@@ -21,6 +21,15 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Respon
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from .artifacts import (
+    artifact_catalog,
+    cleanup_expired_files,
+    filter_artifacts_for_user,
+    find_artifact,
+    safe_delete_artifact_record,
+    verify_artifact_token,
+    with_signed_urls,
+)
 from .config import load_config, privacy_guard, save_config
 from .llm_local import LocalLLMClient
 from .metrics import collect_system_metrics
@@ -177,6 +186,54 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     def reports(_: str = Depends(require_user)) -> dict[str, Any]:
         state.reload_config()
         return {"reports": list_reports(state.config, limit=200)}
+
+    @app.get("/api/artifacts")
+    def artifacts(user: str = Depends(require_user)) -> dict[str, Any]:
+        state.reload_config()
+        rows = artifact_catalog(state.config, list_jobs(state, None))
+        rows = filter_artifacts_for_user(rows, user, admin=is_admin(state, user))
+        rows = with_signed_urls(rows[:300], secret=download_secret(state), username=user, ttl_seconds=int(state.webui.get("signed_url_ttl_seconds", 900)))
+        return {"artifacts": rows, "quota": state.store.quota_status(user)}
+
+    @app.get("/api/artifacts/{artifact_id}/download")
+    def download_artifact(artifact_id: str, request: Request, token: str = "", download: int = 0) -> FileResponse:
+        user = verify_session(request, state)
+        token_user = user or token_username(state, token, artifact_id)
+        if not token_user:
+            raise HTTPException(status_code=401, detail="Login or signed token required")
+        if token and not verify_artifact_token(download_secret(state), token, artifact_id, token_user):
+            raise HTTPException(status_code=401, detail="Invalid signed URL")
+        rows = filter_artifacts_for_user(artifact_catalog(state.config, list_jobs(state, None)), token_user, admin=is_admin(state, token_user))
+        row = find_artifact(rows, artifact_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        path = Path(row["path"])
+        if not path.exists() or not path.is_file():
+            raise HTTPException(status_code=404, detail="File missing")
+        disposition = "attachment" if download else "inline"
+        return FileResponse(path, media_type=row.get("media_type") or None, filename=path.name, content_disposition_type=disposition)
+
+    @app.delete("/api/artifacts/{artifact_id}")
+    def delete_artifact(artifact_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
+        rows = filter_artifacts_for_user(artifact_catalog(state.config, list_jobs(state, None)), user, admin=is_admin(state, user))
+        row = find_artifact(rows, artifact_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        try:
+            deleted = safe_delete_artifact_record(row, state.config)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "artifact": row, "deleted": deleted, "quota": state.store.quota_status(user)}
+
+    @app.post("/api/cleanup")
+    async def cleanup(request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
+        if not is_admin(state, user):
+            raise HTTPException(status_code=403, detail="Admin required")
+        body = await request.json()
+        dry_run = bool(body.get("dry_run", True))
+        older_than_days = int(body.get("older_than_days", state.webui.get("cleanup_older_than_days", 7)) or 7)
+        result = cleanup_expired_files(state.config, older_than_days=older_than_days, dry_run=dry_run)
+        return {"ok": True, "cleanup": result}
 
     @app.post("/api/upload")
     async def upload(files: list[UploadFile] = File(...), user: str = Depends(require_user)) -> dict[str, Any]:
@@ -402,6 +459,32 @@ def sign(body: str, state: WebState) -> str:
     secret = str(state.webui.get("session_secret") or state.webui.get("password") or "ecse-localizer")
     digest = hmac.new(secret.encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
     return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
+def download_secret(state: WebState) -> str:
+    return str(
+        state.webui.get("download_secret")
+        or state.webui.get("session_secret")
+        or state.webui.get("password")
+        or "ecse-localizer-download"
+    )
+
+
+def token_username(state: WebState, token: str, artifact_id_value: str) -> str | None:
+    if not token or "." not in token:
+        return None
+    body, _ = token.rsplit(".", 1)
+    try:
+        raw = base64.urlsafe_b64decode(body + "=" * (-len(body) % 4))
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception:
+        return None
+    username = str(payload.get("u") or "")
+    if not username or payload.get("a") != artifact_id_value:
+        return None
+    if not state.store.get_user(username):
+        return None
+    return username
 
 
 def is_admin(state: WebState, username: str) -> bool:
@@ -631,14 +714,23 @@ def run_job(state: WebState, job_id: str) -> None:
                 state.processes[job_id] = proc
             update_job(state, job_id, {"pid": proc.pid})
             returncode = proc.wait()
+            log.flush()
+            result_payload = extract_job_result_from_log(log_path)
+            changes = {
+                "status": "passed" if returncode == 0 else "failed",
+                "ended_at": iso_now(),
+                "returncode": returncode,
+            }
+            if result_payload:
+                changes["result"] = result_payload
+                if result_payload.get("report"):
+                    changes["result_report"] = result_payload.get("report")
+                if result_payload.get("video"):
+                    changes["result_video"] = result_payload.get("video")
             update_job(
                 state,
                 job_id,
-                {
-                    "status": "passed" if returncode == 0 else "failed",
-                    "ended_at": iso_now(),
-                    "returncode": returncode,
-                },
+                changes,
             )
         except Exception as exc:
             log.write(f"\nWEBUI JOB ERROR: {exc}\n")
@@ -676,6 +768,24 @@ def list_jobs(state: WebState, user: str | None = None) -> list[dict[str, Any]]:
         except Exception:
             continue
     return records
+
+
+def extract_job_result_from_log(log_path: Path) -> dict[str, Any] | None:
+    if not log_path.exists():
+        return None
+    text = log_path.read_text(encoding="utf-8", errors="replace")
+    decoder = json.JSONDecoder()
+    best: dict[str, Any] | None = None
+    for idx, ch in enumerate(text):
+        if ch != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(text[idx:])
+        except Exception:
+            continue
+        if isinstance(value, dict) and any(k in value for k in ("report", "video", "pass", "smoke", "index")):
+            best = value
+    return best
 
 
 def safe_job_id(job_id: str) -> str:

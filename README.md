@@ -43,6 +43,8 @@ http://127.0.0.1:7861
 
 Set real credentials in local `config.yaml` or `.env`; never commit them. The WebUI supports uploads, task history, project metadata, common tuning parameters, logs, quota checks, and local worker health/metrics.
 
+The WebUI also has a `产物` page for generated artifacts. It can list reports, subtitles, WAV/MP4 outputs, show local preview links for media, create short-lived signed download URLs, delete managed output files, and run cleanup dry-runs. Deletion is restricted to managed output, run, and upload directories; it refuses to touch the original video root.
+
 ## Remote + Local Architecture
 
 The intended production layout is:
@@ -52,6 +54,30 @@ The intended production layout is:
 - Connection: Windows initiates a reverse tunnel or private VPN connection. Do not expose the Windows worker directly to the public internet.
 
 Contabo should store only metadata, small thumbnails, low-bitrate previews, and optional short-lived caches. Original videos and full-resolution outputs remain on the local worker by default.
+
+Windows worker heartbeat:
+
+```powershell
+cd "<VIDEO_ROOT>\_localizer_project"
+$env:REMOTE_PUBLIC_BASE_URL="https://your-contabo-domain.example"
+$env:WORKER_SHARED_TOKEN="<generated-worker-token>"
+.\06_worker_heartbeat.ps1 -Loop
+```
+
+Optional Windows Scheduled Task:
+
+```powershell
+.\install_worker_heartbeat_task.ps1 -RemoteBaseUrl $env:REMOTE_PUBLIC_BASE_URL -WorkerToken $env:WORKER_SHARED_TOKEN
+```
+
+Contabo deployment templates live in `deploy/`:
+
+- `deploy/docker-compose.yml`
+- `deploy/Dockerfile.web`
+- `deploy/Caddyfile.example`
+- `deploy/config.remote.example.yaml`
+- `deploy/systemd/*.service`
+- `deploy/systemd/*.timer`
 
 ## Backends
 
@@ -87,6 +113,8 @@ python -m ecse_localizer process-one --video "<VIDEO_ROOT>\<lecture>.mp4"
 python -m ecse_localizer process-all --input "<VIDEO_ROOT>"
 python -m ecse_localizer report --output "<VIDEO_ROOT>\_localizer_output"
 python -m ecse_localizer tts-health
+python -m ecse_localizer worker-status
+python -m ecse_localizer cleanup --older-than-days 7
 ```
 
 ## GitHub

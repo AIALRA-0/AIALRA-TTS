@@ -1,0 +1,33 @@
+input_dir: "/srv/aialra/no-local-media"
+output_dir: "/srv/aialra/previews"
+work_dir: "/srv/aialra/runs"
+
+privacy:
+  allow_cloud_api: false
+  allow_upload_media: false
+  allow_voice_clone_without_consent: false
+
+translation:
+  target_language: "zh-CN"
+  style: "natural_chinese_lecture"
+  quality_mode: "best_quality"
+  max_zh_chars_per_subtitle_line: 22
+
+webui:
+  enabled: true
+  host: "0.0.0.0"
+  port: 7861
+  username: "${WEBUI_ADMIN_USERNAME}"
+  password: "${WEBUI_ADMIN_PASSWORD}"
+  session_secret: "${WEBUI_SESSION_SECRET}"
+  bind_local_only: false
+  upload_dir: "/srv/aialra/previews/uploads"
+  job_dir: "/srv/aialra/runs/webui_jobs"
+  platform_dir: "/srv/aialra/platform"
+  max_upload_mb: 1024
+  default_local_quota_gb: 500
+  default_remote_quota_gb: 10
+  worker_token: "${WORKER_SHARED_TOKEN}"
+  download_secret: "${WEBUI_DOWNLOAD_SECRET}"
+  signed_url_ttl_seconds: 900
+  cleanup_older_than_days: 7

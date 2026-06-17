@@ -1,0 +1,20 @@
+services:
+  aialra-web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    ports:
+      - "127.0.0.1:7861:7861"
+    volumes:
+      - ./config.remote.yaml:/app/config.yaml:ro
+      - aialra_platform:/srv/aialra/platform
+      - aialra_runs:/srv/aialra/runs
+      - aialra_previews:/srv/aialra/previews
+
+volumes:
+  aialra_platform:
+  aialra_runs:
+  aialra_previews:

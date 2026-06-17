@@ -30,7 +30,7 @@ foreach ($file in $files) {
     foreach ($match in $matches) {
       $line = $match.Line.Trim()
       if ($relative -eq '.env.example' -or $relative -eq 'tools\secret_scan.ps1') { continue }
-      if ($line -match 'change-me|example\.invalid|127\.0\.0\.1|localhost|password_hash|WORKER_SHARED_TOKEN|WEBUI_|token = request\.headers|expected = str|password\s*=\s*str\(|password:\s+str') { continue }
+      if ($line -match 'change-me|example\.invalid|127\.0\.0\.1|0\.0\.0\.0|localhost|password_hash|WORKER_SHARED_TOKEN|WEBUI_|token = request\.headers|expected = str|password\s*=\s*str\(|password:\s+str') { continue }
       if (($file.Extension -in @('.py', '.js', '.ts')) -and ($pattern -match 'password|token|session_secret')) { continue }
       $hits += [pscustomobject]@{
         File = $relative

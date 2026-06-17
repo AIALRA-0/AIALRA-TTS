@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .artifacts import cleanup_expired_files
 from .asr import transcribe_audio
 from .audio_enhance import enhance_audio
 from .compact import compact_rerender_from_report
@@ -82,6 +83,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
     sub.add_parser("tts-health")
     sub.add_parser("worker-status")
+    p = sub.add_parser("cleanup")
+    p.add_argument("--older-than-days", type=int, default=7)
+    p.add_argument("--apply", action="store_true", help="Delete files. Without this flag cleanup is a dry run.")
     return parser.parse_args(argv)
 
 
@@ -113,6 +117,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "worker-status":
             return cmd_worker_status(config)
+        if args.command == "cleanup":
+            return cmd_cleanup(args, config)
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         traceback.print_exc()
@@ -246,6 +252,12 @@ def cmd_worker_status(config: dict[str, Any]) -> int:
         "worker": store.worker_status(),
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_cleanup(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    result = cleanup_expired_files(config, older_than_days=args.older_than_days, dry_run=not args.apply)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
 

@@ -48,6 +48,7 @@
         <button class="tab active" data-tab="dashboard">仪表盘</button>
         <button class="tab" data-tab="upload">上传</button>
         <button class="tab" data-tab="projects">项目</button>
+        <button class="tab" data-tab="artifacts">产物</button>
         <button class="tab" data-tab="jobs">历史任务</button>
         <button class="tab" data-tab="settings">参数设置</button>
       </nav>
@@ -188,6 +189,21 @@
             </form>
             <div id="usersList" class="job-list"></div>
           </div>
+        </section>
+      </section>
+
+      <section id="artifactsTab" class="tab-panel">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>生成产物</h2>
+            <p>下载、预览或删除本地生成内容；删除只允许作用于受管理输出目录。</p>
+          </div>
+          <div class="form-actions">
+            <button id="refreshArtifactsBtn" type="button" class="secondary">刷新产物</button>
+            <button id="cleanupDryRunBtn" type="button" class="secondary">清理预估</button>
+          </div>
+          <div id="artifactsTable" class="table artifact-table"></div>
+          <div id="artifactPreview" class="preview-panel"></div>
         </section>
       </section>
 

@@ -44,6 +44,14 @@ Deployment steps:
    - prefer WireGuard/Tailscale/cloudflared reverse tunnel
    - require `X-Worker-Token: $WORKER_SHARED_TOKEN` for worker heartbeat/API
    - mark worker offline after missed heartbeats
+   - on Windows, run:
+     ```powershell
+     .\06_worker_heartbeat.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN" -Loop
+     ```
+   - or install the scheduled task:
+     ```powershell
+     .\install_worker_heartbeat_task.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
+     ```
 9. Validate:
    - login works
    - project creation works
@@ -52,6 +60,9 @@ Deployment steps:
    - GPU/CPU metrics update
    - worker offline status appears when the tunnel is stopped
    - users cannot see each other's jobs
+   - `/api/artifacts` lists only authorized artifacts
+   - signed artifact download URLs expire and do not expose filesystem paths
+   - artifact deletion refuses paths outside managed output/run/upload roots
 
 Do not push `.env`, production config, logs, media, model weights, IP addresses, server hostnames, or credentials back to GitHub.
 
@@ -59,6 +70,15 @@ Suggested service model:
 - `aialra-web.service`: Contabo web app.
 - `aialra-worker-tunnel.service`: reverse tunnel endpoint/client as appropriate.
 - `aialra-cleanup.timer`: TTL cleanup for previews and deleted artifacts.
+
+The repository includes:
+- `deploy/docker-compose.yml`
+- `deploy/Dockerfile.web`
+- `deploy/Caddyfile.example`
+- `deploy/config.remote.example.yaml`
+- `deploy/systemd/aialra-web.service`
+- `deploy/systemd/aialra-cleanup.service`
+- `deploy/systemd/aialra-cleanup.timer`
 
 Suggested public description:
 `Self-hosted video localization platform with a remote web UI and a Windows GPU worker for local ASR, translation, subtitles, TTS, and video dubbing.`
