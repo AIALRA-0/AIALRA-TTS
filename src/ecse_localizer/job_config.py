@@ -71,6 +71,7 @@ def write_job_config(
     config = apply_job_overrides(base_config, metadata)
     data = json.loads(json.dumps(config, ensure_ascii=False))
     data.pop("project_root", None)
+    strip_job_config_secrets(data)
     path = root_path / f"{safe_filename(job_id)}.yaml"
     path.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return path
@@ -123,6 +124,20 @@ def set_nested(config: dict[str, Any], path: list[str], value: Any) -> None:
     for key in path[:-1]:
         cur = cur.setdefault(key, {})
     cur[path[-1]] = value
+
+
+def strip_job_config_secrets(config: dict[str, Any]) -> None:
+    webui = config.get("webui")
+    if not isinstance(webui, dict):
+        return
+    for key in [
+        "username",
+        "password",
+        "session_secret",
+        "download_secret",
+        "worker_token",
+    ]:
+        webui.pop(key, None)
 
 
 def safe_filename(value: str) -> str:

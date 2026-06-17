@@ -73,6 +73,40 @@ def test_write_job_config_omits_runtime_project_root(tmp_path: Path):
     assert path.name == "job_1.yaml"
 
 
+def test_write_job_config_strips_webui_secrets(tmp_path: Path):
+    path = write_job_config(
+        {
+            "project_root": "private",
+            "input_dir": "input",
+            "output_dir": "output",
+            "work_dir": "work",
+            "webui": {
+                "username": "admin",
+                "password": "local-password",
+                "session_secret": "session-secret",
+                "download_secret": "download-secret",
+                "worker_token": "worker-token",
+                "preview_dir": "preview-cache",
+                "worker_preview_max_upload_mb": 256,
+            },
+        },
+        {"source_language": "auto"},
+        job_id="job-secret-test",
+        root=tmp_path,
+    )
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+    assert data["webui"]["preview_dir"] == "preview-cache"
+    assert data["webui"]["worker_preview_max_upload_mb"] == 256
+    for key in ["username", "password", "session_secret", "download_secret", "worker_token"]:
+        assert key not in data["webui"]
+    rendered = path.read_text(encoding="utf-8")
+    assert "local-password" not in rendered
+    assert "session-secret" not in rendered
+    assert "download-secret" not in rendered
+    assert "worker-token" not in rendered
+
+
 def test_asr_language_auto_and_null_enable_detection():
     assert asr_language({"asr": {"language": "auto"}}) is None
     assert asr_language({"asr": {"language": None}}) is None
