@@ -995,22 +995,32 @@ def redacted_command(command: list[str]) -> list[str]:
     return sanitize_remote_command(redacted)
 
 
-def worker_headers(worker_token: str, *, path: str | None = None, body: str | bytes = b"", method: str = "POST") -> dict[str, str]:
+def worker_headers(
+    worker_token: str,
+    *,
+    path: str | None = None,
+    body: str | bytes = b"",
+    method: str = "POST",
+    legacy_token: bool = False,
+) -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
-    if path:
-        timestamp = str(int(time.time()))
-        nonce = uuid.uuid4().hex
-        body_bytes = body.encode("utf-8") if isinstance(body, str) else body
-        headers.update(
-            {
-                "X-Worker-Auth": "hmac-sha256",
-                "X-Worker-Timestamp": timestamp,
-                "X-Worker-Nonce": nonce,
-                "X-Worker-Signature": worker_signature(worker_token, timestamp=timestamp, method=method, path=path, body=body_bytes, nonce=nonce),
-            }
-        )
-    else:
+    if not path:
+        if not legacy_token:
+            raise ValueError("worker_headers requires a request path for HMAC signing")
         headers["X-Worker-Token"] = worker_token
+        return headers
+
+    timestamp = str(int(time.time()))
+    nonce = uuid.uuid4().hex
+    body_bytes = body.encode("utf-8") if isinstance(body, str) else body
+    headers.update(
+        {
+            "X-Worker-Auth": "hmac-sha256",
+            "X-Worker-Timestamp": timestamp,
+            "X-Worker-Nonce": nonce,
+            "X-Worker-Signature": worker_signature(worker_token, timestamp=timestamp, method=method, path=path, body=body_bytes, nonce=nonce),
+        }
+    )
     return headers
 
 

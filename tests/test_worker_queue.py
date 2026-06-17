@@ -4,6 +4,7 @@ import time
 from types import SimpleNamespace
 from pathlib import Path
 
+import pytest
 import yaml
 
 from ecse_localizer.webui import (
@@ -238,6 +239,18 @@ def test_signed_worker_headers_do_not_send_plaintext_token():
     assert "X-Worker-Timestamp" in headers
     assert "X-Worker-Nonce" in headers
     assert "X-Worker-Token" not in headers
+
+
+def test_worker_headers_fail_closed_without_signing_path():
+    with pytest.raises(ValueError, match="requires a request path"):
+        worker_headers("worker-token")
+
+
+def test_worker_headers_legacy_static_token_requires_explicit_opt_in():
+    headers = worker_headers("worker-token", legacy_token=True)
+
+    assert headers["X-Worker-Token"] == "worker-token"
+    assert "X-Worker-Signature" not in headers
 
 
 def test_worker_hmac_rejects_missing_nonce_in_strict_mode(tmp_path):
