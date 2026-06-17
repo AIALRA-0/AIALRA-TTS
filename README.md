@@ -83,6 +83,7 @@ Windows worker heartbeat:
 cd "<VIDEO_ROOT>\_localizer_project"
 $env:REMOTE_PUBLIC_BASE_URL="https://your-contabo-domain.example"
 $env:WORKER_SHARED_TOKEN="<generated-worker-hmac-secret>"
+.\09_worker_healthcheck.ps1
 .\06_worker_heartbeat.ps1 -Loop
 ```
 
@@ -125,6 +126,7 @@ Contabo deployment templates live in `deploy/`:
 - `deploy/Dockerfile.web`
 - `deploy/Caddyfile.example`
 - `deploy/config.remote.example.yaml`
+- `deploy/REMOTE_TUNNEL_GUIDE.md`
 - `deploy/systemd/*.service`
 - `deploy/systemd/*.timer`
 
@@ -173,6 +175,7 @@ python -m ecse_localizer fidelity-audit --report "<VIDEO_ROOT>\_localizer_output
 python -m ecse_localizer repair-fidelity --report "<VIDEO_ROOT>\_localizer_output\<lecture>_report.json"
 python -m ecse_localizer tts-health
 python -m ecse_localizer worker-status
+python -m ecse_localizer worker-health --skip-remote
 python -m ecse_localizer worker-poll --remote-base-url "https://example.invalid" --worker-token "<token>" --once --dry-run
 python -m ecse_localizer --config deploy/config.remote.yaml deploy-check
 python -m ecse_localizer cleanup --older-than-days 7

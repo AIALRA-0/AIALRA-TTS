@@ -56,12 +56,14 @@ Deployment steps:
    - reject new uploads when quota would be exceeded
 9. Configure worker connectivity:
    - prefer WireGuard/Tailscale/cloudflared reverse tunnel
+   - follow `deploy/REMOTE_TUNNEL_GUIDE.md` for the outbound-only worker connection model
    - set `webui.worker_auth_mode: "hmac"` and `webui.worker_require_nonce: true`; require `X-Worker-Timestamp` + `X-Worker-Nonce` + `X-Worker-Signature` for worker heartbeat/API
    - treat `WORKER_SHARED_TOKEN` as an HMAC secret; do not send it as a plaintext production header
    - mark worker offline after missed heartbeats
    - enable stale worker-job recovery with `webui.worker_requeue_stale_jobs=true`, choose a conservative `webui.worker_job_heartbeat_timeout_seconds`, and cap retries with `webui.worker_job_max_auto_retries`
    - on Windows, run:
      ```powershell
+     .\09_worker_healthcheck.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
      .\06_worker_heartbeat.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN" -Loop
      ```
    - to claim and execute queued jobs on Windows, run:
@@ -87,6 +89,7 @@ Deployment steps:
      ```
 10. Validate:
    - `python -m ecse_localizer --config deploy/config.remote.yaml deploy-check` returns PASS before the service is exposed
+   - `.\09_worker_healthcheck.ps1` returns PASS on the Windows worker before scheduled tasks are installed
    - login works
    - project creation works
    - project folders can be created and selected for jobs

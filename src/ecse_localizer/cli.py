@@ -41,7 +41,8 @@ from .subtitle_io import (
 from .translate import translate_segments
 from .tts import build_aligned_dub, tts_health
 from .utils import PROJECT_ROOT, copy_text, ensure_dir, now_id, setup_logger, slugify, write_json
-from .worker_client import collect_worker_media_refs, poll_loop, poll_once
+from .worker_client import collect_worker_media_refs, poll_loop, poll_once, post_worker_heartbeat
+from .worker_health import assess_worker_health
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -85,7 +86,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--tag", default="final7")
 
     sub.add_parser("tts-health")
-    sub.add_parser("worker-status")
+    p = sub.add_parser("worker-status")
+    p.add_argument("--worker-id", default="local-windows-worker")
+    p = sub.add_parser("worker-health")
+    p.add_argument("--remote-base-url")
+    p.add_argument("--worker-token")
+    p.add_argument("--worker-id", default="local-windows-worker")
+    p.add_argument("--skip-remote", action="store_true")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("cleanup")
     p.add_argument("--older-than-days", type=int, default=7)
     p.add_argument("--apply", action="store_true", help="Delete files. Without this flag cleanup is a dry run.")
@@ -106,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     config = load_config(args.config)
     try:
-        if args.command != "deploy-check":
+        if args.command not in {"deploy-check", "worker-health"}:
             privacy_guard(config)
         if args.command == "audit":
             return cmd_audit(args, config)
@@ -130,7 +138,9 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(tts_health(config), ensure_ascii=False, indent=2))
             return 0
         if args.command == "worker-status":
-            return cmd_worker_status(config)
+            return cmd_worker_status(args, config)
+        if args.command == "worker-health":
+            return cmd_worker_health(args, config)
         if args.command == "cleanup":
             return cmd_cleanup(args, config)
         if args.command == "worker-poll":
@@ -256,13 +266,13 @@ def cmd_report(args: argparse.Namespace, config: dict[str, Any]) -> int:
     return 0
 
 
-def cmd_worker_status(config: dict[str, Any]) -> int:
+def build_worker_status_payload(config: dict[str, Any], *, worker_id: str = "local-windows-worker") -> dict[str, Any]:
     store = PlatformStore(config)
     store.bootstrap()
     llm = LocalLLMClient(config).status()
     tts = tts_health(config)
-    payload = {
-        "worker_id": "local-windows-worker",
+    return {
+        "worker_id": worker_id,
         "version": __version__,
         "privacy": config.get("privacy", {}),
         "metrics": collect_system_metrics(config),
@@ -272,8 +282,41 @@ def cmd_worker_status(config: dict[str, Any]) -> int:
         "capabilities": language_capabilities(config, llm_status=llm, tts_status=tts),
         "worker": store.worker_status(),
     }
+
+
+def cmd_worker_status(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    payload = build_worker_status_payload(config, worker_id=args.worker_id)
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
+
+
+def cmd_worker_health(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    payload = build_worker_status_payload(config, worker_id=args.worker_id)
+    remote_checked = False
+    remote_ok = False
+    remote_error_type = ""
+    if not args.skip_remote and (args.remote_base_url or args.worker_token):
+        remote_checked = True
+        if not args.remote_base_url or not args.worker_token:
+            remote_error_type = "MissingRemoteBaseUrlOrWorkerToken"
+        else:
+            try:
+                response = post_worker_heartbeat(args.remote_base_url, args.worker_token, payload)
+                remote_ok = bool(response.get("ok", True))
+            except Exception as exc:
+                remote_error_type = type(exc).__name__
+    result = assess_worker_health(payload, remote_checked=remote_checked, remote_ok=remote_ok, remote_error_type=remote_error_type)
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        status = "PASS" if result["pass"] else "FAIL"
+        remote = result["remote"]
+        remote_label = "skipped" if not remote["checked"] else "ok" if remote["ok"] else "failed"
+        print(f"{status}: {result['errors']} error(s), {result['warnings']} warning(s), remote heartbeat {remote_label}")
+        for finding in result["findings"]:
+            level = finding["level"].upper()
+            print(f"{level} [{finding['code']}] {finding['path']}: {finding['message']}")
+    return 0 if result["pass"] else 2
 
 
 def cmd_deploy_check(args: argparse.Namespace, config: dict[str, Any]) -> int:

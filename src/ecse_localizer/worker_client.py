@@ -93,6 +93,20 @@ def claim_job(remote_base_url: str, worker_token: str, worker_id: str, config: d
     return data.get("job")
 
 
+def post_worker_heartbeat(remote_base_url: str, worker_token: str, payload: dict[str, Any], *, timeout: int = 30) -> dict[str, Any]:
+    path = "/api/worker/heartbeat"
+    body = canonical_json(payload)
+    response = requests.post(
+        endpoint(remote_base_url, path),
+        data=body.encode("utf-8"),
+        headers=worker_headers(worker_token, path=path, body=body),
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    data = response.json()
+    return data if isinstance(data, dict) else {}
+
+
 def run_worker_job(
     job: dict[str, Any],
     remote_base_url: str,
