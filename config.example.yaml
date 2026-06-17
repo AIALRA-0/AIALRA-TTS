@@ -140,6 +140,8 @@ qa:
   fail_on_empty_translation: true
   fail_on_missing_outputs: true
   flag_untranslated_ascii_ratio: 0.5
+  overcompression_min_source_words: 16
+  overcompression_min_zh_per_en_word: 0.45
   flag_tts_overrun: true
   fail_on_rule_fallback_translation: true
   generate_html_report: true

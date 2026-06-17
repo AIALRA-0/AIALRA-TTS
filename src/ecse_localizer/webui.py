@@ -330,20 +330,24 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 raise HTTPException(status_code=400, detail=f"Unsupported file type: {suffix}")
             target = unique_path(state.store.user_upload_dir(user) / name)
             size = 0
-            with target.open("wb") as fh:
-                while True:
-                    chunk = await item.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    size += len(chunk)
-                    if size > max_bytes:
-                        target.unlink(missing_ok=True)
-                        raise HTTPException(status_code=413, detail=f"Upload exceeds {state.webui.get('max_upload_mb')} MB")
-                    if not upload_fits_quota(base_used, reserved_bytes, size, quota_bytes):
-                        target.unlink(missing_ok=True)
-                        remaining = max(0, quota_bytes - base_used - reserved_bytes)
-                        raise HTTPException(status_code=413, detail=f"Remote quota exceeded. Remaining bytes: {remaining}")
-                    fh.write(chunk)
+            try:
+                with target.open("wb") as fh:
+                    while True:
+                        chunk = await item.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        size += len(chunk)
+                        if size > max_bytes:
+                            raise HTTPException(status_code=413, detail=f"Upload exceeds {state.webui.get('max_upload_mb')} MB")
+                        if not upload_fits_quota(base_used, reserved_bytes, size, quota_bytes):
+                            remaining = max(0, quota_bytes - base_used - reserved_bytes)
+                            raise HTTPException(status_code=413, detail=f"Remote quota exceeded. Remaining bytes: {remaining}")
+                        fh.write(chunk)
+            except HTTPException:
+                await item.close()
+                target.unlink(missing_ok=True)
+                raise
+            await item.close()
             saved.append({"name": target.name, "path": str(target), "size": size})
             reserved_bytes += size
         return {"ok": True, "saved": saved, "quota": state.store.quota_status(user)}

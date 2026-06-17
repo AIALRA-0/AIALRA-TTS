@@ -10,6 +10,7 @@ from .glossary import GlossaryTerm
 from .llm_local import LocalLLMClient
 from .subtitle_io import Segment
 from .text_protection import protect_text, restore_text
+from .translation_quality import assess_translation_quality
 
 
 @dataclass
@@ -278,6 +279,7 @@ def translate_chunk_with_retries(
         limit = target_limit(seg, config)
         lecture = normalize_zh(literal)
         flags.extend(["LLM_CHUNK_FAILED_FALLBACK", "LOCAL_RULE_FALLBACK_REVIEW_REQUIRED"])
+        flags.extend(assess_translation_quality(seg.text, lecture, literal, config))
         return [(seg, literal, lecture, flags, limit)]
 
 
@@ -322,6 +324,7 @@ def rescue_translate_single_segment(
                 flags.append("ZH_OVER_TARGET_LENGTH")
                 if config.get("translation", {}).get("hard_truncate_over_limit", False):
                     zh = compress_to_limit(zh, limit)
+            flags.extend(assess_translation_quality(seg.text, zh, lit, config))
             return (seg, normalize_zh(lit), zh, flags, limit)
         except Exception as exc:
             if logger:
@@ -420,6 +423,7 @@ def request_llm_chunk(
             flags.append("ZH_OVER_TARGET_LENGTH")
             if config.get("translation", {}).get("hard_truncate_over_limit", False):
                 zh = compress_to_limit(zh, limit)
+        flags.extend(assess_translation_quality(seg.text, zh, lit, config))
         results.append((seg, normalize_zh(lit), zh, flags, limit))
     return results
 
@@ -698,6 +702,7 @@ def translate_with_rules(
             lecture = apply_light_dialect(lecture, config.get("dialect", {}).get("target", "mandarin"))
         limit = target_limit(seg, config)
         lecture = compress_to_limit(lecture, limit)
+        flags.extend(assess_translation_quality(seg.text, lecture, literal, config))
         zh_segments.append(Segment(seg.id, seg.start, seg.end, lecture))
         traces.append(
             TranslationTrace(

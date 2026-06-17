@@ -8,6 +8,7 @@ from typing import Any
 
 from .config import load_config
 from .llm_local import LocalLLMClient
+from .translation_quality import assess_translation_quality, is_possibly_overcompressed, quality_flag_severity
 from .utils import PROJECT_ROOT, ensure_dir, write_json
 
 
@@ -142,9 +143,9 @@ def heuristic_fidelity_issues(en_segments: list[dict[str, Any]], zh_segments: li
         ]
         if missing_names:
             issues.append({"type": "acronym_or_name_mismatch", "severity": "medium", "segment_id": sid, "missing": missing_names[:8]})
-        en_words = len(re.findall(r"[A-Za-z0-9]+", en_text))
-        zh_cjk = len(re.findall(r"[\u4e00-\u9fff]", zh_text))
-        if en_words >= 16 and zh_cjk < max(8, int(en_words * 0.45)):
+        if is_possibly_overcompressed(en_text, zh_text):
+            en_words = len(re.findall(r"[A-Za-z0-9]+", en_text))
+            zh_cjk = len(re.findall(r"[\u4e00-\u9fff]", zh_text))
             issues.append(
                 {
                     "type": "possibly_overcompressed_translation",
@@ -152,6 +153,16 @@ def heuristic_fidelity_issues(en_segments: list[dict[str, Any]], zh_segments: li
                     "segment_id": sid,
                     "en_words": en_words,
                     "zh_cjk": zh_cjk,
+                }
+            )
+        quality_flags = assess_translation_quality(en_text, zh_text)
+        if quality_flags:
+            issues.append(
+                {
+                    "type": "translation_quality_heuristic",
+                    "severity": quality_flag_severity(quality_flags),
+                    "segment_id": sid,
+                    "flags": quality_flags,
                 }
             )
     return issues

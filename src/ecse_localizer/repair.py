@@ -119,7 +119,12 @@ def select_repair_ids(fidelity: dict[str, Any], *, max_score: int, include_high:
             if issue.get("severity") == "high" and str(issue.get("segment_id", "")).isdigit():
                 ids.add(int(issue["segment_id"]))
     for issue in fidelity.get("issues", []):
-        if issue.get("type") in {"number_mismatch", "acronym_or_name_mismatch", "possibly_overcompressed_translation"}:
+        if issue.get("type") in {
+            "number_mismatch",
+            "acronym_or_name_mismatch",
+            "possibly_overcompressed_translation",
+            "translation_quality_heuristic",
+        }:
             if str(issue.get("segment_id", "")).isdigit():
                 ids.add(int(issue["segment_id"]))
     return ids

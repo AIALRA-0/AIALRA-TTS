@@ -8,6 +8,7 @@ from .align import overlap_count
 from .ffmpeg_utils import media_duration
 from .glossary import GlossaryTerm
 from .subtitle_io import Segment
+from .translation_quality import assess_translation_quality, quality_flag_severity
 
 
 def run_qa(
@@ -47,6 +48,16 @@ def run_qa(
         ascii_letters = sum(1 for ch in zh.text if ch.isascii() and ch.isalpha())
         if ascii_letters / max(1, len(zh.text)) > float(config.get("qa", {}).get("flag_untranslated_ascii_ratio", 0.5)):
             issues.append({"type": "possibly_untranslated", "severity": "medium", "segment_id": zh.id})
+        quality_flags = assess_translation_quality(en.text, zh.text, "", config)
+        if quality_flags:
+            issues.append(
+                {
+                    "type": "translation_quality_heuristic",
+                    "severity": quality_flag_severity(quality_flags),
+                    "segment_id": zh.id,
+                    "flags": quality_flags,
+                }
+            )
 
     tts_duration = float(tts_info.get("duration") or 0)
     if abs(tts_duration - video_duration) > max(2.0, video_duration * 0.03):

@@ -123,7 +123,7 @@ Contabo deployment templates live in `deploy/`:
 - Subtitles: existing `.vtt/.srt/.ass` are preferred and normalized before ASR.
 - ASR: `whisperx` then `faster-whisper` when installed; existing subtitles avoid ASR when good enough.
 - Audio enhancement: ffmpeg loudnorm/highpass/lowpass always available; DeepFilterNet/ClearerVoice optional.
-- Translation: local Ollama/LM Studio OpenAI-compatible endpoint only. `best_quality` reconstructs spoken paragraphs before per-segment JSON translation, then applies a course style guide and coherence pass. `fidelity-audit` reviews the finished report, and `repair-fidelity` rewrites only the failed/low-score segments before regenerating subtitles, TTS, muxed video, and QA. Qwen 14B is preferred for quality; 7B is fallback.
+- Translation: local Ollama/LM Studio OpenAI-compatible endpoint only. `best_quality` reconstructs spoken paragraphs before per-segment JSON translation, then applies a course style guide, coherence pass, and deterministic quality flags for summary-like translations, over-compression, repeated calques, and unchanged literal rewrites. `fidelity-audit` reviews the finished report, and `repair-fidelity` rewrites only the failed/low-score/quality-flagged segments before regenerating subtitles, TTS, muxed video, and QA. Qwen 14B is preferred for quality; 7B is fallback.
 - TTS: CosyVoice SFT is the preferred local Chinese backend; Piper is a lightweight fallback. Voice cloning stays disabled unless explicit consent files are present.
 - Subtitles: `.ass` means Advanced SubStation Alpha and is used for styled bilingual subtitles.
 
