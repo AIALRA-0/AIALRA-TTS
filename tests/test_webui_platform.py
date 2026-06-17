@@ -433,6 +433,41 @@ def test_artifact_download_urls_are_user_scoped(tmp_path):
     assert "Invalid signed URL" in response.text
 
 
+def test_ownerless_remote_preview_is_admin_only(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    preview_dir = tmp_path / "previews"
+    config["webui"]["preview_dir"] = str(preview_dir)
+    config["webui"]["preview_manifest"] = str(preview_dir / "preview_manifest.json")
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    state.store.create_user("student.one", "long-enough-password")
+    preview_dir.mkdir()
+    preview = preview_dir / "legacy_preview.mp4"
+    preview.write_bytes(b"legacy preview")
+    (preview_dir / "preview_manifest.json").write_text(
+        json.dumps({"previews": [{"id": "legacy-preview", "name": "legacy.mp4", "preview_path": str(preview)}]}),
+        encoding="utf-8",
+    )
+
+    student = TestClient(app)
+    response = student.post("/api/login", json={"username": "student.one", "password": "long-enough-password"})
+    assert response.status_code == 200
+    response = student.get("/api/artifacts")
+    assert response.status_code == 200
+    assert "legacy-preview" not in {row["id"] for row in response.json()["artifacts"]}
+
+    admin = TestClient(app)
+    response = admin.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    response = admin.get("/api/artifacts")
+    assert response.status_code == 200
+    assert "legacy-preview" in {row["id"] for row in response.json()["artifacts"]}
+
+
 def test_worker_queue_submit_reports_waiting_worker(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

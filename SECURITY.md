@@ -30,6 +30,8 @@ Remote WebUI deployments should keep `webui.cookie_secure=true` and `webui.csrf_
 
 Generated artifact download URLs are short-lived HMAC-signed URLs. The URL binds to the artifact id and user; it does not expose the filesystem path in the token.
 
+In multi-user WebUI mode, generated artifacts, previews, and temporary remote caches must carry an owner before non-admin users can see them. Ownerless legacy cache rows are admin-only so they can be audited or cleaned without becoming public.
+
 Artifact deletion is restricted to managed directories:
 
 - configured output directory

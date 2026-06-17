@@ -220,7 +220,7 @@ def preview_cache_dir(config: dict[str, Any]) -> Path:
 def filter_artifacts_for_user(artifacts: list[dict[str, Any]], username: str, *, admin: bool) -> list[dict[str, Any]]:
     if admin:
         return artifacts
-    return [row for row in artifacts if not row.get("owner") or row.get("owner") == username]
+    return [row for row in artifacts if row.get("owner") == username]
 
 
 def find_artifact(artifacts: list[dict[str, Any]], aid: str) -> dict[str, Any] | None:

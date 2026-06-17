@@ -9,6 +9,7 @@ from ecse_localizer.artifacts import (
     artifact_catalog,
     artifact_id,
     cleanup_expired_files,
+    filter_artifacts_for_user,
     safe_delete_artifact,
     safe_delete_artifact_record,
     sign_artifact_token,
@@ -130,6 +131,19 @@ def test_worker_artifact_refs_are_requestable_without_worker_paths(tmp_path):
     signed = with_signed_urls([row], secret="secret", username="student", ttl_seconds=60)[0]
     assert signed["request_cache_url"] == "/api/artifacts/worker_artifact_abc123/request-cache"
     assert "download_url" not in signed
+
+
+def test_artifact_filter_hides_ownerless_rows_from_non_admin():
+    rows = [
+        {"id": "student", "owner": "student.one"},
+        {"id": "other", "owner": "student.two"},
+        {"id": "legacy-ownerless"},
+    ]
+
+    visible = filter_artifacts_for_user(rows, "student.one", admin=False)
+
+    assert [row["id"] for row in visible] == ["student"]
+    assert [row["id"] for row in filter_artifacts_for_user(rows, "admin", admin=True)] == ["student", "other", "legacy-ownerless"]
 
 
 def test_remote_cache_manifest_overrides_worker_ref_for_download(tmp_path):
