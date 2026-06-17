@@ -55,6 +55,7 @@ Deployment steps:
    - Use `deploy/Caddyfile.example` for Caddy; it reads `REMOTE_PUBLIC_HOST` from `.env`.
    - Use `deploy/nginx.conf.example` for Nginx; replace `localizer.example.invalid` on the server only.
    - Keep the dedicated `/api/events` reverse-proxy rule. It disables buffering/caching for authenticated Server-Sent Events so job, worker, queue, quota, GPU/CPU, and disk metrics update live instead of waiting for proxy buffers.
+   - Use unauthenticated `/healthz` for process liveness and `/readyz` for readiness checks. These probes must stay redacted: no user records, job records, local filesystem paths, tokens, worker signatures, or media metadata.
 7. Restrict upload size at reverse proxy and application level.
 8. Configure persistent volumes only for:
    - metadata database or JSON store
@@ -110,6 +111,8 @@ Deployment steps:
      Manage the installed task with `.\14_manage_worker_task.ps1 -Action Status|Start|Stop|Restart|Uninstall`; the management script redacts task action arguments and supports `-Json` for monitoring.
 11. Validate:
    - `python -m ecse_localizer --config deploy/config.remote.yaml deploy-check` returns PASS before the service is exposed
+   - `curl -fsS https://your-domain.example/healthz` returns a redacted liveness payload
+   - `curl -fsS https://your-domain.example/readyz` returns a redacted readiness payload with all checks true
    - `.\09_worker_healthcheck.ps1` returns PASS on the Windows worker before scheduled tasks are installed
    - `python -m ecse_localizer translation-sample --output runs/translation_quality_sample` creates JSON/Markdown comparing literal, lecture, coherence, and repair stages
    - `python -m ecse_localizer remote-smoke --output runs/remote_smoke` passes the local Contabo/worker queue simulation

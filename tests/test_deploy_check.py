@@ -63,6 +63,7 @@ def test_reverse_proxy_examples_keep_sse_unbuffered():
     root = Path(__file__).parents[1]
     nginx = (root / "deploy" / "nginx.conf.example").read_text(encoding="utf-8")
     caddy = (root / "deploy" / "Caddyfile.example").read_text(encoding="utf-8")
+    compose = (root / "deploy" / "docker-compose.yml").read_text(encoding="utf-8")
     prompt = (root / "DEPLOY_CONTABO_PROMPT.md").read_text(encoding="utf-8")
 
     assert "location /api/events" in nginx
@@ -72,7 +73,10 @@ def test_reverse_proxy_examples_keep_sse_unbuffered():
     assert "handle /api/events" in caddy
     assert "flush_interval -1" in caddy
     assert "encode @notEvents zstd gzip" in caddy
+    assert "healthcheck:" in compose
+    assert "http://127.0.0.1:7861/readyz" in compose
     assert "dedicated `/api/events` reverse-proxy rule" in prompt
+    assert "Use unauthenticated `/healthz`" in prompt
 
 
 def test_deploy_check_rejects_placeholders_and_unsafe_remote_mode():

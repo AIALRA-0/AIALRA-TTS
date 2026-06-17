@@ -41,6 +41,8 @@ Open:
 http://127.0.0.1:7861
 ```
 
+Unauthenticated monitoring probes are available at `/healthz` and `/readyz`. They return only service/version/mode/check booleans and do not expose usernames, job records, filesystem paths, tokens, or local media metadata. Use `/readyz` for Docker, systemd, Caddy, Nginx, and external uptime checks because it also verifies the WebUI metadata, job, upload, and output stores are writable.
+
 Set real credentials in local `config.yaml` or `.env`; never commit them. The WebUI supports uploads, task history, project/folder metadata, project and folder editing/archiving/restoring, project quotas, reusable parameter templates, invite-only users, admin-managed user status/quotas, common tuning parameters, logs, quota checks, local worker health/metrics, SSE live status updates with polling fallback, failed-job retry, and soft-deleting/restoring job records.
 
 Per-job language, quality, and style settings are written to generated job config files under `runs/`. The base `config.yaml` stays local and is not mutated by submitted jobs.

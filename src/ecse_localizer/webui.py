@@ -25,6 +25,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Respon
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import __version__
 from .artifacts import (
     artifact_catalog,
     cleanup_expired_files,
@@ -189,6 +190,15 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     @app.get("/favicon.ico")
     def favicon() -> Response:
         return Response(status_code=204)
+
+    @app.get("/healthz")
+    def healthz() -> dict[str, Any]:
+        return health_probe_payload(state, ready=False)
+
+    @app.get("/readyz")
+    def readyz() -> JSONResponse:
+        payload = health_probe_payload(state, ready=True)
+        return JSONResponse(payload, status_code=200 if payload["ok"] else 503)
 
     @app.post("/login")
     async def login_form(username: str = Form(...), password: str = Form(...)) -> RedirectResponse:
@@ -2379,6 +2389,52 @@ def worker_status_payload(state: WebState) -> dict[str, Any]:
         }
     )
     return row
+
+
+def health_probe_payload(state: WebState, *, ready: bool) -> dict[str, Any]:
+    execution_mode = str(state.webui.get("execution_mode", "local_subprocess") or "local_subprocess")
+    payload: dict[str, Any] = {
+        "ok": True,
+        "service": "aialra-localizer-web",
+        "version": __version__,
+        "ready": ready,
+        "generated_at": iso_now(),
+        "execution_mode": execution_mode,
+        "worker_required": execution_mode == "worker_queue",
+    }
+    try:
+        worker = worker_status_payload(state)
+        payload["worker_heartbeat_online"] = bool(worker.get("heartbeat_online"))
+        payload["queue_accepting"] = bool(worker.get("queue_accepting", True))
+    except Exception:
+        payload["worker_heartbeat_online"] = False
+        payload["queue_accepting"] = False
+
+    if not ready:
+        return payload
+
+    checks = {
+        "config_loaded": True,
+        "privacy_cloud_disabled": not bool(state.config.get("privacy", {}).get("allow_cloud_api", False)),
+        "platform_store_writable": probe_writable_dir(state.store.root),
+        "job_store_writable": probe_writable_dir(state.job_dir),
+        "upload_store_writable": probe_writable_dir(state.upload_dir),
+        "output_store_writable": probe_writable_dir(Path(state.config["output_dir"])),
+    }
+    payload["checks"] = checks
+    payload["ok"] = all(checks.values())
+    return payload
+
+
+def probe_writable_dir(path: str | Path) -> bool:
+    try:
+        root = ensure_dir(path)
+        probe = root / f".readyz_{uuid.uuid4().hex}.tmp"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return True
+    except Exception:
+        return False
 
 
 def effective_language_capabilities(

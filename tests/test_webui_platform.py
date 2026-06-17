@@ -206,6 +206,33 @@ def test_static_ui_has_sidebar_and_status_rail_layout():
     assert 'progressBar.style.width = `${progress == null ? 0 : progress}%`' in js
 
 
+def test_health_and_readiness_endpoints_are_public_and_redacted(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    app = create_app(write_config(tmp_path))
+    client = TestClient(app)
+
+    health = client.get("/healthz")
+    ready = client.get("/readyz")
+
+    assert health.status_code == 200
+    assert ready.status_code == 200
+    for response in [health, ready]:
+        body = response.json()
+        rendered = response.text
+        assert body["ok"] is True
+        assert body["service"] == "aialra-localizer-web"
+        assert body["version"]
+        assert "local-password" not in rendered
+        assert "worker-token" not in rendered
+        assert "unit-test-secret" not in rendered
+        assert str(tmp_path) not in rendered
+        assert "C:\\Users" not in rendered
+    assert "checks" not in health.json()
+    assert ready.json()["checks"]["platform_store_writable"] is True
+    assert ready.json()["checks"]["job_store_writable"] is True
+
+
 def test_static_artifact_history_has_scope_filters():
     static_root = Path(__file__).parents[1] / "src" / "ecse_localizer" / "static"
     html = (static_root / "index.html").read_text(encoding="utf-8")
