@@ -184,6 +184,28 @@ def test_upload_enforces_remote_quota(tmp_path):
     assert "Remote quota exceeded" in response.text
 
 
+def test_upload_disabled_by_default_for_worker_queue(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+
+    response = client.get("/api/dashboard")
+    assert response.status_code == 200
+    assert response.json()["upload_policy"]["enabled"] is False
+
+    response = client.post("/api/upload", files=[("files", ("lecture.mp4", BytesIO(b"x"), "video/mp4"))])
+    assert response.status_code == 403
+    assert "Windows worker" in response.text
+
+
 def test_worker_queue_submit_reports_waiting_worker(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

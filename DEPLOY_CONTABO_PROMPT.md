@@ -35,6 +35,7 @@ Deployment steps:
    - Set `asr.supported_languages`, `translation.supported_target_languages`, and `tts.supported_languages` to match the Windows worker's installed models.
    - Keep full media storage on the Windows worker.
    - Set `webui.execution_mode=worker_queue` on Contabo.
+   - Keep `webui.allow_remote_media_uploads=false` on Contabo unless a deliberate short-lived cache policy is approved.
    - Do not copy local `config.yaml`; use template values and environment variables only.
 4. Run the web service behind Caddy or Nginx with HTTPS.
 5. Restrict upload size at reverse proxy and application level.
@@ -79,6 +80,7 @@ Deployment steps:
    - user quota is enforced
    - `remote_quota_bytes` limits Contabo uploads plus preview-cache files, while `local_quota_bytes` remains the Windows worker storage budget
    - upload quota is enforced across multi-file requests and active-job concurrency limits return HTTP 429 with a readable message
+   - browser media upload is disabled in `worker_queue` mode unless explicitly enabled, so original videos do not land on the Contabo disk by default
    - admins can disable users and update local/remote user quotas without disabling the last active admin
    - project quota usage is visible for generated managed artifacts
    - worker heartbeat appears online

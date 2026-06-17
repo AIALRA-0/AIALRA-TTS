@@ -190,6 +190,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             "input_dir": state.config["input_dir"],
             "output_dir": state.config["output_dir"],
             "upload_dir": str(state.store.user_upload_dir(user)),
+            "upload_policy": browser_upload_policy(state),
             "video_count": len(videos),
             "report_count": len(list_reports(state.config, limit=10000)),
             "latest_reports": reports,
@@ -206,7 +207,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     @app.get("/api/videos")
     def videos(user: str = Depends(require_user)) -> dict[str, Any]:
         state.reload_config()
-        return {"videos": list_video_records(state.config, state.store.user_upload_dir(user))}
+        return {"videos": list_video_records(state.config, state.store.user_upload_dir(user)), "upload_policy": browser_upload_policy(state)}
 
     @app.get("/api/reports")
     def reports(_: str = Depends(require_user)) -> dict[str, Any]:
@@ -276,6 +277,10 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/api/upload")
     async def upload(files: list[UploadFile] = File(...), user: str = Depends(require_user)) -> dict[str, Any]:
+        state.reload_config()
+        policy = browser_upload_policy(state)
+        if not policy["enabled"]:
+            raise HTTPException(status_code=403, detail=policy["message"])
         saved: list[dict[str, Any]] = []
         max_bytes = int(state.webui.get("max_upload_mb", 20480)) * 1024 * 1024
         quota = state.store.quota_status(user)
@@ -743,6 +748,29 @@ def upload_fits_quota(base_used_bytes: int, reserved_bytes: int, current_file_by
     if quota_bytes <= 0:
         return True
     return base_used_bytes + reserved_bytes + current_file_bytes <= quota_bytes
+
+
+def browser_upload_policy(state: WebState) -> dict[str, Any]:
+    execution_mode = str(state.webui.get("execution_mode", "local_subprocess") or "local_subprocess")
+    explicit = state.webui.get("allow_remote_media_uploads")
+    enabled = bool(explicit) if explicit is not None else execution_mode != "worker_queue"
+    if enabled:
+        message = "Browser uploads are stored in the configured WebUI upload directory and count against remote quota."
+        mode = "webui_upload_dir"
+    else:
+        message = (
+            "Browser media upload is disabled for remote worker_queue mode. "
+            "Keep original videos on the Windows worker and submit a worker-visible local path or use a private worker upload tunnel."
+        )
+        mode = "disabled"
+    return {
+        "enabled": enabled,
+        "mode": mode,
+        "execution_mode": execution_mode,
+        "max_upload_mb": int(state.webui.get("max_upload_mb", 20480) or 20480),
+        "allowed_suffixes": sorted(ALLOWED_UPLOAD_SUFFIXES),
+        "message": message,
+    }
 
 
 def save_worker_preview_upload(state: WebState, record: dict[str, Any], request: Request, body: bytes) -> dict[str, Any]:

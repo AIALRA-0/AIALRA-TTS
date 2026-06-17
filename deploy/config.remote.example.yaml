@@ -31,6 +31,7 @@ webui:
   session_secret: "${WEBUI_SESSION_SECRET}"
   bind_local_only: false
   upload_dir: "/srv/aialra/previews/uploads"
+  allow_remote_media_uploads: false
   preview_dir: "/srv/aialra/previews/cache"
   preview_manifest: "/srv/aialra/previews/cache/preview_manifest.json"
   job_dir: "/srv/aialra/runs/webui_jobs"

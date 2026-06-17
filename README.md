@@ -55,7 +55,7 @@ For Contabo mode, low-bitrate previews and thumbnails can be registered through 
 
 When a queued Windows worker job finishes successfully, the worker can generate a low-bitrate MP4 plus JPG thumbnail with ffmpeg and upload them to `/api/worker/jobs/{job_id}/preview`. These uploads use the same HMAC worker signature as heartbeat/status requests, are capped by `webui.worker_preview_max_upload_mb`, and count against `remote_quota_bytes`. Preview upload failure is non-fatal: the full local output remains on the Windows worker and the job status still reflects the actual processing result.
 
-Quota fields are split by storage responsibility. `remote_quota_bytes` limits Contabo-side uploads plus preview-cache files; `local_quota_bytes` is kept as the Windows worker storage budget for original media and full outputs. Upload requests reserve bytes against the remote quota across all files in the same request.
+Quota fields are split by storage responsibility. `remote_quota_bytes` limits Contabo-side uploads plus preview-cache files; `local_quota_bytes` is kept as the Windows worker storage budget for original media and full outputs. Upload requests reserve bytes against the remote quota across all files in the same request. In `worker_queue` production mode, browser media upload is disabled by default unless `webui.allow_remote_media_uploads: true` is explicitly set; this prevents long-term original videos from landing on the Contabo disk.
 
 Job records are JSON files with `schema_version`. WebUI normalizes older records on read/claim/update by filling missing metadata, log path, dispatch target, timestamps, retry count, and worker args when possible. Job states are normalized to `queued`, `claimed`, `running`, `paused`, `retrying`, `done`, `failed`, `cancelled`, and `deleted`; older `passed` records are migrated to `done` with `legacy_status: passed`.
 
@@ -70,6 +70,8 @@ The intended production layout is:
 - Connection: Windows initiates a reverse tunnel or private VPN connection. Do not expose the Windows worker directly to the public internet.
 
 Contabo should store only metadata, small thumbnails, low-bitrate previews, and optional short-lived caches under `webui.preview_dir`. Original videos and full-resolution outputs remain on the local worker by default.
+
+Remote production config should keep `webui.allow_remote_media_uploads: false`. Users should submit worker-visible local paths, or you can add a private worker upload tunnel later; do not use the public Contabo web disk as the default original-video store.
 
 Windows worker heartbeat:
 

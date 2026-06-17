@@ -8,6 +8,7 @@ import yaml
 from ecse_localizer.webui import (
     WebState,
     active_job_counts,
+    browser_upload_policy,
     build_job_command,
     claim_worker_job,
     command_with_config,
@@ -161,6 +162,26 @@ def test_upload_quota_counts_reserved_bytes_without_double_counting_current_file
     assert upload_fits_quota(base_used_bytes=4, reserved_bytes=0, current_file_bytes=6, quota_bytes=10)
     assert upload_fits_quota(base_used_bytes=4, reserved_bytes=3, current_file_bytes=3, quota_bytes=10)
     assert not upload_fits_quota(base_used_bytes=4, reserved_bytes=3, current_file_bytes=4, quota_bytes=10)
+
+
+def test_browser_upload_policy_disables_remote_worker_queue_by_default(tmp_path):
+    config_path = write_config(tmp_path)
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    data["webui"]["execution_mode"] = "local_subprocess"
+    config_path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    state = WebState(config_path)
+    assert browser_upload_policy(state)["enabled"] is True
+
+    data["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    state = WebState(config_path)
+    policy = browser_upload_policy(state)
+    assert policy["enabled"] is False
+    assert policy["mode"] == "disabled"
+    assert "Windows worker" in policy["message"]
+
+    state.webui["allow_remote_media_uploads"] = True
+    assert browser_upload_policy(state)["enabled"] is True
 
 
 def fake_worker_request(state: WebState, headers: dict[str, str], *, path: str = "/api/worker/jobs/claim"):

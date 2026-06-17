@@ -7,6 +7,7 @@ const state = {
   artifacts: [],
   templates: [],
   capabilities: null,
+  uploadPolicy: null,
   selectedJob: null,
   jobTimer: null,
 };
@@ -187,6 +188,8 @@ async function loadDashboard() {
   workerMetric.textContent = workerLabel(data.worker);
   workerMetric.title = data.worker?.message || "";
   $("metricDisk").textContent = data.metrics?.disk ? `${Math.round(data.metrics.disk.used_percent)}%` : "-";
+  state.uploadPolicy = data.upload_policy || null;
+  renderUploadPolicy();
   state.capabilities = data.capabilities || null;
   renderLanguageCapabilities();
   state.projects = data.projects || [];
@@ -205,6 +208,26 @@ function workerLabel(worker) {
     return "等待 worker";
   }
   return worker.status === "online" ? "online" : "local";
+}
+
+function renderUploadPolicy() {
+  const policy = state.uploadPolicy || {};
+  const enabled = policy.enabled !== false;
+  const message = $("uploadPolicyMessage");
+  if (message) {
+    message.textContent = policy.message || "文件保存到 _localizer_output/uploads，不覆盖原始课程文件。";
+  }
+  const input = $("uploadFiles");
+  const button = $("uploadForm")?.querySelector('button[type="submit"]');
+  if (input) input.disabled = !enabled;
+  if (button) {
+    button.disabled = !enabled;
+    button.textContent = enabled ? "上传" : "远端上传已禁用";
+  }
+  const result = $("uploadResult");
+  if (result && !enabled && !result.textContent.trim()) {
+    result.textContent = policy.message || "";
+  }
 }
 
 function renderLanguageCapabilities() {
@@ -284,6 +307,8 @@ function normalizeLanguage(value) {
 async function loadVideos() {
   const data = await api("/api/videos");
   state.videos = data.videos || [];
+  state.uploadPolicy = data.upload_policy || state.uploadPolicy;
+  renderUploadPolicy();
   renderVideoOptions();
   renderVideos();
 }
@@ -765,6 +790,12 @@ function row(items, header = false) {
 
 async function uploadFiles(event) {
   event.preventDefault();
+  if (state.uploadPolicy && state.uploadPolicy.enabled === false) {
+    const message = state.uploadPolicy.message || "远端上传已禁用";
+    $("uploadResult").textContent = message;
+    toast(message);
+    return;
+  }
   const files = $("uploadFiles").files;
   if (!files.length) {
     toast("请选择文件");

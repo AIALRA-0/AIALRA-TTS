@@ -154,6 +154,7 @@ webui:
   session_secret: "change-me-generate-a-long-random-secret"
   bind_local_only: true
   upload_dir: "C:/path/to/ECSE 4961/_localizer_output/uploads"
+  allow_remote_media_uploads: true
   preview_dir: "C:/path/to/ECSE 4961/_localizer_output/previews"
   preview_manifest: "C:/path/to/ECSE 4961/_localizer_output/previews/preview_manifest.json"
   job_dir: "C:/path/to/ECSE 4961/_localizer_project/runs/webui_jobs"
