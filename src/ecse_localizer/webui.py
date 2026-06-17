@@ -532,6 +532,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "status": "online",
                 "worker_id": worker_id,
                 "version": str(body.get("version") or ""),
+                "max_concurrent_jobs": body.get("max_concurrent_jobs"),
                 "metrics": body.get("metrics") if isinstance(body.get("metrics"), dict) else {},
                 "media_refs": body.get("media_refs") if isinstance(body.get("media_refs"), list) else None,
                 "capabilities": body.get("capabilities") if isinstance(body.get("capabilities"), dict) else {},
@@ -567,6 +568,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "status": "online",
                 "worker_id": str(body.get("worker_id") or record.get("claimed_by") or "local-windows-worker"),
                 "version": str(body.get("version") or ""),
+                "max_concurrent_jobs": body.get("max_concurrent_jobs"),
                 "metrics": body.get("metrics") if isinstance(body.get("metrics"), dict) else {},
                 "message": f"job {job_id} {changes.get('status')}",
             }
@@ -586,6 +588,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "status": "online",
                 "worker_id": worker_id or str(record.get("claimed_by") or "local-windows-worker"),
                 "version": str(body.get("version") or ""),
+                "max_concurrent_jobs": body.get("max_concurrent_jobs"),
                 "metrics": body.get("metrics") if isinstance(body.get("metrics"), dict) else {},
                 "message": f"job {job_id} control poll",
             }

@@ -415,10 +415,12 @@ class PlatformStore:
         media_refs = sanitize_worker_media_refs(payload.get("media_refs"))
         if not isinstance(payload.get("media_refs"), list) and isinstance(previous, dict):
             media_refs = previous.get("media_refs") if isinstance(previous.get("media_refs"), list) else []
+        max_concurrent_jobs = worker_max_concurrent_jobs(payload, previous if isinstance(previous, dict) else {})
         row = {
             "status": str(payload.get("status") or "online"),
             "worker_id": str(payload.get("worker_id") or "local-windows-worker"),
             "version": str(payload.get("version") or ""),
+            "max_concurrent_jobs": max_concurrent_jobs,
             "message": sanitize_remote_text(payload.get("message") or ""),
             "metrics": sanitize_metrics(payload.get("metrics")) if isinstance(payload.get("metrics"), dict) else {},
             "media_refs": media_refs,
@@ -585,6 +587,22 @@ def coerce_float(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def coerce_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def worker_max_concurrent_jobs(payload: dict[str, Any], previous: dict[str, Any]) -> int:
+    raw = payload.get("max_concurrent_jobs")
+    if raw is None and isinstance(payload.get("worker"), dict):
+        raw = payload["worker"].get("max_concurrent_jobs")
+    if raw is None:
+        raw = previous.get("max_concurrent_jobs")
+    return max(1, min(8, coerce_int(raw, 1)))
 
 
 def gb_to_bytes(value: float) -> int:

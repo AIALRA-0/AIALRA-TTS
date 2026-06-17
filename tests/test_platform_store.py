@@ -174,6 +174,7 @@ def test_worker_heartbeat_redacts_message_and_media_ref_names(tmp_path):
         {
             "status": "online",
             "worker_id": "worker-1",
+            "max_concurrent_jobs": 3,
             "message": f"watching {win_root}\\lecture.mp4 via http://{private_ip}:8787/?token=abc123",
             "metrics": {"disk": {"path": f"{win_root}\\_localizer_output", "used_percent": 55}},
             "capabilities": {
@@ -202,8 +203,19 @@ def test_worker_heartbeat_redacts_message_and_media_ref_names(tmp_path):
     assert row["media_refs"][0]["name"] == "lecture.mp4"
     assert "path" not in row["media_refs"][0]
     assert row["capabilities"]["tts"]["note"] == "model at <local-path>"
+    assert row["max_concurrent_jobs"] == 3
 
     updated = store.record_worker_heartbeat({"status": "online", "worker_id": "worker-1", "message": "status-only ping"})
 
     assert updated["capabilities"] == row["capabilities"]
     assert updated["media_refs"] == row["media_refs"]
+    assert updated["max_concurrent_jobs"] == 3
+
+
+def test_worker_heartbeat_concurrency_defaults_and_clamps(tmp_path):
+    store = PlatformStore(make_config(tmp_path))
+    store.bootstrap()
+
+    assert store.record_worker_heartbeat({"worker_id": "worker-1"})["max_concurrent_jobs"] == 1
+    assert store.record_worker_heartbeat({"worker_id": "worker-1", "max_concurrent_jobs": 99})["max_concurrent_jobs"] == 8
+    assert store.record_worker_heartbeat({"worker_id": "worker-1", "worker": {"max_concurrent_jobs": 2}})["max_concurrent_jobs"] == 2

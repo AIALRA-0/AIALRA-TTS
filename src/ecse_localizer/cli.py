@@ -314,6 +314,7 @@ def build_worker_status_payload(config: dict[str, Any], *, worker_id: str = "loc
     return {
         "worker_id": worker_id,
         "version": __version__,
+        "max_concurrent_jobs": worker_concurrency(config),
         "privacy": config.get("privacy", {}),
         "metrics": collect_system_metrics(config),
         "media_refs": collect_worker_media_refs(config),

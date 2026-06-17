@@ -254,12 +254,14 @@ function percentText(value) {
 
 function workerLabel(worker) {
   if (!worker) return "local";
+  const slots = Number(worker.max_concurrent_jobs);
+  const slotLabel = Number.isFinite(slots) && slots > 1 ? ` · ${Math.round(slots)} slots` : "";
   if (worker.execution_mode === "worker_queue") {
-    if (worker.heartbeat_online) return worker.age_seconds != null ? `online ${worker.age_seconds}s` : "online";
+    if (worker.heartbeat_online) return worker.age_seconds != null ? `online ${worker.age_seconds}s${slotLabel}` : `online${slotLabel}`;
     if (worker.status === "offline") return "离线等待";
     return "等待 worker";
   }
-  return worker.status === "online" ? "online" : "local";
+  return worker.status === "online" ? `online${slotLabel}` : "local";
 }
 
 function renderUploadPolicy() {

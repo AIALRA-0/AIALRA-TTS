@@ -537,6 +537,7 @@ def test_metrics_endpoint_returns_live_worker_metrics_without_paths(tmp_path):
         headers={"x-worker-token": "worker-token"},
         json={
             "worker_id": "worker-1",
+            "max_concurrent_jobs": 2,
             "metrics": {
                 "cpu": {"load_percent": 42},
                 "memory": {"used_percent": 38},
@@ -553,6 +554,7 @@ def test_metrics_endpoint_returns_live_worker_metrics_without_paths(tmp_path):
     assert response.status_code == 200
     body = response.json()
     assert body["worker"]["heartbeat_online"] is True
+    assert body["worker"]["max_concurrent_jobs"] == 2
     assert body["metrics"]["source"] == "worker_heartbeat"
     assert body["metrics"]["cpu"]["load_percent"] == 42
     assert body["metrics"]["memory"]["used_percent"] == 38

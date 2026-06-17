@@ -36,6 +36,7 @@ from ecse_localizer.webui import (
 )
 from ecse_localizer.worker_client import (
     canonical_json,
+    claim_job,
     collect_worker_media_refs,
     extract_progress_from_text,
     get_worker_control,
@@ -129,6 +130,32 @@ def test_poll_concurrent_once_uses_per_slot_worker_ids(monkeypatch, tmp_path):
     assert result["max_concurrent_jobs"] == 3
     assert result["claimed_count"] == 1
     assert set(calls) == {"worker-main-1", "worker-main-2", "worker-main-3"}
+
+
+def test_claim_job_sends_worker_concurrency(monkeypatch):
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"ok": True, "job": None}
+
+    def fake_post(url, data, headers, timeout):
+        captured.update({"url": url, "data": data, "headers": headers, "timeout": timeout})
+        return Response()
+
+    monkeypatch.setattr("ecse_localizer.worker_client.requests.post", fake_post)
+
+    assert claim_job("https://remote.example", "worker-token", "worker-main", {"worker": {"max_concurrent_jobs": 3}}) is None
+
+    body = json.loads(captured["data"].decode("utf-8"))
+    assert captured["url"] == "https://remote.example/api/worker/jobs/claim"
+    assert body["worker_id"] == "worker-main"
+    assert body["max_concurrent_jobs"] == 3
+    assert "X-Worker-Signature" in captured["headers"]
+    assert "X-Worker-Token" not in captured["headers"]
 
 
 def test_file_display_name_handles_windows_and_posix_paths():

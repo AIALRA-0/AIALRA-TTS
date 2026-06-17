@@ -15,6 +15,7 @@ from .remote_smoke import run_remote_smoke
 from .translation_sample import write_translation_quality_sample
 from .tts import tts_health
 from .utils import PROJECT_ROOT, ensure_dir, write_json
+from .worker_client import worker_concurrency
 from .worker_health import assess_worker_health
 
 
@@ -66,6 +67,7 @@ def build_worker_health_payload(config: dict[str, Any], *, worker_id: str = "loc
     return {
         "worker_id": worker_id,
         "version": __version__,
+        "max_concurrent_jobs": worker_concurrency(config),
         "privacy": config.get("privacy", {}),
         "metrics": collect_system_metrics(config),
         "tts": tts,

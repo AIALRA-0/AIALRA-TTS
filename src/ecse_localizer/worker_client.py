@@ -156,6 +156,7 @@ def claim_job(remote_base_url: str, worker_token: str, worker_id: str, config: d
     payload = {
         "worker_id": worker_id,
         "version": __version__,
+        "max_concurrent_jobs": worker_concurrency(config),
         "metrics": collect_system_metrics(config),
         "media_refs": collect_worker_media_refs(config),
         "capabilities": worker_language_capabilities(config),
@@ -269,6 +270,7 @@ def run_worker_job(
         "status": status,
         "returncode": final_returncode,
         "worker_id": worker_id,
+        "max_concurrent_jobs": worker_concurrency(base_config),
         "log_tail": log_tail,
         "result": summarize_result(result),
         "metrics": collect_system_metrics(base_config),
@@ -367,6 +369,7 @@ def run_upload_artifact_cache_job(
             "status": "done",
             "returncode": 0,
             "worker_id": worker_id,
+            "max_concurrent_jobs": worker_concurrency(config),
             "progress": 100,
             "result": {"artifact_cache": uploaded.get("artifact", uploaded), "artifact_ref_id": ref_id},
             "metrics": collect_system_metrics(config),
@@ -379,6 +382,7 @@ def run_upload_artifact_cache_job(
             "status": "failed",
             "returncode": 1,
             "worker_id": worker_id,
+            "max_concurrent_jobs": worker_concurrency(config),
             "progress": 100,
             "error": sanitize_remote_text(str(exc)),
             "metrics": collect_system_metrics(config),
@@ -939,6 +943,7 @@ def running_status_payload(
     payload: dict[str, Any] = {
         "status": "running",
         "worker_id": worker_id,
+        "max_concurrent_jobs": worker_concurrency(config),
         "log_tail": tail,
         "metrics": collect_system_metrics(config),
     }
