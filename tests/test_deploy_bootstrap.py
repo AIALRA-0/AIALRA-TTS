@@ -109,3 +109,19 @@ def test_worker_tunnel_systemd_unit_is_template_only_and_secret_free():
         "192.168.",
     ]:
         assert forbidden not in text
+
+
+def test_web_dockerfile_runs_as_non_root_and_stays_secret_free():
+    path = Path(__file__).resolve().parents[1] / "deploy" / "Dockerfile.web"
+    text = path.read_text(encoding="utf-8")
+
+    assert "useradd --create-home --uid 10001" in text
+    assert "chown -R aialra:aialra /app /srv/aialra" in text
+    assert "USER 10001:10001" in text
+    for forbidden in [
+        "WORKER_SHARED_TOKEN",
+        "WEBUI_ADMIN_PASSWORD",
+        "WEBUI_SESSION_SECRET",
+        "WEBUI_DOWNLOAD_SECRET",
+    ]:
+        assert forbidden not in text

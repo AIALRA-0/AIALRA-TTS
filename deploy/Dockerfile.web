@@ -7,6 +7,10 @@ WORKDIR /app
 COPY pyproject.toml requirements.txt README.md ./
 COPY src ./src
 RUN pip install --no-cache-dir -e .
+RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin aialra \
+    && mkdir -p /srv/aialra/platform /srv/aialra/runs /srv/aialra/previews \
+    && chown -R aialra:aialra /app /srv/aialra
+USER 10001:10001
 
 EXPOSE 7861
 CMD ["python", "-m", "ecse_localizer.webui", "--config", "/app/config.yaml", "--host", "0.0.0.0", "--port", "7861"]
