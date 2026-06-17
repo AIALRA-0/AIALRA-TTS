@@ -638,6 +638,14 @@ def test_cleanup_endpoint_is_admin_only(tmp_path):
     cleanup = response.json()["cleanup"]
     assert cleanup["dry_run"] is True
     assert "items" in cleanup
+    assert "reason_summary" in cleanup
+
+
+def test_static_cleanup_result_shows_reason_summary():
+    js = (Path(__file__).parents[1] / "src" / "ecse_localizer" / "static" / "app.js").read_text(encoding="utf-8")
+
+    assert "reason_summary" in js
+    assert "Object.entries(cleanup?.reason_summary || {})" in js
 
 
 def test_global_settings_and_raw_config_are_admin_only(tmp_path):

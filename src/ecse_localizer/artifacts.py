@@ -25,6 +25,15 @@ DOWNLOADABLE_OUTPUTS = {
 }
 PREVIEWABLE_SUFFIXES = {".mp4", ".webm", ".wav", ".mp3", ".m4a"}
 ACTIVE_JOB_STATUSES = {"queued", "claimed", "running", "retrying", "paused"}
+TEMP_AUDIO_STEMS = {
+    "audio",
+    "audio_enhanced",
+    "audio_normalized",
+    "audio_raw",
+    "source_audio",
+    "rawmix",
+}
+SUBTITLE_CACHE_SUFFIXES = {".srt", ".vtt", ".ass", ".ssa"}
 
 
 def artifact_id(path: str | Path) -> str:
@@ -488,10 +497,51 @@ def cleanup_expired_files(config: dict[str, Any], *, older_than_days: int = 7, d
                     candidates.append(path)
                     seen.add(key)
     for path in candidates:
-        deleted.append(cleanup_delete_file(config, path, dry_run=dry_run, reason="expired_file"))
+        deleted.append(cleanup_delete_file(config, path, dry_run=dry_run, reason=cleanup_reason_for_path(path, config)))
     deleted.extend(cleanup_deleted_job_artifacts(config, cutoff=cutoff, dry_run=dry_run, seen=seen))
     deleted.extend(cleanup_preview_manifest(config, cutoff=cutoff, dry_run=dry_run, seen=seen))
-    return {"dry_run": dry_run, "older_than_days": older_than_days, "count": len(deleted), "bytes": sum(int(x["bytes"]) for x in deleted), "items": deleted[:500]}
+    return {
+        "dry_run": dry_run,
+        "older_than_days": older_than_days,
+        "count": len(deleted),
+        "bytes": sum(int(x["bytes"]) for x in deleted),
+        "reason_summary": cleanup_reason_summary(deleted),
+        "items": deleted[:500],
+    }
+
+
+def cleanup_reason_summary(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    summary: dict[str, dict[str, int]] = {}
+    for row in rows:
+        reason = str(row.get("reason") or "unknown")
+        current = summary.setdefault(reason, {"count": 0, "bytes": 0})
+        current["count"] += 1
+        current["bytes"] += int(row.get("bytes") or 0)
+    return dict(sorted(summary.items()))
+
+
+def cleanup_reason_for_path(path: Path, config: dict[str, Any]) -> str:
+    target = path.resolve()
+    preview_root = preview_cache_dir(config)
+    if is_relative_to(target, preview_root):
+        return "expired_preview_cache"
+
+    parts = {part.lower() for part in target.parts}
+    stem = target.stem.lower()
+    suffix = target.suffix.lower()
+    name = target.name.lower()
+
+    if "tts_segments" in parts or (suffix == ".wav" and stem.startswith("seg_")):
+        return "expired_tts_segment_audio"
+    if suffix == ".wav" and (stem in TEMP_AUDIO_STEMS or stem.endswith("_rawmix") or "enhanced" in stem or "normalized" in stem):
+        return "expired_temp_audio"
+    if suffix in SUBTITLE_CACHE_SUFFIXES:
+        return "expired_subtitle_cache"
+    if suffix == ".json" and ("trace" in stem or stem.endswith("_segments") or stem.endswith("_words")):
+        return "expired_trace_cache"
+    if suffix in {".tmp", ".temp", ".cache"} or name.endswith(".tmp.json"):
+        return "expired_temp_file"
+    return "expired_file"
 
 
 def cleanup_deleted_job_artifacts(config: dict[str, Any], *, cutoff: float, dry_run: bool, seen: set[str]) -> list[dict[str, Any]]:

@@ -379,6 +379,46 @@ def test_cleanup_expired_files_includes_preview_cache(tmp_path):
     make_stale(stale)
     result = cleanup_expired_files(config, older_than_days=7, dry_run=True)
     assert any(item["path"] == str(stale.resolve()) for item in result["items"])
+    assert result["reason_summary"]["expired_preview_cache"]["count"] == 1
+
+
+def test_cleanup_classifies_intermediate_run_files_and_preserves_outputs(tmp_path):
+    config = make_config(tmp_path)
+    work = Path(config["work_dir"])
+    out = Path(config["output_dir"])
+    tts_dir = work / "run_1" / "tts_segments"
+    tts_dir.mkdir(parents=True)
+    segment_wav = tts_dir / "seg_00001.wav"
+    temp_audio = work / "run_1" / "audio_enhanced.wav"
+    cached_subtitle = work / "run_1" / "draft.zh.srt"
+    trace = work / "run_1" / "translation_trace.json"
+    final_video = out / "lecture_zh_dub.mp4"
+    final_report = out / "lecture_report.json"
+    for path, data in [
+        (segment_wav, b"seg"),
+        (temp_audio, b"audio"),
+        (cached_subtitle, b"subtitle"),
+        (trace, b"trace"),
+        (final_video, b"mp4"),
+        (final_report, b"report"),
+    ]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        make_stale(path)
+
+    result = cleanup_expired_files(config, older_than_days=7, dry_run=False)
+    summary = result["reason_summary"]
+
+    assert summary["expired_tts_segment_audio"]["count"] == 1
+    assert summary["expired_temp_audio"]["count"] == 1
+    assert summary["expired_subtitle_cache"]["count"] == 1
+    assert summary["expired_trace_cache"]["count"] == 1
+    assert not segment_wav.exists()
+    assert not temp_audio.exists()
+    assert not cached_subtitle.exists()
+    assert not trace.exists()
+    assert final_video.exists()
+    assert final_report.exists()
 
 
 def test_cleanup_deleted_job_artifacts_dry_run_then_apply(tmp_path):

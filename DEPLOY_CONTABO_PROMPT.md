@@ -65,6 +65,7 @@ Deployment steps:
    - short-lived logs
 9. Configure a cleanup job:
    - remove expired previews
+   - remove expired managed run-cache files such as TTS segment WAVs, temporary/enhanced audio, cached subtitles, and translation/ASR trace JSON
    - remove old soft-deleted job artifacts, logs, preview cache files, and stale preview manifest rows
    - preserve job JSON records, user metadata, project metadata, and template metadata
    - reject new uploads when quota would be exceeded
@@ -162,7 +163,7 @@ Deployment steps:
    - failed jobs can be retried without rewriting the base config
    - deleted jobs are soft-deleted from normal history, visible through the deleted history filter, and restorable before any physical artifact cleanup
    - artifacts linked to deleted jobs are hidden from the normal artifact list and signed download/cache endpoints, but remain visible through that job's deleted-detail artifact endpoint
-   - cleanup dry-runs report old deleted-job artifacts without deleting them; cleanup apply removes only managed output/run/upload/job-log/preview files and preserves metadata JSON
+   - cleanup dry-runs report old deleted-job artifacts and intermediate run-cache categories without deleting them; cleanup apply removes only managed output/run/upload/job-log/preview files and preserves metadata JSON
    - a queued job can be claimed through `/api/worker/jobs/claim`
    - a queued `repair_fidelity` job claims portable worker args beginning with `repair-fidelity`
    - worker status updates through `/api/worker/jobs/{job_id}/status`

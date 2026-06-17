@@ -1386,6 +1386,9 @@ async function cleanupApply() {
 function renderCleanupResult(cleanup) {
   const result = $("cleanupResult");
   if (!result) return;
+  const summary = Object.entries(cleanup?.reason_summary || {}).map(([reason, value]) => {
+    return `${reason}: ${value.count || 0} / ${formatBytes(value.bytes || 0)}`;
+  });
   const items = (cleanup?.items || []).slice(0, 20).map((item) => {
     const verb = item.dry_run ? "预估" : "删除";
     const target = item.path || item.error || "";
@@ -1393,6 +1396,7 @@ function renderCleanupResult(cleanup) {
   });
   result.textContent = [
     `${cleanup?.dry_run ? "清理预估" : "清理完成"}：${cleanup?.count || 0} 个文件，${formatBytes(cleanup?.bytes || 0)}`,
+    ...summary,
     ...items,
   ].join("\n");
 }
