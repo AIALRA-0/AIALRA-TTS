@@ -298,7 +298,7 @@ def schedule_compact_units(
     config: dict[str, Any],
 ) -> list[ScheduledUnit]:
     cfg = config.get("tts", {})
-    mode = str(cfg.get("compact_schedule_mode", "source_anchored"))
+    mode = str(cfg.get("compact_schedule_mode", "bounded_distributed"))
     if mode == "source_anchored":
         scheduled = schedule_source_anchored_units(units, tts_dir, video_duration, config)
     elif mode == "bounded_distributed":
@@ -572,7 +572,7 @@ def build_compact_dub(
         "duration": audio_duration(final_out),
         "segment_count": sum(len(x.unit.segment_ids) for x in scheduled),
         "utterance_count": len(scheduled),
-        "alignment_mode": str(config.get("tts", {}).get("compact_schedule_mode", "source_anchored")),
+        "alignment_mode": str(config.get("tts", {}).get("compact_schedule_mode", "bounded_distributed")),
         "flags": [],
     }
 

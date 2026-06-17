@@ -162,3 +162,30 @@ def test_compact_schedule_prevents_audio_overlap(tmp_path):
     }
     scheduled = schedule_compact_units(units, tts_dir, 10.0, config)
     assert scheduled[1].scheduled_start >= scheduled[0].scheduled_end + 0.1
+
+
+def test_compact_schedule_default_caps_long_gaps(tmp_path):
+    tts_dir = tmp_path / "tts"
+    tts_dir.mkdir()
+    sample_rate = 22050
+    silence = array("h", [0]) * int(sample_rate * 1.0)
+    write_pcm(tts_dir / "seg_00001_pcm.wav", silence, sample_rate)
+    write_pcm(tts_dir / "seg_00002_pcm.wav", silence, sample_rate)
+    units = [
+        TTSUnit(1, 0.0, 1.0, "第一句。", [1]),
+        TTSUnit(2, 8.0, 9.0, "第二句。", [2]),
+    ]
+    config = {
+        "tts": {
+            "compact_min_gap_seconds": 0.22,
+            "compact_distributed_max_gap_seconds": 2.0,
+            "prevent_audio_overlap": True,
+            "min_audio_gap_seconds": 0.08,
+        }
+    }
+
+    scheduled = schedule_compact_units(units, tts_dir, 10.0, config)
+
+    gap = scheduled[1].scheduled_start - scheduled[0].scheduled_end
+    assert gap <= 2.0
+    assert scheduled[1].scheduled_start < units[1].start

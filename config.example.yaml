@@ -96,7 +96,7 @@ tts:
   compact_min_gap_seconds: 0.22
   compact_max_gap_seconds: 0.70
   compact_max_advance_seconds: 0.5
-  compact_schedule_mode: "source_anchored"
+  compact_schedule_mode: "bounded_distributed"
   compact_distributed_max_gap_seconds: 2.0
   compact_resynthesize_tts: false
   compact_lead_in_seconds: 0.0
