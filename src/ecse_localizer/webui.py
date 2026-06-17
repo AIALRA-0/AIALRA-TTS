@@ -63,6 +63,21 @@ WINDOWS_RESERVED_FILE_STEMS = {
     *(f"COM{i}" for i in range(1, 10)),
     *(f"LPT{i}" for i in range(1, 10)),
 }
+DELETE_JOB_FIELD = object()
+RETRY_RESULT_FIELDS = [
+    "result",
+    "result_report",
+    "result_video",
+    "result_audio",
+    "worker_artifacts",
+    "preview",
+    "preview_id",
+    "preview_uploaded_at",
+    "preview_name",
+    "cached_artifact_id",
+    "cached_artifact_uploaded_at",
+    "cached_artifact_name",
+]
 JOB_SCHEMA_VERSION = 2
 NORMALIZED_JOB_STATUSES = {"queued", "claimed", "running", "paused", "retrying", "done", "failed", "cancelled", "deleted"}
 JOB_STATUS_ALIASES = {
@@ -2859,7 +2874,11 @@ def update_job(state: WebState, job_id: str, changes: dict[str, Any]) -> None:
         return
     with state.lock:
         record = normalize_job_record(state, read_json(path), path=path, persist=False)
-        record.update(changes)
+        for key, value in changes.items():
+            if value is DELETE_JOB_FIELD:
+                record.pop(key, None)
+            else:
+                record[key] = value
         record = normalize_job_record(state, record, path=path, persist=False)
         write_json(path, record)
 
@@ -2962,8 +2981,19 @@ def retry_job_record(state: WebState, job_id: str) -> dict[str, Any]:
         "cancel_requested_by": None,
         "cancel_handled_at": None,
     }
+    preserve_previous_result_fields(record, changes)
     update_job(state, job_id, changes)
     return read_job(state, job_id) or record
+
+
+def preserve_previous_result_fields(record: dict[str, Any], changes: dict[str, Any]) -> None:
+    for key in RETRY_RESULT_FIELDS:
+        if key not in record:
+            continue
+        value = record.get(key)
+        if value not in (None, "", [], {}):
+            changes[f"previous_{key}"] = value
+        changes[key] = DELETE_JOB_FIELD
 
 
 def soft_delete_job(state: WebState, job_id: str, *, deleted_by: str) -> dict[str, Any]:

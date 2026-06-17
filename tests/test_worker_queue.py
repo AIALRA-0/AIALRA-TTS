@@ -935,6 +935,10 @@ def test_restore_deleted_active_job_does_not_requeue(tmp_path):
 
 def test_retry_worker_job_requeues_failed_record(tmp_path):
     state = WebState(write_config(tmp_path))
+    report = tmp_path / "output" / "lecture_report.json"
+    video = tmp_path / "output" / "lecture_zh_dub.mp4"
+    report.write_text("{}", encoding="utf-8")
+    video.write_bytes(b"mp4")
     record = create_job_record(
         state,
         "audit",
@@ -944,10 +948,32 @@ def test_retry_worker_job_requeues_failed_record(tmp_path):
         metadata={"worker_args": ["audit", "--input", "x"]},
         dispatch_target="worker",
     )
-    update_job(state, record["id"], {"status": "failed", "returncode": 1})
+    update_job(
+        state,
+        record["id"],
+        {
+            "status": "failed",
+            "returncode": 1,
+            "result": {"report": str(report), "video": str(video)},
+            "result_report": str(report),
+            "result_video": str(video),
+            "worker_artifacts": [{"ref_id": "old-output", "name": "lecture_zh_dub.mp4"}],
+            "preview_id": "old-preview",
+            "preview_name": "lecture_zh_dub.mp4",
+        },
+    )
     retried = retry_job_record(state, record["id"])
     assert retried["status"] == "retrying"
     assert retried["retry_count"] == 1
+    assert "result" not in retried
+    assert "result_report" not in retried
+    assert "result_video" not in retried
+    assert "worker_artifacts" not in retried
+    assert "preview_id" not in retried
+    assert retried["previous_result_report"] == str(report)
+    assert retried["previous_result_video"] == str(video)
+    assert retried["previous_worker_artifacts"] == [{"ref_id": "old-output", "name": "lecture_zh_dub.mp4"}]
+    assert retried["previous_preview_id"] == "old-preview"
     claimed = claim_worker_job(state, "worker-1")
     assert claimed["id"] == record["id"]
     assert claimed["status"] == "claimed"
