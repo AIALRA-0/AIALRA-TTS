@@ -34,6 +34,8 @@ Disabling a user invalidates their browser session access and their existing sig
 
 In multi-user WebUI mode, generated artifacts, previews, and temporary remote caches must carry an owner before non-admin users can see them. Ownerless legacy cache rows are admin-only so they can be audited or cleaned without becoming public.
 
+Historical WebUI job records without an owner are also admin-only. Non-admin users can view and act only on jobs explicitly owned by their account.
+
 Artifact deletion is restricted to managed directories:
 
 - configured output directory

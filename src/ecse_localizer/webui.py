@@ -987,7 +987,7 @@ def is_admin(state: WebState, username: str) -> bool:
 
 
 def can_access_record(state: WebState, username: str, record: dict[str, Any]) -> bool:
-    return is_admin(state, username) or not record.get("user") or record.get("user") == username
+    return is_admin(state, username) or record.get("user") == username
 
 
 def upload_fits_quota(base_used_bytes: int, reserved_bytes: int, current_file_bytes: int, quota_bytes: int) -> bool:

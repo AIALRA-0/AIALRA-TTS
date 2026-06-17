@@ -386,6 +386,49 @@ def test_jobs_endpoint_filters_by_project_folder_and_status(tmp_path):
     assert [job["id"] for job in response.json()["jobs"]] == [second["id"]]
 
 
+def test_ownerless_legacy_jobs_are_admin_only(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    app = create_app(config_path)
+    state = app.state.web
+    state.store.create_user("student.one", "long-enough-password")
+    log_path = state.job_dir / "legacy_ownerless.log"
+    log_path.write_text("legacy private log", encoding="utf-8")
+    (state.job_dir / "legacy_ownerless.json").write_text(
+        json.dumps(
+            {
+                "id": "legacy_ownerless",
+                "type": "process_one",
+                "title": "Legacy Ownerless Job",
+                "status": "done",
+                "log": str(log_path),
+                "command": ["python", "-m", "ecse_localizer", "process-one"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with TestClient(app) as student:
+        response = student.post("/api/login", json={"username": "student.one", "password": "long-enough-password"})
+        assert response.status_code == 200
+        response = student.get("/api/jobs")
+        assert response.status_code == 200
+        assert "legacy_ownerless" not in {job["id"] for job in response.json()["jobs"]}
+        assert student.get("/api/jobs/legacy_ownerless").status_code == 404
+        assert student.get("/api/jobs/legacy_ownerless/log").status_code == 404
+
+    with TestClient(app) as admin:
+        response = admin.post("/api/login", json={"username": "admin", "password": "local-password"})
+        assert response.status_code == 200
+        response = admin.get("/api/jobs")
+        assert response.status_code == 200
+        assert "legacy_ownerless" in {job["id"] for job in response.json()["jobs"]}
+        response = admin.get("/api/jobs/legacy_ownerless/log")
+        assert response.status_code == 200
+        assert "legacy private log" in response.text
+
+
 def test_artifact_download_urls_are_user_scoped(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
