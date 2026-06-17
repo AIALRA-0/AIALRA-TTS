@@ -216,6 +216,49 @@ def test_upload_disabled_by_default_for_worker_queue(tmp_path):
     assert "Windows worker" in response.text
 
 
+def test_jobs_endpoint_filters_by_project_folder_and_status(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+
+    project = state.store.create_project("admin", "Course")
+    folder = state.store.create_folder("admin", project["id"], "Week 1")
+    other_project = state.store.create_project("admin", "Other")
+    first = create_job_record(
+        state,
+        "audit",
+        "Audit course",
+        ["python", "-m", "ecse_localizer", "audit"],
+        user="admin",
+        metadata={"project_id": project["id"], "folder_id": folder["id"]},
+        dispatch_target="worker",
+    )
+    second = create_job_record(
+        state,
+        "audit",
+        "Audit other",
+        ["python", "-m", "ecse_localizer", "audit"],
+        user="admin",
+        metadata={"project_id": other_project["id"], "folder_id": "root"},
+        dispatch_target="worker",
+    )
+    update_job(state, second["id"], {"status": "running"})
+
+    response = client.get(f"/api/jobs?project_id={project['id']}&folder_id={folder['id']}")
+    assert response.status_code == 200
+    assert [job["id"] for job in response.json()["jobs"]] == [first["id"]]
+
+    response = client.get("/api/jobs?status=running")
+    assert response.status_code == 200
+    assert [job["id"] for job in response.json()["jobs"]] == [second["id"]]
+
+
 def test_artifact_download_urls_are_user_scoped(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

@@ -131,6 +131,12 @@ function bindEvents() {
   $("projectForm").addEventListener("submit", createProject);
   $("folderForm").addEventListener("submit", createFolder);
   $("jobProject").addEventListener("change", renderFolderOptions);
+  $("jobFilterProject").addEventListener("change", () => {
+    renderJobFilterFolders();
+    refreshJobs();
+  });
+  $("jobFilterFolder").addEventListener("change", refreshJobs);
+  $("jobFilterStatus").addEventListener("change", refreshJobs);
   $("jobTemplate").addEventListener("change", applySelectedTemplate);
   ["jobSourceLanguage", "jobSubtitleLanguage", "jobTtsLanguage"].forEach((id) => {
     const el = $(id);
@@ -210,6 +216,7 @@ async function loadDashboard() {
   state.projects = data.projects || [];
   renderProjectOptions();
   renderFolderOptions();
+  renderJobFilterOptions();
   renderProjects();
   state.reports = data.latest_reports || [];
   renderReports();
@@ -424,6 +431,7 @@ async function loadProjects() {
     state.projects = data.projects || [];
     renderProjectOptions();
     renderFolderOptions();
+    renderJobFilterOptions();
     renderProjects();
   } catch (error) {
     console.warn("Project load failed:", error);
@@ -507,6 +515,48 @@ function renderProjectOptions() {
   }
 }
 
+function renderJobFilterOptions() {
+  const select = $("jobFilterProject");
+  if (!select) return;
+  const selected = select.value;
+  select.innerHTML = "";
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "全部项目";
+  select.appendChild(all);
+  for (const project of state.projects) {
+    const option = document.createElement("option");
+    option.value = project.id;
+    option.textContent = `${project.owner ? `${project.owner} / ` : ""}${project.name}`;
+    select.appendChild(option);
+  }
+  if (selected && state.projects.some((item) => item.id === selected)) {
+    select.value = selected;
+  }
+  renderJobFilterFolders();
+}
+
+function renderJobFilterFolders() {
+  const select = $("jobFilterFolder");
+  if (!select) return;
+  const selected = select.value;
+  select.innerHTML = "";
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "全部文件夹";
+  select.appendChild(all);
+  const project = state.projects.find((item) => item.id === $("jobFilterProject")?.value);
+  for (const folder of project?.folders || []) {
+    const option = document.createElement("option");
+    option.value = folder.id;
+    option.textContent = folder.name || folder.id;
+    select.appendChild(option);
+  }
+  if (selected && Array.from(select.options).some((option) => option.value === selected)) {
+    select.value = selected;
+  }
+}
+
 function renderFolderOptions() {
   const select = $("jobFolder");
   if (!select) return;
@@ -573,6 +623,7 @@ async function createFolder(event) {
     toast("文件夹已创建");
     renderProjectOptions();
     renderFolderOptions();
+    renderJobFilterOptions();
     renderProjects();
   } catch (error) {
     toast(`创建文件夹失败：${error.message}`);
@@ -960,11 +1011,23 @@ function jobSubmitMessage(result) {
 
 async function refreshJobs() {
   try {
-    const data = await api("/api/jobs");
+    const data = await api(`/api/jobs${jobFilterQuery()}`);
     state.jobs = data.jobs || [];
     renderJobs();
     if (state.selectedJob) await loadJobLog(state.selectedJob, false);
   } catch (_) {}
+}
+
+function jobFilterQuery() {
+  const params = new URLSearchParams();
+  const project = $("jobFilterProject")?.value || "";
+  const folder = $("jobFilterFolder")?.value || "";
+  const status = $("jobFilterStatus")?.value || "";
+  if (project) params.set("project_id", project);
+  if (folder) params.set("folder_id", folder);
+  if (status) params.set("status", status);
+  const query = params.toString();
+  return query ? `?${query}` : "";
 }
 
 function renderJobs() {

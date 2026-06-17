@@ -655,8 +655,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return {"ok": True, "artifact": row, "bytes": len(body), "quota": state.store.quota_status(str(record.get("user") or ""))}
 
     @app.get("/api/jobs")
-    def jobs(user: str = Depends(require_user)) -> dict[str, Any]:
-        return {"jobs": [public_job_record(record) for record in list_jobs(state, user)]}
+    def jobs(
+        project_id: str = "",
+        folder_id: str = "",
+        status: str = "",
+        user: str = Depends(require_user),
+    ) -> dict[str, Any]:
+        records = filter_job_records(list_jobs(state, user), project_id=project_id, folder_id=folder_id, status=status)
+        return {"jobs": [public_job_record(record) for record in records]}
 
     @app.get("/api/jobs/{job_id}")
     def job(job_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
@@ -1137,6 +1143,30 @@ def active_job_counts(state: WebState, user: str) -> dict[str, int]:
         if record.get("user") == user:
             user_active += 1
     return {"user": user_active, "global": global_active}
+
+
+def filter_job_records(
+    records: list[dict[str, Any]],
+    *,
+    project_id: str = "",
+    folder_id: str = "",
+    status: str = "",
+) -> list[dict[str, Any]]:
+    project = str(project_id or "").strip()
+    folder = str(folder_id or "").strip()
+    status_filter = str(status or "").strip()
+    normalized_status = normalize_job_status(status_filter) if status_filter else ""
+    out: list[dict[str, Any]] = []
+    for record in records:
+        metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+        if project and str(metadata.get("project_id") or "") != project:
+            continue
+        if folder and folder != "all" and str(metadata.get("folder_id") or "root") != folder:
+            continue
+        if normalized_status and normalize_job_status(str(record.get("status") or "")) != normalized_status:
+            continue
+        out.append(record)
+    return out
 
 
 def job_queue_summary(

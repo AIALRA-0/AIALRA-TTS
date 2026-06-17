@@ -17,6 +17,7 @@ from ecse_localizer.webui import (
     enforce_artifact_cache_request_limits,
     enforce_active_job_limits,
     file_display_name,
+    filter_job_records,
     infer_job_type,
     job_queue_summary,
     list_jobs,
@@ -459,6 +460,19 @@ def test_active_job_limits_count_user_and_global_records(tmp_path):
 
     update_job(state, list_jobs(state, "admin")[0]["id"], {"status": "done"})
     enforce_active_job_limits(state, "new-user")
+
+
+def test_filter_job_records_by_project_folder_and_status():
+    records = [
+        {"id": "a", "status": "queued", "metadata": {"project_id": "p1", "folder_id": "root"}},
+        {"id": "b", "status": "running", "metadata": {"project_id": "p1", "folder_id": "week_1"}},
+        {"id": "c", "status": "failed", "metadata": {"project_id": "p2", "folder_id": "root"}},
+    ]
+
+    assert [row["id"] for row in filter_job_records(records, project_id="p1")] == ["a", "b"]
+    assert [row["id"] for row in filter_job_records(records, project_id="p1", folder_id="week_1")] == ["b"]
+    assert [row["id"] for row in filter_job_records(records, status="running")] == ["b"]
+    assert [row["id"] for row in filter_job_records(records, status="error")] == ["c"]
 
 
 def test_job_queue_summary_reports_status_counts_and_worker_slots(tmp_path):

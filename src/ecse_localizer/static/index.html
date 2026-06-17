@@ -312,6 +312,30 @@
               <h2>历史任务</h2>
               <p>点击一条任务查看尾部日志。</p>
             </div>
+            <div class="task-grid compact-grid">
+              <label>
+                项目
+                <select id="jobFilterProject"></select>
+              </label>
+              <label>
+                文件夹
+                <select id="jobFilterFolder"></select>
+              </label>
+              <label>
+                状态
+                <select id="jobFilterStatus">
+                  <option value="">全部</option>
+                  <option value="queued">queued</option>
+                  <option value="claimed">claimed</option>
+                  <option value="running">running</option>
+                  <option value="paused">paused</option>
+                  <option value="retrying">retrying</option>
+                  <option value="done">done</option>
+                  <option value="failed">failed</option>
+                  <option value="cancelled">cancelled</option>
+                </select>
+              </label>
+            </div>
             <div id="jobsList" class="job-list"></div>
           </div>
           <div>
