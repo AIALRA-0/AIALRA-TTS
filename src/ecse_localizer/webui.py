@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import threading
@@ -45,6 +46,21 @@ COOKIE_NAME = "ecse_webui_session"
 TOKEN_TTL_SECONDS = 12 * 60 * 60
 ACTIVE_JOB_STATUSES = {"queued", "claimed", "running", "retrying", "paused"}
 TERMINAL_JOB_STATUSES = {"done", "passed", "failed", "cancelled"}
+JOB_SCHEMA_VERSION = 2
+NORMALIZED_JOB_STATUSES = {"queued", "claimed", "running", "paused", "retrying", "done", "failed", "cancelled", "deleted"}
+JOB_STATUS_ALIASES = {
+    "passed": "done",
+    "pass": "done",
+    "success": "done",
+    "succeeded": "done",
+    "complete": "done",
+    "completed": "done",
+    "error": "failed",
+    "errored": "failed",
+    "failure": "failed",
+    "canceled": "cancelled",
+    "stopped": "cancelled",
+}
 TUNABLE_FIELDS: dict[str, dict[str, Any]] = {
     "audio.enhance": {"label": "音频增强", "type": "bool"},
     "llm.temperature": {"label": "LLM temperature", "type": "float", "min": 0, "max": 1},
@@ -687,7 +703,7 @@ def claim_worker_job(state: WebState, worker_id: str) -> dict[str, Any] | None:
     with state.lock:
         for path in sorted(state.job_dir.glob("*.json"), key=lambda p: p.stat().st_mtime):
             try:
-                record = read_json(path)
+                record = normalize_job_record(state, read_json(path), path=path, persist=True)
             except Exception:
                 continue
             if record.get("dispatch_target") != "worker":
@@ -1051,6 +1067,7 @@ def create_job_record(
     job_id = now_id(f"webui_{job_type}") + "_" + uuid.uuid4().hex[:6]
     log_path = state.job_dir / f"{job_id}.log"
     record = {
+        "schema_version": JOB_SCHEMA_VERSION,
         "id": job_id,
         "user": user,
         "type": job_type,
@@ -1059,6 +1076,7 @@ def create_job_record(
         "dispatch_target": dispatch_target,
         "queued_for_worker": dispatch_target == "worker",
         "created_at": iso_now(),
+        "updated_at": iso_now(),
         "started_at": None,
         "ended_at": None,
         "returncode": None,
@@ -1124,11 +1142,114 @@ def run_job(state: WebState, job_id: str) -> None:
                 state.processes.pop(job_id, None)
 
 
+def normalize_job_record(
+    state: WebState,
+    record: dict[str, Any],
+    *,
+    path: Path | None = None,
+    persist: bool = False,
+) -> dict[str, Any]:
+    before = stable_json(record)
+    row = dict(record) if isinstance(record, dict) else {}
+    job_id = str(row.get("id") or (path.stem if path else "") or now_id("webui_legacy"))
+    row["schema_version"] = JOB_SCHEMA_VERSION
+    row["id"] = safe_job_id(job_id)
+    row["type"] = str(row.get("type") or infer_job_type(row)).strip() or "unknown"
+    row["title"] = str(row.get("title") or title_for_job(row)).strip()
+
+    raw_status = str(row.get("status") or "queued").strip().lower()
+    status = normalize_job_status(raw_status)
+    if raw_status and raw_status != status and not row.get("legacy_status"):
+        row["legacy_status"] = raw_status
+    row["status"] = status
+
+    metadata = row.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {"legacy_metadata": metadata} if metadata not in (None, "") else {}
+    row["metadata"] = metadata
+
+    command = normalize_command(row.get("command"))
+    row["command"] = command
+
+    dispatch = str(row.get("dispatch_target") or "").strip().lower()
+    if dispatch not in {"local", "worker"}:
+        if bool(row.get("queued_for_worker")) or isinstance(metadata.get("worker_args"), list):
+            dispatch = "worker"
+        else:
+            dispatch = "local"
+    row["dispatch_target"] = dispatch
+    row["queued_for_worker"] = dispatch == "worker"
+
+    if dispatch == "worker" and "worker_args" not in metadata and command:
+        metadata["worker_args"] = worker_args_from_command(command)
+
+    created_at = str(row.get("created_at") or row.get("submitted_at") or timestamp_from_path(path) or iso_now())
+    row["created_at"] = created_at
+    row["updated_at"] = str(row.get("updated_at") or row.get("ended_at") or row.get("started_at") or created_at)
+    row.setdefault("started_at", None)
+    row.setdefault("ended_at", None)
+    row.setdefault("returncode", None)
+    row.setdefault("pid", None)
+    row.setdefault("retry_count", 0)
+    row.setdefault("log", str(state.job_dir / f"{row['id']}.log"))
+
+    if persist and path and stable_json(row) != before:
+        write_json(path, row)
+    return row
+
+
+def normalize_job_status(status: str) -> str:
+    cleaned = re.sub(r"[\s-]+", "_", (status or "").strip().lower())
+    cleaned = JOB_STATUS_ALIASES.get(cleaned, cleaned)
+    if cleaned in NORMALIZED_JOB_STATUSES:
+        return cleaned
+    return "failed" if any(token in cleaned for token in ("fail", "error")) else "queued"
+
+
+def normalize_command(command: Any) -> list[str]:
+    if isinstance(command, list):
+        return [str(item) for item in command]
+    if isinstance(command, str) and command.strip():
+        try:
+            return [str(item).strip('"') for item in shlex.split(command, posix=False)]
+        except ValueError:
+            return [command]
+    return []
+
+
+def infer_job_type(record: dict[str, Any]) -> str:
+    command = normalize_command(record.get("command"))
+    for item in command:
+        normalized = item.replace("-", "_")
+        if normalized in {"audit", "smoke", "process_one", "process_all", "report", "compact_rerender", "fidelity_audit"}:
+            return normalized
+    job_id = str(record.get("id") or "")
+    match = re.match(r"webui_([A-Za-z0-9_]+)_\d{8}_\d{6}", job_id)
+    return match.group(1) if match else "unknown"
+
+
+def title_for_job(record: dict[str, Any]) -> str:
+    job_type = str(record.get("type") or infer_job_type(record) or "unknown")
+    if record.get("source_video"):
+        return f"{job_type}: {Path(str(record['source_video'])).name}"
+    return f"Job: {job_type}"
+
+
+def timestamp_from_path(path: Path | None) -> str | None:
+    if not path or not path.exists():
+        return None
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(path.stat().st_mtime))
+
+
+def stable_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
 def read_job(state: WebState, job_id: str) -> dict[str, Any] | None:
     path = state.job_dir / f"{safe_job_id(job_id)}.json"
     if not path.exists():
         return None
-    return read_json(path)
+    return normalize_job_record(state, read_json(path), path=path, persist=True)
 
 
 def update_job(state: WebState, job_id: str, changes: dict[str, Any]) -> None:
@@ -1136,8 +1257,9 @@ def update_job(state: WebState, job_id: str, changes: dict[str, Any]) -> None:
     if not path.exists():
         return
     with state.lock:
-        record = read_json(path)
+        record = normalize_job_record(state, read_json(path), path=path, persist=False)
         record.update(changes)
+        record = normalize_job_record(state, record, path=path, persist=False)
         write_json(path, record)
 
 
@@ -1145,7 +1267,7 @@ def list_jobs(state: WebState, user: str | None = None, *, include_deleted: bool
     records = []
     for path in sorted(state.job_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:
-            record = read_json(path)
+            record = normalize_job_record(state, read_json(path), path=path, persist=True)
             if not include_deleted and record.get("status") == "deleted":
                 continue
             if user and not can_access_record(state, user, record):

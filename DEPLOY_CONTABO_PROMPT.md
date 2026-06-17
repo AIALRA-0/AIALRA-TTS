@@ -78,6 +78,7 @@ Deployment steps:
    - worker offline status appears when the tunnel is stopped
    - users cannot see each other's jobs
    - jobs move through `queued/claimed/running/retrying/done/failed/cancelled/deleted`
+   - older JSON job records without the current schema are normalized on read and remain visible/retryable when their state allows it
    - running jobs refresh progress/log-tail summaries without exposing local Windows paths or full logs
    - failed jobs can be retried without rewriting the base config
    - deleted jobs are soft-deleted from normal history before any physical artifact cleanup

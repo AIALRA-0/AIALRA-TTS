@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import yaml
@@ -9,6 +10,7 @@ from ecse_localizer.webui import (
     command_with_config,
     create_job_record,
     list_jobs,
+    read_job,
     retry_job_record,
     soft_delete_job,
     update_job,
@@ -76,6 +78,55 @@ def test_command_with_config_replaces_only_config_path(tmp_path):
     updated = command_with_config(command, tmp_path / "job.yaml")
     assert updated[updated.index("--config") + 1] == str(tmp_path / "job.yaml")
     assert worker_args_from_command(updated) == ["audit", "--input", str(tmp_path / "input")]
+
+
+def test_legacy_job_record_is_normalized_on_read(tmp_path):
+    state = WebState(write_config(tmp_path))
+    legacy_path = state.job_dir / "legacy_passed.json"
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "id": "legacy_passed",
+                "status": "passed",
+                "command": 'python -m ecse_localizer audit --input "C:\\Course Root"',
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    record = read_job(state, "legacy_passed")
+    assert record["schema_version"] == 2
+    assert record["status"] == "done"
+    assert record["legacy_status"] == "passed"
+    assert record["dispatch_target"] == "local"
+    assert record["metadata"] == {}
+    assert record["log"].endswith("legacy_passed.log")
+
+    persisted = json.loads(legacy_path.read_text(encoding="utf-8"))
+    assert persisted["schema_version"] == 2
+    assert persisted["status"] == "done"
+
+
+def test_legacy_worker_job_without_dispatch_can_be_claimed(tmp_path):
+    state = WebState(write_config(tmp_path))
+    legacy_path = state.job_dir / "legacy_worker_queue.json"
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "id": "legacy_worker_queue",
+                "status": "queued",
+                "metadata": {"worker_args": ["audit", "--input", "x"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    claimed = claim_worker_job(state, "worker-legacy")
+    assert claimed["id"] == "legacy_worker_queue"
+    assert claimed["schema_version"] == 2
+    assert claimed["dispatch_target"] == "worker"
+    assert claimed["status"] == "claimed"
+    assert claimed["claimed_by"] == "worker-legacy"
 
 
 def test_claim_worker_job_marks_job_claimed(tmp_path):
