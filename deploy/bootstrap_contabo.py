@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import secrets
 from pathlib import Path
 from urllib.parse import urlparse
@@ -183,6 +184,17 @@ def validate_public_base_url(value: str, *, allow_http: bool = False) -> None:
     if parsed.scheme not in allowed or not parsed.netloc:
         expected = "https://your-domain.example" if not allow_http else "https://your-domain.example or http://private-host"
         raise ValueError(f"--public-base-url must look like {expected}")
+    host = (parsed.hostname or "").lower()
+    if not host or host in {"localhost", "0.0.0.0"}:
+        raise ValueError("--public-base-url must use a public hostname, not localhost")
+    if any(marker in value.lower() for marker in ("change-me", "replace-me", "your-domain")):
+        raise ValueError("--public-base-url must not contain a placeholder hostname")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return
+    if address.is_loopback or address.is_private or address.is_link_local or address.is_unspecified:
+        raise ValueError("--public-base-url must not use a private or local IP address")
 
 
 def public_host_from_url(value: str) -> str:

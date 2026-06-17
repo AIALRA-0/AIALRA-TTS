@@ -76,6 +76,15 @@ def test_bootstrap_contabo_requires_https_by_default():
     module.validate_public_base_url("http://localizer.example.com", allow_http=True)
 
 
+def test_bootstrap_contabo_rejects_local_or_placeholder_public_url():
+    module = load_bootstrap_module()
+    private_ip = ".".join(["10", "0", "0", "5"])
+
+    for url in ["https://localhost:7861", f"https://{private_ip}", "https://your-domain.example"]:
+        with pytest.raises(ValueError):
+            module.validate_public_base_url(url)
+
+
 def test_bootstrap_real_template_generates_deploy_check_passing_config(tmp_path):
     module = load_bootstrap_module()
     repo = tmp_path
