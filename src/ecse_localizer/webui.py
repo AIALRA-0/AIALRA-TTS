@@ -1296,7 +1296,7 @@ def enforce_worker_upload_content_length_limit(
 ) -> None:
     raw = headers.get("content-length") or headers.get("Content-Length")
     if raw is None or str(raw).strip() == "":
-        return
+        raise HTTPException(status_code=411, detail=f"{label} upload requires Content-Length")
     try:
         content_length = int(str(raw).strip())
     except ValueError as exc:
@@ -1304,12 +1304,14 @@ def enforce_worker_upload_content_length_limit(
     if content_length < 0:
         raise HTTPException(status_code=400, detail="Invalid Content-Length")
     configured_mb = state.webui.get(config_key, default_mb)
+    if configured_mb is None:
+        configured_mb = default_mb
     try:
-        max_bytes = int(float(configured_mb or default_mb) * 1024 * 1024)
+        max_bytes = int(float(configured_mb) * 1024 * 1024)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=500, detail=f"Invalid {config_key}") from exc
     if content_length > max_bytes:
-        raise HTTPException(status_code=413, detail=f"{label} exceeds {configured_mb or default_mb} MB")
+        raise HTTPException(status_code=413, detail=f"{label} exceeds {configured_mb} MB")
 
 
 def browser_upload_policy(state: WebState) -> dict[str, Any]:

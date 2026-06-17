@@ -1338,6 +1338,42 @@ def test_worker_preview_content_length_preflight_rejects_oversize_without_body(t
         raise AssertionError("expected worker preview preflight to reject oversized content length")
 
 
+def test_worker_upload_content_length_preflight_requires_header(tmp_path):
+    state = WebState(write_config(tmp_path))
+
+    with pytest.raises(Exception) as excinfo:
+        enforce_worker_upload_content_length_limit(
+            {},
+            state,
+            config_key="worker_preview_max_upload_mb",
+            default_mb=256,
+            label="Worker preview",
+        )
+
+    assert getattr(excinfo.value, "status_code", None) == 411
+    assert "requires Content-Length" in str(excinfo.value)
+
+
+def test_worker_upload_content_length_preflight_honors_zero_limit(tmp_path):
+    config_path = write_config(tmp_path)
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    data["webui"]["worker_preview_max_upload_mb"] = 0
+    config_path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    state = WebState(config_path)
+
+    with pytest.raises(Exception) as excinfo:
+        enforce_worker_upload_content_length_limit(
+            {"content-length": "1"},
+            state,
+            config_key="worker_preview_max_upload_mb",
+            default_mb=256,
+            label="Worker preview",
+        )
+
+    assert getattr(excinfo.value, "status_code", None) == 413
+    assert "Worker preview exceeds 0 MB" in str(excinfo.value)
+
+
 def test_worker_artifact_cache_content_length_preflight_rejects_oversize_without_body(tmp_path):
     config_path = write_config(tmp_path)
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
