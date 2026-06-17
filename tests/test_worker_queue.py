@@ -293,6 +293,39 @@ def test_worker_hmac_rejects_replayed_nonce(tmp_path):
         raise AssertionError("expected replayed worker nonce to be rejected")
 
 
+def test_worker_hmac_nonce_replay_survives_webstate_reload(tmp_path):
+    config_path = write_config(tmp_path)
+    state = WebState(config_path)
+    state.webui["worker_auth_mode"] = "hmac"
+    body = canonical_json({"worker_id": "worker-1"}).encode("utf-8")
+    timestamp = str(int(time.time()))
+    nonce = "persisted-nonce-" + "3" * 16
+    headers = {
+        "x-worker-timestamp": timestamp,
+        "x-worker-nonce": nonce,
+        "x-worker-signature": worker_signature(
+            "worker-token",
+            timestamp=timestamp,
+            method="POST",
+            path="/api/worker/heartbeat",
+            body=body,
+            nonce=nonce,
+        ),
+    }
+
+    require_worker_token(fake_worker_request(state, headers, path="/api/worker/heartbeat"), state, body)
+    assert (state.store.root / "worker_nonces.json").exists()
+
+    reloaded = WebState(config_path)
+    reloaded.webui["worker_auth_mode"] = "hmac"
+    try:
+        require_worker_token(fake_worker_request(reloaded, headers, path="/api/worker/heartbeat"), reloaded, body)
+    except Exception as exc:
+        assert "nonce has already been used" in str(exc)
+    else:
+        raise AssertionError("expected persisted worker nonce replay to be rejected")
+
+
 def test_worker_hmac_can_allow_legacy_signature_when_nonce_not_required(tmp_path):
     state = WebState(write_config(tmp_path))
     state.webui["worker_auth_mode"] = "hmac"

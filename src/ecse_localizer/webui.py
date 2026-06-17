@@ -107,7 +107,8 @@ class WebState:
         self.store = PlatformStore(self.config)
         self.store.bootstrap()
         self.processes: dict[str, subprocess.Popen[str]] = {}
-        self.worker_nonce_cache: dict[str, int] = {}
+        self.worker_nonce_path = self.store.root / "worker_nonces.json"
+        self.worker_nonce_cache: dict[str, int] = load_worker_nonce_cache(self.worker_nonce_path)
         self.lock = threading.Lock()
 
     @property
@@ -126,6 +127,8 @@ class WebState:
         self.config = load_config(self.config_path)
         self.store = PlatformStore(self.config)
         self.store.bootstrap()
+        self.worker_nonce_path = self.store.root / "worker_nonces.json"
+        self.worker_nonce_cache = load_worker_nonce_cache(self.worker_nonce_path)
 
 
 def create_app(config_path: str | Path | None = None) -> FastAPI:
@@ -1566,16 +1569,49 @@ def worker_hmac_requires_nonce(state: WebState, mode: str) -> bool:
     return mode in {"hmac", "signed", "signature"}
 
 
+def load_worker_nonce_cache(path: Path) -> dict[str, int]:
+    if not path.exists():
+        return {}
+    try:
+        data = read_json(path)
+    except Exception:
+        return {}
+    rows = data.get("nonces", data) if isinstance(data, dict) else data
+    if isinstance(rows, dict):
+        items = rows.items()
+    elif isinstance(rows, list):
+        items = ((row.get("nonce"), row.get("timestamp")) for row in rows if isinstance(row, dict))
+    else:
+        items = []
+    cache: dict[str, int] = {}
+    for nonce, timestamp in items:
+        nonce_text = str(nonce or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{8,128}", nonce_text):
+            continue
+        try:
+            cache[nonce_text] = int(timestamp)
+        except (TypeError, ValueError):
+            continue
+    return cache
+
+
+def save_worker_nonce_cache(path: Path, cache: dict[str, int]) -> None:
+    ensure_dir(path.parent)
+    write_json(path, {"nonces": dict(sorted(cache.items()))})
+
+
 def remember_worker_nonce(state: WebState, nonce: str, *, timestamp_int: int, max_skew_seconds: int) -> None:
     now_epoch = int(time.time())
     cutoff = now_epoch - max(30, max_skew_seconds)
     with state.lock:
+        state.worker_nonce_cache.update(load_worker_nonce_cache(state.worker_nonce_path))
         for cached_nonce, cached_timestamp in list(state.worker_nonce_cache.items()):
             if int(cached_timestamp) < cutoff:
                 state.worker_nonce_cache.pop(cached_nonce, None)
         if nonce in state.worker_nonce_cache:
             raise HTTPException(status_code=401, detail="Worker HMAC nonce has already been used")
         state.worker_nonce_cache[nonce] = timestamp_int
+        save_worker_nonce_cache(state.worker_nonce_path, state.worker_nonce_cache)
 
 
 def worker_hmac_signature(worker_token: str, *, timestamp: str, method: str, path: str, body: bytes, nonce: str | None = None) -> str:

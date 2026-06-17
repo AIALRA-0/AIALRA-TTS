@@ -130,7 +130,7 @@ Deployment steps:
    - worker heartbeat appears online
    - worker heartbeat/claim payloads can publish ASR, translation, and TTS language capabilities; `/api/capabilities` should report `source=worker_heartbeat` while that worker is online
    - unsigned worker requests are rejected when `worker_auth_mode=hmac`
-   - replaying the same signed worker request with the same nonce is rejected
+   - replaying the same signed worker request with the same nonce is rejected, including after a WebUI restart within the configured timestamp window
    - job submission while the worker is offline shows a queued/waiting state and records the worker status at submit time
    - GPU/CPU metrics update
    - dashboard metrics in `worker_queue` mode come from the Windows worker heartbeat and contain no Windows path fields
