@@ -181,6 +181,7 @@ webui:
   job_storage_reserve_multiplier: 2.0
   max_active_jobs_per_user: 2
   max_active_jobs_global: 8
+  event_stream_interval_seconds: 2
   worker_token: "change-me-generate-a-long-random-token"
   worker_auth_mode: "hmac_or_token"
   worker_signature_max_skew_seconds: 300

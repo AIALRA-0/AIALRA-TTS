@@ -17,13 +17,16 @@ from ecse_localizer.artifacts import artifact_catalog
 from ecse_localizer.platform_store import safe_worker_id
 from ecse_localizer.utils import read_json
 from ecse_localizer.webui import (
+    WebState,
     create_app,
     create_job_record,
     fields_from_config,
     list_all_video_records,
+    live_event_payload,
     read_job,
     resolve_video_reference,
     safe_upload_name,
+    sse_event,
     update_job,
 )
 from ecse_localizer.worker_client import worker_headers
@@ -154,6 +157,15 @@ def test_static_job_history_surfaces_refresh_errors():
     assert "请检查登录状态、Contabo WebUI 服务和 worker 队列 API" in js
 
 
+def test_static_ui_uses_sse_with_polling_fallback():
+    js = (Path(__file__).parents[1] / "src" / "ecse_localizer" / "static" / "app.js").read_text(encoding="utf-8")
+
+    assert 'new EventSource("/api/events", { withCredentials: true })' in js
+    assert "state.eventConnected" in js
+    assert "if (state.eventConnected) return;" in js
+    assert "applyLiveEvent(JSON.parse(event.data))" in js
+
+
 def test_static_artifact_history_has_scope_filters():
     static_root = Path(__file__).parents[1] / "src" / "ecse_localizer" / "static"
     html = (static_root / "index.html").read_text(encoding="utf-8")
@@ -258,6 +270,44 @@ def test_webui_login_project_and_quota(tmp_path):
     assert "asr" in caps
     assert "translation" in caps
     assert "tts" in caps
+
+
+def test_events_endpoint_requires_login(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    app = create_app(write_config(tmp_path))
+    client = TestClient(app)
+
+    response = client.get("/api/events")
+
+    assert response.status_code == 401
+
+
+def test_live_event_payload_is_remote_safe_and_sse_encoded(tmp_path):
+    state = WebState(write_config(tmp_path))
+    create_job_record(
+        state,
+        "process_one",
+        "Process private video",
+        ["python", "-m", "ecse_localizer", "process-one", "--video", r"D:\worker-local\private\lecture.mp4"],
+        user="admin",
+        metadata={"worker_args": ["process-one", "--video", r"D:\worker-local\private\lecture.mp4"]},
+        dispatch_target="worker",
+    )
+
+    payload = live_event_payload(state, "admin")
+    encoded = json.dumps(payload, ensure_ascii=False)
+    event = sse_event("state", payload)
+
+    assert payload["kind"] == "state"
+    assert payload["jobs"]
+    assert "queue" in payload
+    assert "worker" in payload
+    assert "metrics" in payload
+    assert "quota" in payload
+    assert r"D:\worker-local\private" not in encoded
+    assert event.startswith("event: state\ndata: ")
+    assert event.endswith("\n\n")
 
 
 def test_template_update_api_applies_to_worker_job_metadata(tmp_path):

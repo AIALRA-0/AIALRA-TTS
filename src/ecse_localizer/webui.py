@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import argparse
 import base64
 import hashlib
@@ -21,7 +22,7 @@ from urllib.parse import urlparse
 import uvicorn
 import yaml
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .artifacts import (
@@ -258,6 +259,25 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             "queue": job_queue_summary(state, user, worker=worker, jobs=jobs),
             "metrics": dashboard_metrics(state, worker),
         }
+
+    @app.get("/api/events")
+    async def events(request: Request, user: str = Depends(require_user)) -> StreamingResponse:
+        interval = max(1.0, min(30.0, float(state.webui.get("event_stream_interval_seconds", 2.0) or 2.0)))
+
+        async def stream() -> Any:
+            while not await request.is_disconnected():
+                payload = live_event_payload(state, user)
+                yield sse_event("state", payload)
+                await asyncio.sleep(interval)
+
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.get("/api/videos")
     def videos(user: str = Depends(require_user)) -> dict[str, Any]:
@@ -2402,6 +2422,26 @@ def dashboard_metrics(state: WebState, worker: dict[str, Any] | None = None) -> 
     out = sanitize_metrics(collect_system_metrics(state.config))
     out["source"] = "webui_host"
     return out
+
+
+def live_event_payload(state: WebState, user: str) -> dict[str, Any]:
+    state.reload_config()
+    worker = worker_status_payload(state)
+    jobs = list_jobs(state, user)
+    return {
+        "kind": "state",
+        "generated_at": iso_now(),
+        "jobs": [public_job_record(job) for job in jobs[:50]],
+        "queue": job_queue_summary(state, user, worker=worker, jobs=jobs),
+        "worker": worker,
+        "metrics": dashboard_metrics(state, worker),
+        "quota": quota_status_with_reservations(state, user),
+    }
+
+
+def sse_event(event: str, payload: dict[str, Any]) -> str:
+    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return f"event: {event}\ndata: {data}\n\n"
 
 
 def worker_args_from_command(command: list[str]) -> list[str]:

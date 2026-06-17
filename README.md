@@ -41,7 +41,7 @@ Open:
 http://127.0.0.1:7861
 ```
 
-Set real credentials in local `config.yaml` or `.env`; never commit them. The WebUI supports uploads, task history, project/folder metadata, project and folder editing/archiving/restoring, project quotas, reusable parameter templates, invite-only users, admin-managed user status/quotas, common tuning parameters, logs, quota checks, local worker health/metrics, failed-job retry, and soft-deleting/restoring job records.
+Set real credentials in local `config.yaml` or `.env`; never commit them. The WebUI supports uploads, task history, project/folder metadata, project and folder editing/archiving/restoring, project quotas, reusable parameter templates, invite-only users, admin-managed user status/quotas, common tuning parameters, logs, quota checks, local worker health/metrics, SSE live status updates with polling fallback, failed-job retry, and soft-deleting/restoring job records.
 
 Per-job language, quality, and style settings are written to generated job config files under `runs/`. The base `config.yaml` stays local and is not mutated by submitted jobs.
 
@@ -109,7 +109,7 @@ Worker API authentication supports signed requests. Production remote config sho
 
 Queued jobs carry only portable worker arguments plus non-secret job metadata such as source language, target subtitle language, TTS language, quality mode, style, and the worker availability state at submit time. The Windows worker applies those values to a local generated job config before running the CLI. Worker heartbeat and claim polls also include the worker's current language capability summary so the remote UI reflects the installed local ASR/LLM/TTS models instead of guessing from the Contabo host.
 
-While a worker job is running, the Windows worker periodically reports a remote-safe status payload: `running`, `worker_id`, `pid`, best-effort `progress`, sanitized system metrics, local managed-storage byte counts, and a log tail. Contabo stores only that summary; full logs stay on the Windows worker. Metrics are stripped of filesystem path fields before storage or display, and the dashboard uses worker heartbeat metrics in `worker_queue` mode instead of the Contabo host metrics.
+While a worker job is running, the Windows worker periodically reports a remote-safe status payload: `running`, `worker_id`, `pid`, best-effort `progress`, sanitized system metrics, local managed-storage byte counts, and a log tail. Contabo stores only that summary; full logs stay on the Windows worker. Metrics are stripped of filesystem path fields before storage or display, and the dashboard uses worker heartbeat metrics in `worker_queue` mode instead of the Contabo host metrics. The browser opens `/api/events` as an authenticated Server-Sent Events stream for near-real-time job, queue, worker, quota, and metrics updates; if the stream drops, the UI keeps the existing polling fallback.
 
 Status, control, preview, and cache upload calls are bound to the `claimed_by` worker id on the job record. If a stale worker reports late after the server has requeued and another worker has claimed the job, the old update is rejected instead of overwriting the active run.
 

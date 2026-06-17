@@ -15,6 +15,8 @@ const state = {
   jobsLoadError: "",
   jobTimer: null,
   metricsTimer: null,
+  eventSource: null,
+  eventConnected: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -223,19 +225,28 @@ function renderAdminUi() {
 
 function startLiveTimers() {
   if ($("appView").hidden) return;
+  connectLiveEvents();
   if (!state.jobTimer) {
     state.jobTimer = setInterval(() => {
+      connectLiveEvents();
+      if (state.eventConnected) return;
       refreshJobs().catch((error) => console.warn("Job refresh failed:", error));
     }, 5000);
   }
   if (!state.metricsTimer) {
     state.metricsTimer = setInterval(() => {
+      if (state.eventConnected) return;
       loadMetrics().catch((error) => console.warn("Metrics refresh failed:", error));
     }, 5000);
   }
 }
 
 function stopLiveTimers() {
+  if (state.eventSource) {
+    state.eventSource.close();
+    state.eventSource = null;
+  }
+  state.eventConnected = false;
   if (state.jobTimer) {
     clearInterval(state.jobTimer);
     state.jobTimer = null;
@@ -244,6 +255,38 @@ function stopLiveTimers() {
     clearInterval(state.metricsTimer);
     state.metricsTimer = null;
   }
+}
+
+function connectLiveEvents() {
+  if (!("EventSource" in window) || state.eventSource || $("appView").hidden) return;
+  const source = new EventSource("/api/events", { withCredentials: true });
+  state.eventSource = source;
+  source.addEventListener("state", (event) => {
+    try {
+      applyLiveEvent(JSON.parse(event.data));
+      state.eventConnected = true;
+    } catch (error) {
+      console.warn("Live event parse failed:", error);
+    }
+  });
+  source.onerror = () => {
+    state.eventConnected = false;
+    source.close();
+    if (state.eventSource === source) state.eventSource = null;
+  };
+}
+
+function applyLiveEvent(data) {
+  if (!data || data.kind !== "state") return;
+  state.jobs = data.jobs || state.jobs;
+  state.jobsLoadError = "";
+  renderJobs();
+  renderRuntimeMetrics({
+    metrics: data.metrics || {},
+    quota: data.quota || null,
+    worker: data.worker || null,
+    queue: data.queue || null,
+  });
 }
 
 async function loadDashboard() {
