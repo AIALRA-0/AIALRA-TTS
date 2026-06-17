@@ -441,11 +441,19 @@ function quotaTitle(quota) {
   const globalRemote = globalQuota
     ? `${formatBytes(quota.remote_global_committed_bytes ?? quota.remote_global_used_bytes ?? 0)} / ${formatBytes(globalQuota)}`
     : "未设置硬上限";
-  return [
+  const lines = [
     `用户远端：${formatBytes(quota.remote_committed_bytes ?? quota.remote_used_bytes ?? 0)} / ${formatBytes(quota.remote_quota_bytes || 0)}（已用 ${formatBytes(quota.remote_used_bytes || 0)}，预留 ${formatBytes(quota.remote_reserved_bytes || 0)}）`,
     `全局远端：${globalRemote}`,
     `本地 worker：${formatBytes(quota.local_committed_bytes ?? quota.local_used_bytes ?? 0)} / ${formatBytes(quota.local_quota_bytes || 0)}（已用 ${formatBytes(quota.local_used_bytes || 0)}，预留 ${formatBytes(quota.local_reserved_bytes || 0)}）`,
-  ].join("\n");
+  ];
+  if (quota.local_worker_disk_source === "worker_heartbeat") {
+    lines.push(
+      `worker 磁盘：可用 ${formatBytes(quota.local_worker_disk_available_bytes || 0)}（空闲 ${formatBytes(quota.local_worker_disk_free_bytes || 0)}，安全余量 ${formatBytes(quota.local_worker_disk_min_free_bytes || 0)}）`
+    );
+  } else if (quota.local_worker_disk_source && quota.local_worker_disk_source !== "not_required") {
+    lines.push(`worker 磁盘：${quota.local_worker_disk_source}`);
+  }
+  return lines.join("\n");
 }
 
 function renderUploadPolicy() {

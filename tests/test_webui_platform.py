@@ -74,6 +74,7 @@ def test_tuning_fields_include_tts_slot_trim_controls():
     assert fields["tts.slot_trim_tolerance_seconds"]["type"] == "float"
     assert fields["tts.slot_trim_fade_seconds"]["type"] == "float"
     assert fields["webui.job_storage_reserve_multiplier"]["type"] == "float"
+    assert fields["webui.worker_disk_min_free_gb"]["type"] == "float"
 
 
 def test_static_ui_does_not_expose_raw_worker_path_placeholder():
@@ -164,6 +165,7 @@ def test_static_ui_uses_sse_with_polling_fallback():
     assert "state.eventConnected" in js
     assert "if (state.eventConnected) return;" in js
     assert "applyLiveEvent(JSON.parse(event.data))" in js
+    assert "local_worker_disk_available_bytes" in js
 
 
 def test_static_ui_has_sidebar_and_status_rail_layout():
@@ -2300,6 +2302,45 @@ def test_worker_queue_submit_counts_active_local_storage_reservations(tmp_path):
     assert "Local worker quota exceeded" in second.text
 
 
+def test_worker_queue_submit_rejects_when_worker_disk_free_space_is_low(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config["webui"]["job_storage_reserve_multiplier"] = 1.0
+    config["webui"]["worker_disk_min_free_gb"] = 0.00000005
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    response = client.post(
+        "/api/worker/heartbeat",
+        headers={"x-worker-token": "worker-token"},
+        json={
+            "worker_id": "worker-1",
+            "media_refs": [{"ref_id": "media123", "name": "lecture.mp4", "size": 100, "media_type": "video/mp4"}],
+            "metrics": {
+                "disk": {"free_bytes": 120, "used_percent": 99},
+                "local_storage": {"managed_bytes": 0, "total_reported_bytes": 0, "roots": []},
+            },
+        },
+    )
+    assert response.status_code == 200
+    project = client.get("/api/projects").json()["projects"][0]
+
+    response = client.post(
+        "/api/jobs",
+        json={"type": "process_one", "video": "worker-ref:media123", "video_name": "lecture.mp4", "project_id": project["id"], "folder_id": "root"},
+    )
+
+    assert response.status_code == 413
+    assert "Local worker disk free space is too low" in response.text
+    assert "C:\\Users" not in response.text
+
+
 def test_worker_queue_submit_counts_active_project_storage_reservations(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
@@ -2346,6 +2387,7 @@ def test_quota_and_project_views_include_active_storage_reservations(tmp_path):
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     config["webui"]["execution_mode"] = "worker_queue"
     config["webui"]["job_storage_reserve_multiplier"] = 1.0
+    config["webui"]["worker_disk_min_free_gb"] = 0.000001
     config["webui"]["max_active_jobs_per_user"] = 5
     config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
     app = create_app(config_path)
@@ -2360,7 +2402,10 @@ def test_quota_and_project_views_include_active_storage_reservations(tmp_path):
         json={
             "worker_id": "worker-1",
             "media_refs": [{"ref_id": "media123", "name": "lecture.mp4", "size": 100, "media_type": "video/mp4"}],
-            "metrics": {"local_storage": {"managed_bytes": 20, "total_reported_bytes": 20, "roots": []}},
+            "metrics": {
+                "disk": {"free_bytes": 4096, "used_percent": 55, "path": r"C:\private\worker-output"},
+                "local_storage": {"managed_bytes": 20, "total_reported_bytes": 20, "roots": []},
+            },
         },
     )
     assert response.status_code == 200
@@ -2387,6 +2432,10 @@ def test_quota_and_project_views_include_active_storage_reservations(tmp_path):
     assert quota["local_used_bytes"] == 20
     assert quota["local_reserved_bytes"] == 100
     assert quota["local_committed_bytes"] == 120
+    assert quota["local_worker_disk_source"] == "worker_heartbeat"
+    assert quota["local_worker_disk_free_bytes"] == 4096
+    assert quota["local_worker_disk_available_bytes"] > 0
+    assert "path" not in json.dumps(quota, ensure_ascii=False)
     assert quota["remote_reserved_bytes"] == 50
     assert quota["remote_committed_bytes"] == quota["remote_used_bytes"] + 50
     assert row["project_reserved_bytes"] == 100

@@ -49,6 +49,7 @@ webui:
   default_local_quota_gb: 500
   default_remote_quota_gb: 10
   default_project_quota_gb: 500
+  worker_disk_min_free_gb: 5
   max_active_jobs_per_user: 2
   max_active_jobs_global: 8
   event_stream_interval_seconds: 2

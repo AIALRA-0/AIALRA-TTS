@@ -37,6 +37,7 @@ Deployment steps:
    - Set small Contabo remote quota defaults.
    - Set `webui.global_remote_quota_gb` to the hard Contabo-side storage budget for uploads, previews, thumbnails, and temporary full-artifact cache files.
    - Set `webui.default_project_quota_gb` to the per-project generated-artifact budget.
+   - Set `webui.worker_disk_min_free_gb` to the minimum free-space safety margin that must remain on the Windows worker output volume.
    - Set `webui.max_active_jobs_per_user` and `webui.max_active_jobs_global` conservatively for the first public test.
    - Set `asr.supported_languages`, `translation.supported_target_languages`, and `tts.supported_languages` as fallback hints; when the Windows worker is online, its heartbeat/claim `capabilities` payload should be treated as the authoritative local model capability view.
    - Keep full media storage on the Windows worker.
@@ -130,6 +131,7 @@ Deployment steps:
    - per-user `remote_quota_bytes` limits Contabo uploads plus preview-cache files, `webui.global_remote_quota_gb` caps total Contabo upload/preview/cache storage across all users, and `local_quota_bytes` remains the Windows worker storage budget
    - new job submission returns HTTP 413 when the Windows worker local quota or selected project quota cannot fit current usage plus active queued/running job reservations
    - `webui.job_storage_reserve_multiplier` controls the conservative local/project reservation for `process_one` jobs based on the safe worker-ref or uploaded-media source size
+   - if the online Windows worker heartbeat reports `metrics.disk.free_bytes`, new jobs that would leave less than `webui.worker_disk_min_free_gb` free on the worker output volume return HTTP 413 before worker execution
    - quota/project API responses include reserved and committed byte fields; the UI should display committed usage so queued work is visible before files are written
    - upload quota is enforced across multi-file requests and active-job concurrency limits return HTTP 429 with a readable message
    - artifact history can be filtered by project, folder, job id, and output kind before signed preview/download URLs are returned

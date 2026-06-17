@@ -124,6 +124,7 @@ TUNABLE_FIELDS: dict[str, dict[str, Any]] = {
     "mux.hard_subtitle": {"label": "生成硬字幕视频", "type": "bool"},
     "webui.global_remote_quota_gb": {"label": "远端全局存储额度 GB", "type": "float", "min": 0, "max": 10240},
     "webui.job_storage_reserve_multiplier": {"label": "任务本地产物预留倍率", "type": "float", "min": 0, "max": 10},
+    "webui.worker_disk_min_free_gb": {"label": "Worker 磁盘安全余量 GB", "type": "float", "min": 0, "max": 1024},
     "webui.max_active_jobs_per_user": {"label": "每用户最大活动任务数", "type": "int", "min": 1, "max": 32},
     "webui.max_active_jobs_global": {"label": "全局最大活动任务数", "type": "int", "min": 1, "max": 128},
 }
@@ -2174,6 +2175,73 @@ def worker_media_ref_size_bytes(state: WebState, ref_id: str) -> int:
     return 0
 
 
+def worker_disk_min_free_bytes(state: WebState) -> int:
+    try:
+        gb = float(state.webui.get("worker_disk_min_free_gb", 5.0) or 0)
+    except (TypeError, ValueError):
+        gb = 5.0
+    return int(max(0.0, gb) * 1024 * 1024 * 1024)
+
+
+def worker_disk_capacity_status(state: WebState, worker: dict[str, Any] | None = None) -> dict[str, Any]:
+    execution_mode = str(state.webui.get("execution_mode", "local_subprocess") or "local_subprocess")
+    min_free = worker_disk_min_free_bytes(state)
+    out: dict[str, Any] = {
+        "local_worker_disk_source": "not_required" if execution_mode != "worker_queue" else "unavailable",
+        "local_worker_disk_enforced": False,
+        "local_worker_disk_min_free_bytes": min_free,
+    }
+    if execution_mode != "worker_queue":
+        return out
+
+    worker = worker or worker_status_payload(state)
+    if not worker.get("heartbeat_online"):
+        return out
+    metrics = worker.get("metrics") if isinstance(worker, dict) else {}
+    disk = metrics.get("disk") if isinstance(metrics, dict) else {}
+    if not isinstance(disk, dict) or "free_bytes" not in disk:
+        out["local_worker_disk_source"] = "missing_worker_metric"
+        return out
+    try:
+        free_bytes = int(max(0, float(disk.get("free_bytes") or 0)))
+    except (TypeError, ValueError):
+        out["local_worker_disk_source"] = "invalid_worker_metric"
+        return out
+
+    out.update(
+        {
+            "local_worker_disk_source": "worker_heartbeat",
+            "local_worker_disk_enforced": True,
+            "local_worker_disk_free_bytes": free_bytes,
+            "local_worker_disk_available_bytes": max(0, free_bytes - min_free),
+        }
+    )
+    try:
+        out["local_worker_disk_used_percent"] = round(float(disk.get("used_percent") or 0), 2)
+    except (TypeError, ValueError):
+        out["local_worker_disk_used_percent"] = 0
+    return out
+
+
+def enforce_worker_disk_capacity_before_job(state: WebState, incoming_local_bytes: int) -> None:
+    if incoming_local_bytes <= 0:
+        return
+    disk = worker_disk_capacity_status(state)
+    if disk.get("local_worker_disk_source") != "worker_heartbeat" or not disk.get("local_worker_disk_enforced"):
+        return
+    available = int(disk.get("local_worker_disk_available_bytes") or 0)
+    if incoming_local_bytes > available:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "Local worker disk free space is too low. "
+                f"Available bytes after safety margin: {available}; incoming bytes: {incoming_local_bytes}; "
+                f"free bytes: {disk.get('local_worker_disk_free_bytes')}; "
+                f"safety margin bytes: {disk.get('local_worker_disk_min_free_bytes')}"
+            ),
+        )
+
+
 def enforce_storage_quota_before_job(state: WebState, user: str, metadata: dict[str, Any]) -> None:
     quota = state.store.quota_status(user)
     local_quota = int(quota.get("local_quota_bytes") or 0)
@@ -2191,6 +2259,7 @@ def enforce_storage_quota_before_job(state: WebState, user: str, metadata: dict[
                 f"quota bytes: {local_quota}; source: {quota.get('local_usage_source')}"
             ),
         )
+    enforce_worker_disk_capacity_before_job(state, incoming_local)
 
     project_id = str(metadata.get("project_id") or "")
     if not project_id:
@@ -2249,6 +2318,8 @@ def active_project_storage_reserved_bytes(state: WebState, project_id: str) -> i
 
 def quota_status_with_reservations(state: WebState, username: str) -> dict[str, Any]:
     quota = dict(state.store.quota_status(username))
+    quota.update(worker_disk_capacity_status(state))
+
     local_reserved = active_job_storage_reserved_bytes(state, username, "estimated_local_bytes")
     local_quota = int(quota.get("local_quota_bytes") or 0)
     local_used = int(quota.get("local_used_bytes") or 0)
