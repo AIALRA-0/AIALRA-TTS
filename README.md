@@ -53,6 +53,8 @@ The WebUI also has a `产物` page for generated artifacts. It can list reports,
 
 For Contabo mode, low-bitrate previews and thumbnails can be registered through `webui.preview_manifest` without exposing Windows source paths. The manifest can be a list or `{ "previews": [...] }`; each row may include `name`, `preview_path`, `thumbnail_path`, `owner`, `project_id`, `job_id`, and `source_output_key`. The API serves only the preview-cache files through signed URLs.
 
+Quota fields are split by storage responsibility. `remote_quota_bytes` limits Contabo-side uploads plus preview-cache files; `local_quota_bytes` is kept as the Windows worker storage budget for original media and full outputs. Upload requests reserve bytes against the remote quota across all files in the same request.
+
 Job records are JSON files with `schema_version`. WebUI normalizes older records on read/claim/update by filling missing metadata, log path, dispatch target, timestamps, retry count, and worker args when possible. Job states are normalized to `queued`, `claimed`, `running`, `paused`, `retrying`, `done`, `failed`, `cancelled`, and `deleted`; older `passed` records are migrated to `done` with `legacy_status: passed`.
 
 Project quota is tracked as generated managed artifact usage per project. Original course videos stay outside project cleanup and remain protected.

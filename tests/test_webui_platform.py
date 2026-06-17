@@ -1,3 +1,4 @@
+from io import BytesIO
 from pathlib import Path
 
 import yaml
@@ -156,6 +157,28 @@ def test_webui_admin_can_update_user_quota_and_disable(tmp_path):
 
     response = admin.patch("/api/users/admin", json={"role": "user"})
     assert response.status_code == 400
+
+
+def test_upload_enforces_remote_quota(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["default_remote_quota_gb"] = 0.000001
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+
+    response = client.post("/api/upload", files=[("files", ("small.mp4", BytesIO(b"x" * 900), "video/mp4"))])
+    assert response.status_code == 200
+    assert response.json()["quota"]["remote_used_bytes"] == 900
+
+    response = client.post("/api/upload", files=[("files", ("too_big.mp4", BytesIO(b"x" * 300), "video/mp4"))])
+    assert response.status_code == 413
+    assert "Remote quota exceeded" in response.text
 
 
 def test_worker_queue_submit_reports_waiting_worker(tmp_path):

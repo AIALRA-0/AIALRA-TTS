@@ -277,8 +277,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         saved: list[dict[str, Any]] = []
         max_bytes = int(state.webui.get("max_upload_mb", 20480)) * 1024 * 1024
         quota = state.store.quota_status(user)
-        base_used = int(quota["local_used_bytes"])
-        quota_bytes = int(quota["local_quota_bytes"])
+        base_used = int(quota["remote_used_bytes"])
+        quota_bytes = int(quota["remote_quota_bytes"])
         reserved_bytes = 0
         for item in files:
             name = safe_upload_name(item.filename or "upload.bin")
@@ -299,7 +299,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                     if not upload_fits_quota(base_used, reserved_bytes, size, quota_bytes):
                         target.unlink(missing_ok=True)
                         remaining = max(0, quota_bytes - base_used - reserved_bytes)
-                        raise HTTPException(status_code=413, detail=f"User quota exceeded. Remaining bytes: {remaining}")
+                        raise HTTPException(status_code=413, detail=f"Remote quota exceeded. Remaining bytes: {remaining}")
                     fh.write(chunk)
             saved.append({"name": target.name, "path": str(target), "size": size})
             reserved_bytes += size

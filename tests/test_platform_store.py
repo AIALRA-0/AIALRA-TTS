@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from ecse_localizer.platform_store import PlatformStore, hash_password, verify_password
@@ -38,6 +39,46 @@ def test_bootstrap_user_project_and_quota(tmp_path):
     project = store.list_projects("admin")[0]
     assert project["quota_project_bytes"] == 3 * 1024 * 1024 * 1024
     assert project["folders"][0]["id"] == "root"
+
+
+def test_remote_quota_counts_uploads_and_preview_manifest(tmp_path):
+    config = make_config(tmp_path)
+    preview_dir = tmp_path / "previews"
+    preview_dir.mkdir()
+    config["webui"]["preview_dir"] = str(preview_dir)
+    config["webui"]["preview_manifest"] = str(preview_dir / "preview_manifest.json")
+    store = PlatformStore(config)
+    store.bootstrap()
+
+    upload = store.user_upload_dir("admin") / "lecture.mp4"
+    upload.write_bytes(b"upload")
+    preview = preview_dir / "lecture_preview.mp4"
+    thumbnail = preview_dir / "lecture_thumb.jpg"
+    preview.write_bytes(b"preview")
+    thumbnail.write_bytes(b"thumb")
+    Path(config["webui"]["preview_manifest"]).write_text(
+        json.dumps({"previews": [{"owner": "admin", "preview_path": str(preview), "thumbnail_path": str(thumbnail)}]}),
+        encoding="utf-8",
+    )
+
+    quota = store.quota_status("admin")
+
+    assert quota["remote_used_bytes"] == len(b"uploadpreviewthumb")
+    assert quota["remote_remaining_bytes"] == quota["remote_quota_bytes"] - quota["remote_used_bytes"]
+    assert quota["local_used_bytes"] == 0
+
+
+def test_can_store_uses_remote_quota(tmp_path):
+    config = make_config(tmp_path)
+    config["webui"]["default_remote_quota_gb"] = 0.000001
+    store = PlatformStore(config)
+    store.bootstrap()
+
+    upload = store.user_upload_dir("admin") / "almost_full.bin"
+    upload.write_bytes(b"x" * 900)
+
+    assert store.can_store("admin", 100)
+    assert not store.can_store("admin", 1000)
 
 
 def test_create_invited_user(tmp_path):

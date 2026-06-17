@@ -180,7 +180,9 @@ async function loadDashboard() {
   $("metricLlm").textContent = data.llm.available ? data.llm.model : "未连接";
   const gpu = (data.metrics?.gpu || [])[0] || {};
   $("metricGpu").textContent = gpu.available ? `${Math.round(gpu.util_percent)}% / ${Math.round(gpu.memory_used_percent)}%` : "未检测";
-  $("metricQuota").textContent = data.quota ? `${formatBytes(data.quota.local_used_bytes)} / ${formatBytes(data.quota.local_quota_bytes)}` : "-";
+  $("metricQuota").textContent = data.quota
+    ? `远端 ${formatBytes(data.quota.remote_used_bytes || 0)} / ${formatBytes(data.quota.remote_quota_bytes || 0)} · 本地 ${formatBytes(data.quota.local_used_bytes || 0)} / ${formatBytes(data.quota.local_quota_bytes || 0)}`
+    : "-";
   const workerMetric = $("metricWorker");
   workerMetric.textContent = workerLabel(data.worker);
   workerMetric.title = data.worker?.message || "";

@@ -345,21 +345,41 @@ class PlatformStore:
 
     def quota_status(self, username: str) -> dict[str, Any]:
         user = self.get_user(username) or {}
-        quota = int(user.get("quota_local_bytes") or gb_to_bytes(500))
-        used = directory_size(self.user_upload_dir(username))
+        local_quota = int(user.get("quota_local_bytes") or gb_to_bytes(500))
+        remote_quota = int(user.get("quota_remote_bytes") or gb_to_bytes(10))
+        remote_used = self.remote_usage_bytes(username)
         return {
             "user": username,
-            "local_used_bytes": used,
-            "local_quota_bytes": quota,
-            "local_remaining_bytes": max(0, quota - used),
-            "local_percent": round((used / quota) * 100, 2) if quota else 0,
-            "remote_used_bytes": 0,
-            "remote_quota_bytes": int(user.get("quota_remote_bytes") or gb_to_bytes(10)),
+            "local_used_bytes": 0,
+            "local_quota_bytes": local_quota,
+            "local_remaining_bytes": local_quota,
+            "local_percent": 0,
+            "remote_used_bytes": remote_used,
+            "remote_quota_bytes": remote_quota,
+            "remote_remaining_bytes": max(0, remote_quota - remote_used),
+            "remote_percent": round((remote_used / remote_quota) * 100, 2) if remote_quota else 0,
         }
 
     def can_store(self, username: str, incoming_bytes: int) -> bool:
         quota = self.quota_status(username)
-        return int(quota["local_used_bytes"]) + incoming_bytes <= int(quota["local_quota_bytes"])
+        return int(quota["remote_used_bytes"]) + incoming_bytes <= int(quota["remote_quota_bytes"])
+
+    def remote_usage_bytes(self, username: str) -> int:
+        total = directory_size(self.user_upload_dir(username))
+        webui = self.config.get("webui", {})
+        manifest = Path(str(webui.get("preview_manifest") or Path(webui.get("preview_dir") or Path(self.config["output_dir"]) / "previews") / "preview_manifest.json"))
+        if manifest.exists():
+            try:
+                data = read_json(manifest)
+                rows = data.get("previews", data) if isinstance(data, dict) else data
+            except Exception:
+                rows = []
+            if isinstance(rows, list):
+                for row in rows:
+                    if isinstance(row, dict) and (not row.get("owner") or str(row.get("owner")) == username):
+                        total += file_size(row.get("preview_path") or row.get("path"))
+                        total += file_size(row.get("thumbnail_path"))
+        return total
 
     def default_project_quota_gb(self) -> float:
         web = self.config.get("webui", {})
@@ -513,6 +533,16 @@ def directory_size(path: str | Path) -> int:
             except OSError:
                 continue
     return total
+
+
+def file_size(path: Any) -> int:
+    if not path:
+        return 0
+    try:
+        target = Path(str(path))
+        return target.stat().st_size if target.exists() and target.is_file() else 0
+    except OSError:
+        return 0
 
 
 def iso_now() -> str:

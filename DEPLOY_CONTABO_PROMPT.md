@@ -76,6 +76,7 @@ Deployment steps:
    - the task form displays ASR/subtitle/TTS language support hints from the configured local model capabilities
    - the task form can queue both `fidelity_audit` and `repair_fidelity`; repair jobs must use the selected report and default to its sibling `*_fidelity_report.json`
    - user quota is enforced
+   - `remote_quota_bytes` limits Contabo uploads plus preview-cache files, while `local_quota_bytes` remains the Windows worker storage budget
    - upload quota is enforced across multi-file requests and active-job concurrency limits return HTTP 429 with a readable message
    - admins can disable users and update local/remote user quotas without disabling the last active admin
    - project quota usage is visible for generated managed artifacts
