@@ -916,6 +916,28 @@ function renderJobs() {
       <div class="job-actions"></div>
     `;
     const actions = item.querySelector(".job-actions");
+    if (canPauseJob(job)) {
+      const pause = document.createElement("button");
+      pause.type = "button";
+      pause.className = "secondary";
+      pause.textContent = "暂停";
+      pause.addEventListener("click", (event) => {
+        event.stopPropagation();
+        pauseJob(job.id);
+      });
+      actions.appendChild(pause);
+    }
+    if (canResumeJob(job)) {
+      const resume = document.createElement("button");
+      resume.type = "button";
+      resume.className = "secondary";
+      resume.textContent = "恢复";
+      resume.addEventListener("click", (event) => {
+        event.stopPropagation();
+        resumeJob(job.id);
+      });
+      actions.appendChild(resume);
+    }
     if (canCancelJob(job)) {
       const cancel = document.createElement("button");
       cancel.type = "button";
@@ -972,6 +994,7 @@ function jobProgressLine(job) {
 function workerJobLine(job) {
   if (job.dispatch_target !== "worker") return "";
   if (job.cancel_requested) return `worker：取消中，等待 ${job.claimed_by || "本地 worker"} 确认`;
+  if (job.status === "paused") return `worker：已暂停，恢复后继续排队`;
   const submitted = job.metadata?.worker_status_at_submit || job.worker_status_at_submit || {};
   if (job.status === "queued" || job.status === "retrying") {
     if (submitted.heartbeat_online === false) return `worker：等待本地 worker 心跳（提交时 ${submitted.status || "unknown"}）`;
@@ -984,6 +1007,14 @@ function workerJobLine(job) {
 
 function canRetryJob(status) {
   return ["done", "passed", "failed", "cancelled"].includes(status);
+}
+
+function canPauseJob(job) {
+  return job.dispatch_target === "worker" && ["queued", "retrying"].includes(job.status) && !job.cancel_requested;
+}
+
+function canResumeJob(job) {
+  return job.dispatch_target === "worker" && job.status === "paused";
 }
 
 function canCancelJob(job) {
@@ -1006,6 +1037,28 @@ async function cancelJob(jobId) {
     }
   } catch (error) {
     toast(`取消失败：${error.message}`);
+  }
+}
+
+async function pauseJob(jobId) {
+  try {
+    const result = await api(`/api/jobs/${encodeURIComponent(jobId)}/pause`, { method: "POST", body: "{}" });
+    toast("任务已暂停");
+    state.selectedJob = result.job.id;
+    await refreshJobs();
+  } catch (error) {
+    toast(`暂停失败：${error.message}`);
+  }
+}
+
+async function resumeJob(jobId) {
+  try {
+    const result = await api(`/api/jobs/${encodeURIComponent(jobId)}/resume`, { method: "POST", body: "{}" });
+    toast("任务已恢复排队");
+    state.selectedJob = result.job.id;
+    await refreshJobs();
+  } catch (error) {
+    toast(`恢复失败：${error.message}`);
   }
 }
 

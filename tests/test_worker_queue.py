@@ -18,9 +18,11 @@ from ecse_localizer.webui import (
     file_display_name,
     infer_job_type,
     list_jobs,
+    pause_job_record,
     require_worker_token,
     read_job,
     requeue_stale_worker_jobs,
+    resume_job_record,
     retry_job_record,
     save_worker_artifact_cache_upload,
     save_worker_preview_upload,
@@ -329,6 +331,55 @@ def test_claim_worker_job_marks_job_claimed(tmp_path):
     assert claimed["status"] == "claimed"
     assert claimed["claimed_by"] == "worker-1"
     assert claim_worker_job(state, "worker-1") is None
+
+
+def test_pause_and_resume_worker_queue_job(tmp_path):
+    state = WebState(write_config(tmp_path))
+    record = create_job_record(
+        state,
+        "audit",
+        "Audit input directory",
+        ["python", "-m", "ecse_localizer", "--config", "remote.yaml", "audit", "--input", "x"],
+        user="admin",
+        metadata={"worker_args": ["audit", "--input", "x"]},
+        dispatch_target="worker",
+    )
+
+    paused = pause_job_record(state, record["id"], paused_by="admin")
+
+    assert paused["status"] == "paused"
+    assert paused["previous_status"] == "queued"
+    assert paused["paused_by"] == "admin"
+    assert claim_worker_job(state, "worker-1") is None
+
+    resumed = resume_job_record(state, record["id"], resumed_by="admin")
+
+    assert resumed["status"] == "queued"
+    assert resumed["previous_status"] == "paused"
+    assert resumed["resumed_by"] == "admin"
+    claimed = claim_worker_job(state, "worker-1")
+    assert claimed["id"] == record["id"]
+
+
+def test_pause_rejects_running_worker_job(tmp_path):
+    state = WebState(write_config(tmp_path))
+    record = create_job_record(
+        state,
+        "audit",
+        "Audit input directory",
+        ["python", "-m", "ecse_localizer", "--config", "remote.yaml", "audit", "--input", "x"],
+        user="admin",
+        metadata={"worker_args": ["audit", "--input", "x"]},
+        dispatch_target="worker",
+    )
+    update_job(state, record["id"], {"status": "running", "claimed_by": "worker-1"})
+
+    try:
+        pause_job_record(state, record["id"], paused_by="admin")
+    except Exception as exc:
+        assert "cannot be paused" in str(exc)
+    else:
+        raise AssertionError("expected running worker job pause to be rejected")
 
 
 def test_worker_status_changes_extracts_result_paths_as_fields():

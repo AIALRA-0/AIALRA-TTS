@@ -464,6 +464,62 @@ def test_running_worker_job_cancel_is_polled_and_finalized(tmp_path):
     assert job["cancel_requested_at"] is None
 
 
+def test_worker_queue_pause_resume_and_cancel_paused_job(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    record = create_job_record(
+        state,
+        "audit",
+        "Remote audit",
+        ["python", "-m", "ecse_localizer", "audit"],
+        user="admin",
+        metadata={"worker_args": ["audit", "--input", "x"]},
+        dispatch_target="worker",
+    )
+
+    response = client.post(f"/api/jobs/{record['id']}/pause", json={})
+
+    assert response.status_code == 200
+    job = response.json()["job"]
+    assert job["status"] == "paused"
+    assert job["paused_by"] == "admin"
+
+    response = client.post(
+        "/api/worker/jobs/claim",
+        headers={"x-worker-token": "worker-token"},
+        json={"worker_id": "worker-1"},
+    )
+    assert response.status_code == 200
+    assert response.json()["job"] is None
+
+    response = client.post(f"/api/jobs/{record['id']}/resume", json={})
+
+    assert response.status_code == 200
+    job = response.json()["job"]
+    assert job["status"] == "queued"
+    assert job["resumed_by"] == "admin"
+
+    response = client.post(f"/api/jobs/{record['id']}/pause", json={})
+    assert response.status_code == 200
+    response = client.post(f"/api/jobs/{record['id']}/cancel", json={})
+
+    assert response.status_code == 200
+    job = response.json()["job"]
+    assert job["status"] == "cancelled"
+    assert job["returncode"] == -9
+    assert not job.get("cancel_requested")
+
+
 def test_job_submit_rejects_full_local_worker_quota(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

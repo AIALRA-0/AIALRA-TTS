@@ -726,10 +726,10 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, text=True)
             update_job(state, job_id, {"status": "cancelled", "ended_at": iso_now(), "returncode": -9})
             return {"ok": True}
-        if record.get("dispatch_target") == "worker" and record.get("status") in {"queued", "retrying"}:
+        if record.get("dispatch_target") == "worker" and record.get("status") in {"queued", "retrying", "paused"}:
             update_job(state, job_id, {"status": "cancelled", "ended_at": iso_now(), "returncode": -9, "updated_at": iso_now()})
             return {"ok": True, "job": read_job(state, job_id)}
-        if record.get("dispatch_target") == "worker" and record.get("status") in {"claimed", "running", "paused"}:
+        if record.get("dispatch_target") == "worker" and record.get("status") in {"claimed", "running"}:
             update_job(
                 state,
                 job_id,
@@ -742,6 +742,20 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             )
             return {"ok": True, "job": read_job(state, job_id), "message": "Cancel request sent to Windows worker"}
         return {"ok": False, "message": "Job is not running in this WebUI process"}
+
+    @app.post("/api/jobs/{job_id}/pause")
+    def pause_job(job_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
+        record = read_job(state, job_id)
+        if not record or not can_access_record(state, user, record):
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {"ok": True, "job": pause_job_record(state, job_id, paused_by=user)}
+
+    @app.post("/api/jobs/{job_id}/resume")
+    def resume_job(job_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
+        record = read_job(state, job_id)
+        if not record or not can_access_record(state, user, record):
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {"ok": True, "job": resume_job_record(state, job_id, resumed_by=user)}
 
     @app.post("/api/jobs/{job_id}/retry")
     def retry_job(job_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
@@ -1937,6 +1951,58 @@ def list_jobs(state: WebState, user: str | None = None, *, include_deleted: bool
         except Exception:
             continue
     return records
+
+
+def pause_job_record(state: WebState, job_id: str, *, paused_by: str) -> dict[str, Any]:
+    record = read_job(state, job_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if record.get("dispatch_target") != "worker":
+        raise HTTPException(status_code=409, detail="Only queued worker jobs can be paused")
+    status = str(record.get("status") or "")
+    if status not in {"queued", "retrying"}:
+        raise HTTPException(status_code=409, detail=f"Job cannot be paused from status: {status}")
+    update_job(
+        state,
+        job_id,
+        {
+            "status": "paused",
+            "previous_status": status,
+            "paused_at": iso_now(),
+            "paused_by": paused_by,
+            "updated_at": iso_now(),
+        },
+    )
+    return read_job(state, job_id) or record
+
+
+def resume_job_record(state: WebState, job_id: str, *, resumed_by: str) -> dict[str, Any]:
+    record = read_job(state, job_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if record.get("dispatch_target") != "worker":
+        raise HTTPException(status_code=409, detail="Only paused worker jobs can be resumed")
+    status = str(record.get("status") or "")
+    if status != "paused":
+        raise HTTPException(status_code=409, detail=f"Job cannot be resumed from status: {status}")
+    previous_status = str(record.get("previous_status") or "queued")
+    target_status = "retrying" if previous_status == "retrying" else "queued"
+    update_job(
+        state,
+        job_id,
+        {
+            "status": target_status,
+            "previous_status": "paused",
+            "resumed_at": iso_now(),
+            "resumed_by": resumed_by,
+            "updated_at": iso_now(),
+            "cancel_requested": False,
+            "cancel_requested_at": None,
+            "cancel_requested_by": None,
+            "cancel_handled_at": None,
+        },
+    )
+    return read_job(state, job_id) or record
 
 
 def retry_job_record(state: WebState, job_id: str) -> dict[str, Any]:
