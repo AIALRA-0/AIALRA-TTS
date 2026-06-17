@@ -74,6 +74,17 @@ def test_static_settings_ui_is_admin_only():
     assert '<section id="settingsTab" class="tab-panel" data-admin-only>' in html
 
 
+def test_static_template_controls_have_save_update_and_delete_actions():
+    static_root = Path(__file__).parents[1] / "src" / "ecse_localizer" / "static"
+    html = (static_root / "index.html").read_text(encoding="utf-8")
+    js = (static_root / "app.js").read_text(encoding="utf-8")
+
+    for button_id in ["saveTemplateBtn", "updateTemplateBtn", "deleteTemplateBtn"]:
+        assert f'id="{button_id}"' in html
+        assert '$("' + button_id + '").addEventListener("click"' in js
+    assert "async function deleteCurrentTemplate()" in js
+
+
 def test_webui_login_project_and_quota(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
@@ -193,6 +204,32 @@ def test_template_update_api_applies_to_worker_job_metadata(tmp_path):
     assert metadata["template_id"] == template["id"]
     assert metadata["quality_mode"] == "best_quality"
     assert metadata["tts_speed"] == 1.15
+
+
+def test_template_delete_api_removes_template_from_job_options(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    project = client.get("/api/projects").json()["projects"][0]
+    response = client.post("/api/templates", json={"name": "Delete Me", "params": {"quality_mode": "fast"}})
+    assert response.status_code == 200
+    template = response.json()["template"]
+
+    response = client.delete(f"/api/templates/{template['id']}")
+
+    assert response.status_code == 200
+    assert all(item["id"] != template["id"] for item in response.json()["templates"])
+    response = client.post("/api/jobs", json={"type": "audit", "project_id": project["id"], "template_id": template["id"]})
+    assert response.status_code == 400
+    assert "Template not found" in response.text
 
 
 def test_project_and_folder_archive_api_hides_targets(tmp_path):

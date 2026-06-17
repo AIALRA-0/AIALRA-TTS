@@ -150,6 +150,7 @@ function bindEvents() {
   });
   $("saveTemplateBtn").addEventListener("click", saveCurrentTemplate);
   $("updateTemplateBtn").addEventListener("click", updateCurrentTemplate);
+  $("deleteTemplateBtn").addEventListener("click", deleteCurrentTemplate);
   $("userForm").addEventListener("submit", createUser);
   $("refreshArtifactsBtn").addEventListener("click", loadArtifacts);
   $("cleanupDryRunBtn").addEventListener("click", cleanupDryRun);
@@ -893,6 +894,26 @@ async function updateCurrentTemplate() {
     toast("模板已更新");
   } catch (error) {
     toast(`更新模板失败：${error.message}`);
+  }
+}
+
+async function deleteCurrentTemplate() {
+  const templateId = $("jobTemplate").value;
+  const current = state.templates.find((item) => item.id === templateId);
+  if (!current) {
+    toast("请先选择一个模板");
+    return;
+  }
+  const ok = window.confirm(`删除模板？\n${current.name}`);
+  if (!ok) return;
+  try {
+    const result = await api(`/api/templates/${encodeURIComponent(templateId)}`, { method: "DELETE" });
+    state.templates = result.templates || state.templates;
+    renderTemplateOptions();
+    applySelectedTemplate();
+    toast("模板已删除");
+  } catch (error) {
+    toast(`删除模板失败：${error.message}`);
   }
 }
 
