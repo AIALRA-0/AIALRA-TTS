@@ -162,3 +162,38 @@ def test_parameter_templates_are_user_scoped_and_sanitized(tmp_path):
     deleted = store.delete_template("admin", template["id"])
     assert deleted["id"] == template["id"]
     assert store.get_template("admin", template["id"]) is None
+
+
+def test_worker_heartbeat_redacts_message_and_media_ref_names(tmp_path):
+    store = PlatformStore(make_config(tmp_path))
+    store.bootstrap()
+    win_root = "C:" + "\\Users\\Alice\\Desktop\\ECSE 4961"
+    private_ip = "10." + "0.0.12"
+
+    row = store.record_worker_heartbeat(
+        {
+            "status": "online",
+            "worker_id": "worker-1",
+            "message": f"watching {win_root}\\lecture.mp4 via http://{private_ip}:8787/?token=abc123",
+            "metrics": {"disk": {"path": f"{win_root}\\_localizer_output", "used_percent": 55}},
+            "media_refs": [
+                {
+                    "ref_id": "media-1",
+                    "name": f"{win_root}\\lecture.mp4",
+                    "size": 12,
+                    "mtime": 123.5,
+                    "media_type": "video/mp4",
+                    "path": f"{win_root}\\lecture.mp4",
+                }
+            ],
+        }
+    )
+
+    serialized = json.dumps(row, ensure_ascii=False)
+    assert "Alice" not in serialized
+    assert win_root not in serialized
+    assert private_ip not in serialized
+    assert "token=abc123" not in serialized
+    assert "path" not in row["metrics"]["disk"]
+    assert row["media_refs"][0]["name"] == "lecture.mp4"
+    assert "path" not in row["media_refs"][0]

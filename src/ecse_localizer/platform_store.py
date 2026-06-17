@@ -7,10 +7,11 @@ import os
 import re
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from .metrics import sanitize_metrics
+from .redaction import sanitize_remote_text
 from .utils import PROJECT_ROOT, ensure_dir, read_json, write_json
 
 
@@ -411,7 +412,7 @@ class PlatformStore:
             "status": str(payload.get("status") or "online"),
             "worker_id": str(payload.get("worker_id") or "local-windows-worker"),
             "version": str(payload.get("version") or ""),
-            "message": str(payload.get("message") or ""),
+            "message": sanitize_remote_text(payload.get("message") or ""),
             "metrics": sanitize_metrics(payload.get("metrics")) if isinstance(payload.get("metrics"), dict) else {},
             "media_refs": sanitize_worker_media_refs(payload.get("media_refs")),
             "updated_at": iso_now(),
@@ -504,13 +505,26 @@ def sanitize_worker_media_refs(value: Any) -> list[dict[str, Any]]:
         rows.append(
             {
                 "ref_id": str(item.get("ref_id") or "")[:80],
-                "name": clean_name(str(item.get("name") or "worker-media"), default="worker-media"),
+                "name": safe_worker_media_name(item.get("name") or "worker-media"),
                 "size": int(max(0, coerce_float(item.get("size")))),
                 "mtime": max(0, coerce_float(item.get("mtime"))),
                 "media_type": str(item.get("media_type") or "application/octet-stream")[:120],
             }
         )
     return rows
+
+
+def safe_worker_media_name(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "worker-media"
+    windows_name = PureWindowsPath(text).name
+    posix_name = Path(text).name
+    if "\\" in text or re.match(r"^[A-Za-z]:", text):
+        candidate = windows_name or posix_name
+    else:
+        candidate = posix_name or windows_name
+    return clean_name(sanitize_remote_text(candidate), default="worker-media")
 
 
 def validate_username(username: str) -> None:
