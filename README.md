@@ -144,6 +144,7 @@ It fails closed when production safety settings are missing: placeholder secrets
 - ASR: `whisperx` then `faster-whisper` when installed; existing subtitles avoid ASR when good enough.
 - Audio enhancement: ffmpeg loudnorm/highpass/lowpass always available; DeepFilterNet/ClearerVoice optional.
 - Translation: local Ollama/LM Studio OpenAI-compatible endpoint only. `best_quality` reconstructs spoken paragraphs before per-segment JSON translation, then applies a course style guide, coherence pass, and deterministic quality flags for summary-like translations, over-compression, repeated calques, and unchanged literal rewrites. `fidelity-audit` reviews the finished report, and `repair-fidelity` rewrites only the failed/low-score/quality-flagged segments before regenerating subtitles, TTS, muxed video, and QA. Qwen 14B is preferred for quality; 7B is fallback.
+- `translation-sample` writes a deterministic local JSON/Markdown comparison of the same source segment across `literal`, `lecture`, `coherence`, and `repair` stages. Use it as a quick quality gate before long video runs.
 - TTS: CosyVoice SFT is the preferred local Chinese backend; Piper is a lightweight fallback. Voice cloning stays disabled unless explicit consent files are present.
 - Subtitles: `.ass` means Advanced SubStation Alpha and is used for styled bilingual subtitles.
 
@@ -173,6 +174,7 @@ python -m ecse_localizer process-all --input "<VIDEO_ROOT>"
 python -m ecse_localizer report --output "<VIDEO_ROOT>\_localizer_output"
 python -m ecse_localizer fidelity-audit --report "<VIDEO_ROOT>\_localizer_output\<lecture>_report.json"
 python -m ecse_localizer repair-fidelity --report "<VIDEO_ROOT>\_localizer_output\<lecture>_report.json"
+python -m ecse_localizer translation-sample --output ".\runs\translation_quality_sample"
 python -m ecse_localizer tts-health
 python -m ecse_localizer worker-status
 python -m ecse_localizer worker-health --skip-remote

@@ -90,6 +90,7 @@ Deployment steps:
 10. Validate:
    - `python -m ecse_localizer --config deploy/config.remote.yaml deploy-check` returns PASS before the service is exposed
    - `.\09_worker_healthcheck.ps1` returns PASS on the Windows worker before scheduled tasks are installed
+   - `python -m ecse_localizer translation-sample --output runs/translation_quality_sample` creates JSON/Markdown comparing literal, lecture, coherence, and repair stages
    - login works
    - project creation works
    - project folders can be created and selected for jobs

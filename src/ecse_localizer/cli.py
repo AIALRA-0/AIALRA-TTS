@@ -39,6 +39,7 @@ from .subtitle_io import (
     write_vtt,
 )
 from .translate import translate_segments
+from .translation_sample import write_translation_quality_sample
 from .tts import build_aligned_dub, tts_health
 from .utils import PROJECT_ROOT, copy_text, ensure_dir, now_id, setup_logger, slugify, write_json
 from .worker_client import collect_worker_media_refs, poll_loop, poll_once, post_worker_heartbeat
@@ -84,6 +85,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--report", required=True)
     p.add_argument("--run-dir")
     p.add_argument("--tag", default="final7")
+    p = sub.add_parser("translation-sample")
+    p.add_argument("--output", help="Directory for translation_quality_sample.json/md. Defaults to work_dir/translation_quality_sample.")
+    p.add_argument("--json", action="store_true", help="Print the full sample JSON result.")
 
     sub.add_parser("tts-health")
     p = sub.add_parser("worker-status")
@@ -134,6 +138,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_repair_fidelity(args, config)
         if args.command == "compact-rerender":
             return cmd_compact_rerender(args, config)
+        if args.command == "translation-sample":
+            return cmd_translation_sample(args, config)
         if args.command == "tts-health":
             print(json.dumps(tts_health(config), ensure_ascii=False, indent=2))
             return 0
@@ -359,6 +365,16 @@ def cmd_worker_poll(args: argparse.Namespace, config: dict[str, Any]) -> int:
         interval_seconds=args.interval_seconds,
     )
     return 0
+
+
+def cmd_translation_sample(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    output = Path(args.output) if args.output else Path(config["work_dir"]) / "translation_quality_sample"
+    result = write_translation_quality_sample(output, config)
+    payload = {"pass": result["pass"], "json": result["json"], "markdown": result["markdown"]}
+    if args.json:
+        payload["sample"] = result["sample"]
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0 if result["pass"] else 2
 
 
 def cmd_fidelity_audit(args: argparse.Namespace, config: dict[str, Any]) -> int:
