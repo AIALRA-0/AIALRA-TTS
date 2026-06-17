@@ -41,6 +41,7 @@ def valid_remote_config() -> dict:
             "worker_signature_max_skew_seconds": 300,
             "worker_offline_after_seconds": 180,
             "cleanup_older_than_days": 7,
+            "global_remote_quota_gb": 50,
             "default_remote_quota_gb": 10,
             "worker_preview_max_upload_mb": 256,
             "worker_artifact_cache_max_upload_mb": 2048,
@@ -149,6 +150,7 @@ webui:
   worker_signature_max_skew_seconds: 300
   worker_offline_after_seconds: 180
   cleanup_older_than_days: 7
+  global_remote_quota_gb: 50
   default_remote_quota_gb: 10
   worker_preview_max_upload_mb: 256
   worker_artifact_cache_max_upload_mb: 2048

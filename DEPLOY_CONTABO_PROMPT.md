@@ -35,6 +35,7 @@ Deployment steps:
    - Set `privacy.allow_cloud_api=false`.
    - Set `privacy.allow_upload_media=false`.
    - Set small Contabo remote quota defaults.
+   - Set `webui.global_remote_quota_gb` to the hard Contabo-side storage budget for uploads, previews, thumbnails, and temporary full-artifact cache files.
    - Set `webui.default_project_quota_gb` to the per-project generated-artifact budget.
    - Set `webui.max_active_jobs_per_user` and `webui.max_active_jobs_global` conservatively for the first public test.
    - Set `asr.supported_languages`, `translation.supported_target_languages`, and `tts.supported_languages` as fallback hints; when the Windows worker is online, its heartbeat/claim `capabilities` payload should be treated as the authoritative local model capability view.
@@ -115,7 +116,7 @@ Deployment steps:
    - the task form displays ASR/subtitle/TTS language support hints from the online Windows worker heartbeat when available, otherwise from configured fallback capabilities
    - the task form can queue both `fidelity_audit` and `repair_fidelity`; repair jobs must use the selected report and default to its sibling `*_fidelity_report.json`
    - user quota is enforced
-   - `remote_quota_bytes` limits Contabo uploads plus preview-cache files, while `local_quota_bytes` remains the Windows worker storage budget
+   - per-user `remote_quota_bytes` limits Contabo uploads plus preview-cache files, `webui.global_remote_quota_gb` caps total Contabo upload/preview/cache storage across all users, and `local_quota_bytes` remains the Windows worker storage budget
    - new job submission returns HTTP 413 when the Windows worker local quota or selected project quota is already exhausted
    - upload quota is enforced across multi-file requests and active-job concurrency limits return HTTP 429 with a readable message
    - browser media upload is disabled in `worker_queue` mode unless explicitly enabled, so original videos do not land on the Contabo disk by default

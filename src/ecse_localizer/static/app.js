@@ -284,9 +284,8 @@ function renderRuntimeMetrics(data) {
   if (memoryMetric) memoryMetric.textContent = percentText(metrics.memory?.used_percent);
   const quotaMetric = $("metricQuota");
   if (quotaMetric) {
-    quotaMetric.textContent = data.quota
-      ? `远端 ${formatBytes(data.quota.remote_used_bytes || 0)} / ${formatBytes(data.quota.remote_quota_bytes || 0)} · 本地 ${formatBytes(data.quota.local_used_bytes || 0)} / ${formatBytes(data.quota.local_quota_bytes || 0)}`
-      : "-";
+    quotaMetric.textContent = data.quota ? quotaLabel(data.quota) : "-";
+    quotaMetric.title = data.quota ? quotaTitle(data.quota) : "";
   }
   const workerMetric = $("metricWorker");
   if (workerMetric) {
@@ -333,6 +332,27 @@ function queueTitle(queue) {
     `worker slots: ${queue.worker_slots_used || 0}/${queue.worker_max_slots || 1}`,
     `worker waiting: ${queue.worker_waiting_jobs || 0}`,
   ].join(" · ");
+}
+
+function quotaLabel(quota) {
+  const userRemote = `${formatBytes(quota.remote_used_bytes || 0)} / ${formatBytes(quota.remote_quota_bytes || 0)}`;
+  const globalQuota = Number(quota.remote_global_quota_bytes || 0);
+  const globalRemote = globalQuota
+    ? `${formatBytes(quota.remote_global_used_bytes || 0)} / ${formatBytes(globalQuota)}`
+    : "不限";
+  return `远端 ${userRemote} · 全局 ${globalRemote}`;
+}
+
+function quotaTitle(quota) {
+  const globalQuota = Number(quota.remote_global_quota_bytes || 0);
+  const globalRemote = globalQuota
+    ? `${formatBytes(quota.remote_global_used_bytes || 0)} / ${formatBytes(globalQuota)}`
+    : "未设置硬上限";
+  return [
+    `用户远端：${formatBytes(quota.remote_used_bytes || 0)} / ${formatBytes(quota.remote_quota_bytes || 0)}`,
+    `全局远端：${globalRemote}`,
+    `本地 worker：${formatBytes(quota.local_used_bytes || 0)} / ${formatBytes(quota.local_quota_bytes || 0)}`,
+  ].join("\n");
 }
 
 function renderUploadPolicy() {

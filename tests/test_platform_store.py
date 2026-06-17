@@ -83,6 +83,27 @@ def test_can_store_uses_remote_quota(tmp_path):
     assert not store.can_store("admin", 1000)
 
 
+def test_can_store_uses_global_remote_quota(tmp_path):
+    config = make_config(tmp_path)
+    preview_dir = tmp_path / "previews"
+    preview_dir.mkdir()
+    config["webui"]["preview_dir"] = str(preview_dir)
+    config["webui"]["global_remote_quota_gb"] = 0.000001
+    store = PlatformStore(config)
+    store.bootstrap()
+
+    upload = store.user_upload_dir("admin") / "almost_full.bin"
+    upload.write_bytes(b"x" * 700)
+    preview = preview_dir / "cache.mp4"
+    preview.write_bytes(b"x" * 200)
+    quota = store.quota_status("admin")
+
+    assert quota["remote_global_used_bytes"] == 900
+    assert quota["remote_global_quota_bytes"] > 900
+    assert store.can_store("admin", 100)
+    assert not store.can_store("admin", 300)
+
+
 def test_create_invited_user(tmp_path):
     store = PlatformStore(make_config(tmp_path))
     store.bootstrap()

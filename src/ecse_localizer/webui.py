@@ -92,6 +92,7 @@ TUNABLE_FIELDS: dict[str, dict[str, Any]] = {
     "dialect.enabled": {"label": "方言/轻口音", "type": "bool"},
     "dialect.target": {"label": "方言目标", "type": "choice", "options": ["mandarin", "sichuan", "cantonese", "dongbei", "shanghai", "taiwan"]},
     "mux.hard_subtitle": {"label": "生成硬字幕视频", "type": "bool"},
+    "webui.global_remote_quota_gb": {"label": "远端全局存储额度 GB", "type": "float", "min": 0, "max": 10240},
     "webui.max_active_jobs_per_user": {"label": "每用户最大活动任务数", "type": "int", "min": 1, "max": 32},
     "webui.max_active_jobs_global": {"label": "全局最大活动任务数", "type": "int", "min": 1, "max": 128},
 }
@@ -342,6 +343,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         quota = state.store.quota_status(user)
         base_used = int(quota["remote_used_bytes"])
         quota_bytes = int(quota["remote_quota_bytes"])
+        global_base_used = int(quota.get("remote_global_used_bytes") or 0)
+        global_quota_bytes = int(quota.get("remote_global_quota_bytes") or 0)
         reserved_bytes = 0
         for item in files:
             name = safe_upload_name(item.filename or "upload.bin")
@@ -362,6 +365,9 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                         if not upload_fits_quota(base_used, reserved_bytes, size, quota_bytes):
                             remaining = max(0, quota_bytes - base_used - reserved_bytes)
                             raise HTTPException(status_code=413, detail=f"Remote quota exceeded. Remaining bytes: {remaining}")
+                        if global_quota_bytes > 0 and not upload_fits_quota(global_base_used, reserved_bytes, size, global_quota_bytes):
+                            remaining = max(0, global_quota_bytes - global_base_used - reserved_bytes)
+                            raise HTTPException(status_code=413, detail=f"Global remote quota exceeded. Remaining bytes: {remaining}")
                         fh.write(chunk)
             except HTTPException:
                 await item.close()
@@ -1158,6 +1164,11 @@ def save_worker_preview_upload(state: WebState, record: dict[str, Any], request:
     if not upload_fits_quota(base_used, 0, len(body), quota_bytes):
         remaining = max(0, quota_bytes - base_used)
         raise HTTPException(status_code=413, detail=f"Remote quota exceeded. Remaining bytes: {remaining}")
+    global_quota_bytes = int(quota.get("remote_global_quota_bytes") or 0)
+    global_base_used = max(0, int(quota.get("remote_global_used_bytes") or 0) - existing_size)
+    if global_quota_bytes > 0 and not upload_fits_quota(global_base_used, 0, len(body), global_quota_bytes):
+        remaining = max(0, global_quota_bytes - global_base_used)
+        raise HTTPException(status_code=413, detail=f"Global remote quota exceeded. Remaining bytes: {remaining}")
 
     target.write_bytes(body)
     row = upsert_worker_preview_manifest(state, record, request, target, variant)
@@ -1194,6 +1205,11 @@ def save_worker_artifact_cache_upload(state: WebState, record: dict[str, Any], r
     if not upload_fits_quota(base_used, 0, len(body), quota_bytes):
         remaining = max(0, quota_bytes - base_used)
         raise HTTPException(status_code=413, detail=f"Remote quota exceeded. Remaining bytes: {remaining}")
+    global_quota_bytes = int(quota.get("remote_global_quota_bytes") or 0)
+    global_base_used = max(0, int(quota.get("remote_global_used_bytes") or 0) - existing_size)
+    if global_quota_bytes > 0 and not upload_fits_quota(global_base_used, 0, len(body), global_quota_bytes):
+        remaining = max(0, global_quota_bytes - global_base_used)
+        raise HTTPException(status_code=413, detail=f"Global remote quota exceeded. Remaining bytes: {remaining}")
 
     target.write_bytes(body)
     row = upsert_worker_artifact_cache_manifest(state, record, request, target)
@@ -1211,6 +1227,10 @@ def enforce_artifact_cache_request_limits(state: WebState, username: str, artifa
     remaining = max(0, int(quota["remote_quota_bytes"]) - int(quota["remote_used_bytes"]))
     if size > remaining:
         raise HTTPException(status_code=413, detail=f"Remote quota exceeded. Remaining bytes: {remaining}")
+    global_quota = int(quota.get("remote_global_quota_bytes") or 0)
+    global_remaining = max(0, global_quota - int(quota.get("remote_global_used_bytes") or 0)) if global_quota else 0
+    if global_quota > 0 and size > global_remaining:
+        raise HTTPException(status_code=413, detail=f"Global remote quota exceeded. Remaining bytes: {global_remaining}")
 
 
 def upsert_worker_preview_manifest(

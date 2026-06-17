@@ -478,6 +478,31 @@ def test_upload_enforces_remote_quota(tmp_path):
     assert "Remote quota exceeded" in response.text
 
 
+def test_upload_enforces_global_remote_quota(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["default_remote_quota_gb"] = 1
+    config["webui"]["global_remote_quota_gb"] = 0.000001
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+
+    response = client.post("/api/upload", files=[("files", ("small.mp4", BytesIO(b"x" * 900), "video/mp4"))])
+    assert response.status_code == 200
+    quota = response.json()["quota"]
+    assert quota["remote_global_used_bytes"] == 900
+    assert quota["remote_global_quota_bytes"] > 900
+
+    response = client.post("/api/upload", files=[("files", ("too_big.mp4", BytesIO(b"x" * 300), "video/mp4"))])
+    assert response.status_code == 413
+    assert "Global remote quota exceeded" in response.text
+
+
 def test_upload_disabled_by_default_for_worker_queue(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
@@ -1584,6 +1609,47 @@ def test_request_worker_artifact_cache_rejects_known_size_over_remote_quota(tmp_
     assert not any(job["type"] == "cache_artifact" for job in client.get("/api/jobs").json()["jobs"])
 
 
+def test_request_worker_artifact_cache_rejects_known_size_over_global_remote_quota(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config["webui"]["default_remote_quota_gb"] = 1
+    config["webui"]["global_remote_quota_gb"] = 0.00000001
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    source_job = create_job_record(
+        state,
+        "process_one",
+        "Remote process",
+        ["python", "-m", "ecse_localizer", "process-one", "--video", r"C:\private\lecture.mp4"],
+        user="admin",
+        metadata={"project_id": "course", "folder_id": "week_1"},
+        dispatch_target="worker",
+    )
+    update_job(
+        state,
+        source_job["id"],
+        {
+            "status": "done",
+            "worker_artifacts": [{"ref_id": "ref_big", "source_output_key": "zh_dub_mp4", "name": "lecture_zh_dub.mp4", "size": 100}],
+        },
+    )
+    artifact = next(item for item in client.get("/api/artifacts").json()["artifacts"] if item["id"] == "worker_artifact_ref_big")
+
+    response = client.post(artifact["request_cache_url"], json={})
+
+    assert response.status_code == 413
+    assert "Global remote quota exceeded" in response.text
+    assert not any(job["type"] == "cache_artifact" for job in client.get("/api/jobs").json()["jobs"])
+
+
 def test_request_worker_artifact_cache_rejects_known_size_over_cache_limit(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
@@ -1726,3 +1792,43 @@ def test_worker_preview_upload_respects_remote_quota(tmp_path):
     response = client.post(path, data=body, headers=headers)
     assert response.status_code == 413
     assert "Remote quota exceeded" in response.text
+
+
+def test_worker_preview_upload_respects_global_remote_quota(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["worker_auth_mode"] = "hmac"
+    config["webui"]["default_remote_quota_gb"] = 1
+    config["webui"]["global_remote_quota_gb"] = 0.00000001
+    config["webui"]["preview_dir"] = str(tmp_path / "previews")
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+    record = create_job_record(
+        state,
+        "process_one",
+        "Remote process",
+        ["python", "-m", "ecse_localizer", "process-one", "--video", r"C:\private\lecture.mp4"],
+        user="admin",
+        metadata={},
+        dispatch_target="worker",
+    )
+    update_job(state, record["id"], {"status": "claimed", "claimed_by": "worker-1"})
+
+    path = f"/api/worker/jobs/{record['id']}/preview"
+    body = b"x" * 100
+    headers = worker_headers("worker-token", path=path, body=body)
+    headers.update(
+        {
+            "Content-Type": "video/mp4",
+            "X-Worker-Preview-Variant": "preview",
+            "X-Worker-Preview-File-Name": "too_big_preview.mp4",
+            "X-Worker-Id": "worker-1",
+        }
+    )
+    response = client.post(path, data=body, headers=headers)
+    assert response.status_code == 413
+    assert "Global remote quota exceeded" in response.text

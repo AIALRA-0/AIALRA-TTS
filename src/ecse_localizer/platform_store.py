@@ -502,9 +502,12 @@ class PlatformStore:
 
     def quota_status(self, username: str) -> dict[str, Any]:
         user = self.get_user(username) or {}
+        webui = self.config.get("webui", {}) if isinstance(self.config.get("webui"), dict) else {}
         local_quota = int(user.get("quota_local_bytes") or gb_to_bytes(500))
         remote_quota = int(user.get("quota_remote_bytes") or gb_to_bytes(10))
         remote_used = self.remote_usage_bytes(username)
+        global_remote_quota = gb_to_bytes(float(webui.get("global_remote_quota_gb", 0) or 0))
+        global_remote_used = self.remote_total_usage_bytes()
         local_used, local_source = self.local_usage_bytes()
         return {
             "user": username,
@@ -517,11 +520,18 @@ class PlatformStore:
             "remote_quota_bytes": remote_quota,
             "remote_remaining_bytes": max(0, remote_quota - remote_used),
             "remote_percent": round((remote_used / remote_quota) * 100, 2) if remote_quota else 0,
+            "remote_global_used_bytes": global_remote_used,
+            "remote_global_quota_bytes": global_remote_quota,
+            "remote_global_remaining_bytes": max(0, global_remote_quota - global_remote_used) if global_remote_quota else 0,
+            "remote_global_percent": round((global_remote_used / global_remote_quota) * 100, 2) if global_remote_quota else 0,
         }
 
     def can_store(self, username: str, incoming_bytes: int) -> bool:
         quota = self.quota_status(username)
-        return int(quota["remote_used_bytes"]) + incoming_bytes <= int(quota["remote_quota_bytes"])
+        user_ok = int(quota["remote_used_bytes"]) + incoming_bytes <= int(quota["remote_quota_bytes"])
+        global_quota = int(quota.get("remote_global_quota_bytes") or 0)
+        global_ok = global_quota <= 0 or int(quota.get("remote_global_used_bytes") or 0) + incoming_bytes <= global_quota
+        return user_ok and global_ok
 
     def remote_usage_bytes(self, username: str) -> int:
         total = directory_size(self.user_upload_dir(username))
@@ -538,6 +548,28 @@ class PlatformStore:
                     if isinstance(row, dict) and (not row.get("owner") or str(row.get("owner")) == username):
                         total += file_size(row.get("preview_path") or row.get("path"))
                         total += file_size(row.get("thumbnail_path"))
+        return total
+
+    def remote_total_usage_bytes(self) -> int:
+        webui = self.config.get("webui", {}) if isinstance(self.config.get("webui"), dict) else {}
+        upload_root = Path(str(webui.get("upload_dir") or Path(self.config["output_dir"]) / "uploads"))
+        preview_root = Path(str(webui.get("preview_dir") or Path(self.config["output_dir"]) / "previews"))
+        seen: set[str] = set()
+        total = 0
+        for root in [upload_root, preview_root]:
+            if not root.exists():
+                continue
+            for item in root.rglob("*"):
+                if not item.is_file():
+                    continue
+                try:
+                    key = str(item.resolve()).lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    total += item.stat().st_size
+                except OSError:
+                    continue
         return total
 
     def local_usage_bytes(self) -> tuple[int, str]:
