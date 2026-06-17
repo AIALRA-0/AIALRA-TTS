@@ -10,6 +10,7 @@ const state = {
   uploadPolicy: null,
   selectedJob: null,
   jobTimer: null,
+  metricsTimer: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -48,6 +49,7 @@ async function api(path, options = {}) {
 }
 
 function showLogin() {
+  stopLiveTimers();
   $("loginView").hidden = false;
   $("appView").hidden = true;
 }
@@ -165,10 +167,31 @@ async function refreshAll() {
     console.warn("Partial refresh failed:", failed.map((item) => item.reason));
     toast(`部分数据刷新失败：${failed[0].reason?.message || failed[0].reason}`);
   }
+  startLiveTimers();
+}
+
+function startLiveTimers() {
+  if ($("appView").hidden) return;
   if (!state.jobTimer) {
     state.jobTimer = setInterval(() => {
       refreshJobs().catch((error) => console.warn("Job refresh failed:", error));
     }, 5000);
+  }
+  if (!state.metricsTimer) {
+    state.metricsTimer = setInterval(() => {
+      loadMetrics().catch((error) => console.warn("Metrics refresh failed:", error));
+    }, 5000);
+  }
+}
+
+function stopLiveTimers() {
+  if (state.jobTimer) {
+    clearInterval(state.jobTimer);
+    state.jobTimer = null;
+  }
+  if (state.metricsTimer) {
+    clearInterval(state.metricsTimer);
+    state.metricsTimer = null;
   }
 }
 
@@ -179,15 +202,7 @@ async function loadDashboard() {
   $("metricReports").textContent = data.report_count;
   $("metricTts").textContent = data.tts.backend || "-";
   $("metricLlm").textContent = data.llm.available ? data.llm.model : "未连接";
-  const gpu = (data.metrics?.gpu || [])[0] || {};
-  $("metricGpu").textContent = gpu.available ? `${Math.round(gpu.util_percent)}% / ${Math.round(gpu.memory_used_percent)}%` : "未检测";
-  $("metricQuota").textContent = data.quota
-    ? `远端 ${formatBytes(data.quota.remote_used_bytes || 0)} / ${formatBytes(data.quota.remote_quota_bytes || 0)} · 本地 ${formatBytes(data.quota.local_used_bytes || 0)} / ${formatBytes(data.quota.local_quota_bytes || 0)}`
-    : "-";
-  const workerMetric = $("metricWorker");
-  workerMetric.textContent = workerLabel(data.worker);
-  workerMetric.title = data.worker?.message || "";
-  $("metricDisk").textContent = data.metrics?.disk ? `${Math.round(data.metrics.disk.used_percent)}%` : "-";
+  renderRuntimeMetrics(data);
   state.uploadPolicy = data.upload_policy || null;
   renderUploadPolicy();
   state.capabilities = data.capabilities || null;
@@ -198,6 +213,43 @@ async function loadDashboard() {
   renderProjects();
   state.reports = data.latest_reports || [];
   renderReports();
+}
+
+async function loadMetrics() {
+  const data = await api("/api/metrics");
+  renderRuntimeMetrics(data);
+}
+
+function renderRuntimeMetrics(data) {
+  const metrics = data.metrics || {};
+  const gpu = (metrics.gpu || [])[0] || {};
+  const gpuMetric = $("metricGpu");
+  if (gpuMetric) {
+    gpuMetric.textContent = gpu.available ? `${percentText(gpu.util_percent)} / ${percentText(gpu.memory_used_percent)}` : "未检测";
+    gpuMetric.title = gpu.name || gpu.error || "";
+  }
+  const cpuMetric = $("metricCpu");
+  if (cpuMetric) cpuMetric.textContent = percentText(metrics.cpu?.load_percent);
+  const memoryMetric = $("metricMemory");
+  if (memoryMetric) memoryMetric.textContent = percentText(metrics.memory?.used_percent);
+  const quotaMetric = $("metricQuota");
+  if (quotaMetric) {
+    quotaMetric.textContent = data.quota
+      ? `远端 ${formatBytes(data.quota.remote_used_bytes || 0)} / ${formatBytes(data.quota.remote_quota_bytes || 0)} · 本地 ${formatBytes(data.quota.local_used_bytes || 0)} / ${formatBytes(data.quota.local_quota_bytes || 0)}`
+      : "-";
+  }
+  const workerMetric = $("metricWorker");
+  if (workerMetric) {
+    workerMetric.textContent = workerLabel(data.worker);
+    workerMetric.title = data.worker?.message || "";
+  }
+  const diskMetric = $("metricDisk");
+  if (diskMetric) diskMetric.textContent = metrics.disk ? percentText(metrics.disk.used_percent) : "-";
+}
+
+function percentText(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? `${Math.round(n)}%` : "-";
 }
 
 function workerLabel(worker) {

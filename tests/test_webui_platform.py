@@ -397,6 +397,48 @@ def test_worker_status_update_refreshes_heartbeat_and_job_progress(tmp_path):
     assert response.json()["quota"]["local_used_bytes"] == 12345
 
 
+def test_metrics_endpoint_returns_live_worker_metrics_without_paths(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    response = client.post(
+        "/api/worker/heartbeat",
+        headers={"x-worker-token": "worker-token"},
+        json={
+            "worker_id": "worker-1",
+            "metrics": {
+                "cpu": {"load_percent": 42},
+                "memory": {"used_percent": 38},
+                "gpu": [{"available": True, "util_percent": 71, "memory_used_percent": 33, "name": "RTX"}],
+                "disk": {"path": r"C:\private\worker-output", "used_percent": 61},
+                "local_storage": {"managed_bytes": 54321, "total_reported_bytes": 54321, "roots": []},
+            },
+        },
+    )
+    assert response.status_code == 200
+
+    response = client.get("/api/metrics")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["worker"]["heartbeat_online"] is True
+    assert body["metrics"]["source"] == "worker_heartbeat"
+    assert body["metrics"]["cpu"]["load_percent"] == 42
+    assert body["metrics"]["memory"]["used_percent"] == 38
+    assert body["metrics"]["gpu"][0]["util_percent"] == 71
+    assert body["quota"]["local_used_bytes"] == 54321
+    assert "path" not in json.dumps(body).lower()
+    assert "private" not in json.dumps(body).lower()
+
+
 def test_capabilities_prefer_online_worker_heartbeat(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
