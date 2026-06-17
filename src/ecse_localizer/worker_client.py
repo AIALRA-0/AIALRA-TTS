@@ -112,7 +112,7 @@ def run_worker_job(
         returncode = proc.wait()
         log.flush()
     result = extract_json_result(log_path)
-    status = "passed" if returncode == 0 else "failed"
+    status = "done" if returncode == 0 else "failed"
     payload = {
         "status": status,
         "returncode": returncode,

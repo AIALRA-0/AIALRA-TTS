@@ -43,6 +43,8 @@ from .utils import PROJECT_ROOT, ensure_dir, now_id, read_json, slugify, write_j
 ALLOWED_UPLOAD_SUFFIXES = VIDEO_SUFFIXES | {".srt", ".vtt", ".ass", ".wav", ".mp3", ".m4a"}
 COOKIE_NAME = "ecse_webui_session"
 TOKEN_TTL_SECONDS = 12 * 60 * 60
+ACTIVE_JOB_STATUSES = {"queued", "claimed", "running", "retrying", "paused"}
+TERMINAL_JOB_STATUSES = {"done", "passed", "failed", "cancelled"}
 TUNABLE_FIELDS: dict[str, dict[str, Any]] = {
     "audio.enhance": {"label": "音频增强", "type": "bool"},
     "llm.temperature": {"label": "LLM temperature", "type": "float", "min": 0, "max": 1},
@@ -451,7 +453,30 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, text=True)
             update_job(state, job_id, {"status": "cancelled", "ended_at": iso_now(), "returncode": -9})
             return {"ok": True}
+        if record.get("dispatch_target") == "worker" and record.get("status") in {"queued", "retrying"}:
+            update_job(state, job_id, {"status": "cancelled", "ended_at": iso_now(), "returncode": -9, "updated_at": iso_now()})
+            return {"ok": True}
         return {"ok": False, "message": "Job is not running in this WebUI process"}
+
+    @app.post("/api/jobs/{job_id}/retry")
+    def retry_job(job_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
+        record = read_job(state, job_id)
+        if not record or not can_access_record(state, user, record):
+            raise HTTPException(status_code=404, detail="Job not found")
+        record = retry_job_record(state, job_id)
+        if record.get("dispatch_target") == "worker":
+            return {"ok": True, "job": record}
+        thread = threading.Thread(target=run_job, args=(state, record["id"]), daemon=True)
+        thread.start()
+        return {"ok": True, "job": record}
+
+    @app.delete("/api/jobs/{job_id}")
+    def delete_job(job_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
+        record = read_job(state, job_id)
+        if not record or not can_access_record(state, user, record):
+            raise HTTPException(status_code=404, detail="Job not found")
+        deleted = soft_delete_job(state, job_id, deleted_by=user)
+        return {"ok": True, "job": deleted}
 
     return app
 
@@ -580,14 +605,16 @@ def claim_worker_job(state: WebState, worker_id: str) -> dict[str, Any] | None:
 
 
 def worker_status_changes(body: dict[str, Any]) -> dict[str, Any]:
-    allowed = {"queued", "claimed", "running", "retrying", "passed", "failed", "cancelled"}
+    allowed = {"queued", "claimed", "running", "paused", "retrying", "done", "passed", "failed", "cancelled", "deleted"}
     status = str(body.get("status") or "").lower()
     if status not in allowed:
         raise HTTPException(status_code=400, detail=f"Unsupported worker job status: {status}")
+    if status == "passed":
+        status = "done"
     changes: dict[str, Any] = {"status": status, "updated_at": iso_now()}
     if status == "running":
         changes.setdefault("started_at", iso_now())
-    if status in {"passed", "failed", "cancelled"}:
+    if status in {"done", "failed", "cancelled", "deleted"}:
         changes["ended_at"] = iso_now()
     for key in ["returncode", "pid", "progress", "error", "log_tail", "result", "result_report", "result_video"]:
         if key in body:
@@ -850,7 +877,7 @@ def run_job(state: WebState, job_id: str) -> None:
             log.flush()
             result_payload = extract_job_result_from_log(log_path)
             changes = {
-                "status": "passed" if returncode == 0 else "failed",
+                "status": "done" if returncode == 0 else "failed",
                 "ended_at": iso_now(),
                 "returncode": returncode,
             }
@@ -890,17 +917,74 @@ def update_job(state: WebState, job_id: str, changes: dict[str, Any]) -> None:
         write_json(path, record)
 
 
-def list_jobs(state: WebState, user: str | None = None) -> list[dict[str, Any]]:
+def list_jobs(state: WebState, user: str | None = None, *, include_deleted: bool = False) -> list[dict[str, Any]]:
     records = []
     for path in sorted(state.job_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             record = read_json(path)
+            if not include_deleted and record.get("status") == "deleted":
+                continue
             if user and not can_access_record(state, user, record):
                 continue
             records.append(record)
         except Exception:
             continue
     return records
+
+
+def retry_job_record(state: WebState, job_id: str) -> dict[str, Any]:
+    record = read_job(state, job_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Job not found")
+    status = str(record.get("status") or "")
+    if status in ACTIVE_JOB_STATUSES:
+        raise HTTPException(status_code=409, detail=f"Job is already active: {status}")
+    if status == "deleted":
+        raise HTTPException(status_code=409, detail="Deleted jobs cannot be retried")
+    if status not in TERMINAL_JOB_STATUSES:
+        raise HTTPException(status_code=409, detail=f"Job cannot be retried from status: {status}")
+    retry_count = int(record.get("retry_count") or 0) + 1
+    log_path = state.job_dir / f"{safe_job_id(job_id)}_retry{retry_count}.log"
+    changes = {
+        "status": "retrying",
+        "retry_count": retry_count,
+        "previous_status": status,
+        "started_at": None,
+        "ended_at": None,
+        "returncode": None,
+        "pid": None,
+        "error": None,
+        "log": str(log_path),
+        "updated_at": iso_now(),
+    }
+    update_job(state, job_id, changes)
+    return read_job(state, job_id) or record
+
+
+def soft_delete_job(state: WebState, job_id: str, *, deleted_by: str) -> dict[str, Any]:
+    record = read_job(state, job_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Job not found")
+    status = str(record.get("status") or "")
+    with state.lock:
+        proc = state.processes.get(job_id)
+    if proc and proc.poll() is None:
+        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, text=True)
+    elif status in {"running", "claimed"}:
+        raise HTTPException(status_code=409, detail="Cancel the running worker job before deleting it")
+    update_job(
+        state,
+        job_id,
+        {
+            "status": "deleted",
+            "previous_status": status,
+            "deleted_at": iso_now(),
+            "deleted_by": deleted_by,
+            "ended_at": record.get("ended_at") or iso_now(),
+            "updated_at": iso_now(),
+        },
+    )
+    return read_job(state, job_id) or record
 
 
 def extract_job_result_from_log(log_path: Path) -> dict[str, Any] | None:

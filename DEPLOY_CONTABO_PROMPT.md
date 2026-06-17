@@ -69,6 +69,9 @@ Deployment steps:
    - GPU/CPU metrics update
    - worker offline status appears when the tunnel is stopped
    - users cannot see each other's jobs
+   - jobs move through `queued/claimed/running/retrying/done/failed/cancelled/deleted`
+   - failed jobs can be retried without rewriting the base config
+   - deleted jobs are soft-deleted from normal history before any physical artifact cleanup
    - a queued job can be claimed through `/api/worker/jobs/claim`
    - worker status updates through `/api/worker/jobs/{job_id}/status`
    - `/api/artifacts` lists only authorized artifacts

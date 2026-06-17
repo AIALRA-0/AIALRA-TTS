@@ -429,6 +429,28 @@ h2 {
   font-weight: 650;
 }
 
+.job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.job-actions button {
+  min-height: 30px;
+  padding: 6px 10px;
+}
+
+button.danger {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fecaca;
+}
+
+button.danger:hover {
+  background: #fecaca;
+}
+
 .job-meta {
   color: var(--muted);
   font-size: 12px;

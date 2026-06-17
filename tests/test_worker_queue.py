@@ -8,6 +8,10 @@ from ecse_localizer.webui import (
     claim_worker_job,
     command_with_config,
     create_job_record,
+    list_jobs,
+    retry_job_record,
+    soft_delete_job,
+    update_job,
     worker_args_from_command,
     worker_status_changes,
 )
@@ -89,9 +93,45 @@ def test_worker_status_changes_extracts_result_paths_as_fields():
             "result": {"pass": True, "report": "demo_report.json", "video": "demo.mp4"},
         }
     )
-    assert changes["status"] == "passed"
+    assert changes["status"] == "done"
     assert changes["result_report"] == "demo_report.json"
     assert changes["result_video"] == "demo.mp4"
+
+
+def test_soft_delete_job_hides_record_from_default_history(tmp_path):
+    state = WebState(write_config(tmp_path))
+    record = create_job_record(
+        state,
+        "audit",
+        "Audit input directory",
+        ["python", "-m", "ecse_localizer", "--config", "remote.yaml", "audit", "--input", "x"],
+        user="admin",
+        metadata={},
+    )
+    deleted = soft_delete_job(state, record["id"], deleted_by="admin")
+    assert deleted["status"] == "deleted"
+    assert list_jobs(state, "admin") == []
+    assert list_jobs(state, "admin", include_deleted=True)[0]["id"] == record["id"]
+
+
+def test_retry_worker_job_requeues_failed_record(tmp_path):
+    state = WebState(write_config(tmp_path))
+    record = create_job_record(
+        state,
+        "audit",
+        "Audit input directory",
+        ["python", "-m", "ecse_localizer", "--config", "remote.yaml", "audit", "--input", "x"],
+        user="admin",
+        metadata={"worker_args": ["audit", "--input", "x"]},
+        dispatch_target="worker",
+    )
+    update_job(state, record["id"], {"status": "failed", "returncode": 1})
+    retried = retry_job_record(state, record["id"])
+    assert retried["status"] == "retrying"
+    assert retried["retry_count"] == 1
+    claimed = claim_worker_job(state, "worker-1")
+    assert claimed["id"] == record["id"]
+    assert claimed["status"] == "claimed"
 
 
 def test_worker_client_helpers_redact_local_config():

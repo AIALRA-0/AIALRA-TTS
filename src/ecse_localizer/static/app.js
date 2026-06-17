@@ -553,12 +553,68 @@ function renderJobs() {
       </div>
       <div class="job-meta">${escapeHtml(job.created_at || "")} · ${escapeHtml(job.id)}</div>
       <div class="job-meta">${escapeHtml(job.user || "")} · ${escapeHtml(job.metadata?.project_id || "")} · ${escapeHtml(job.metadata?.quality_mode || "")}</div>
+      <div class="job-actions"></div>
     `;
+    const actions = item.querySelector(".job-actions");
+    if (canRetryJob(job.status)) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "secondary";
+      retry.textContent = "重试";
+      retry.addEventListener("click", (event) => {
+        event.stopPropagation();
+        retryJob(job.id);
+      });
+      actions.appendChild(retry);
+    }
+    if (job.status !== "deleted") {
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "danger";
+      del.textContent = "删除记录";
+      del.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deleteJob(job.id);
+      });
+      actions.appendChild(del);
+    }
     item.addEventListener("click", () => {
       state.selectedJob = job.id;
       loadJobLog(job.id);
     });
     list.appendChild(item);
+  }
+}
+
+function canRetryJob(status) {
+  return ["done", "passed", "failed", "cancelled"].includes(status);
+}
+
+async function retryJob(jobId) {
+  try {
+    const result = await api(`/api/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST", body: "{}" });
+    state.selectedJob = result.job.id;
+    toast("任务已重新进入队列");
+    await refreshJobs();
+    await loadJobLog(result.job.id, false);
+  } catch (error) {
+    toast(`重试失败：${error.message}`);
+  }
+}
+
+async function deleteJob(jobId) {
+  if (!confirm("删除任务记录？这会从历史列表隐藏该任务，但不会直接删除产物文件。")) return;
+  try {
+    await api(`/api/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" });
+    if (state.selectedJob === jobId) {
+      state.selectedJob = null;
+      $("selectedJobLine").textContent = "未选择任务";
+      $("jobLog").textContent = "";
+    }
+    toast("任务记录已软删除");
+    await refreshJobs();
+  } catch (error) {
+    toast(`删除失败：${error.message}`);
   }
 }
 
@@ -669,8 +725,8 @@ async function saveRawConfig() {
 }
 
 function statusClass(status) {
-  if (status === "passed") return "ok";
-  if (status === "failed" || status === "cancelled") return "bad";
+  if (status === "done" || status === "passed") return "ok";
+  if (status === "failed" || status === "cancelled" || status === "deleted") return "bad";
   return "warn";
 }
 
