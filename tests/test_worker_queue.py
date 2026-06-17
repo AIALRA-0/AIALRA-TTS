@@ -280,6 +280,31 @@ def test_worker_hmac_rejects_missing_nonce_in_strict_mode(tmp_path):
         raise AssertionError("expected strict HMAC mode to require nonce")
 
 
+def test_worker_hmac_or_token_respects_configured_nonce_requirement(tmp_path):
+    state = WebState(write_config(tmp_path))
+    state.webui["worker_auth_mode"] = "hmac_or_token"
+    state.webui["worker_require_nonce"] = True
+    body = canonical_json({"worker_id": "worker-1"}).encode("utf-8")
+    timestamp = str(int(time.time()))
+    headers = {
+        "x-worker-timestamp": timestamp,
+        "x-worker-signature": worker_signature(
+            "worker-token",
+            timestamp=timestamp,
+            method="POST",
+            path="/api/worker/heartbeat",
+            body=body,
+        ),
+    }
+
+    try:
+        require_worker_token(fake_worker_request(state, headers, path="/api/worker/heartbeat"), state, body)
+    except Exception as exc:
+        assert "nonce is required" in str(exc)
+    else:
+        raise AssertionError("expected configured nonce requirement to override compatibility mode")
+
+
 def test_worker_hmac_rejects_replayed_nonce(tmp_path):
     state = WebState(write_config(tmp_path))
     state.webui["worker_auth_mode"] = "hmac"
