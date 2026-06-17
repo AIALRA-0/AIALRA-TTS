@@ -146,6 +146,7 @@ function bindEvents() {
   $("userForm").addEventListener("submit", createUser);
   $("refreshArtifactsBtn").addEventListener("click", loadArtifacts);
   $("cleanupDryRunBtn").addEventListener("click", cleanupDryRun);
+  $("cleanupApplyBtn").addEventListener("click", cleanupApply);
   $("saveTuningBtn").addEventListener("click", saveTuning);
   $("reloadConfigBtn").addEventListener("click", loadRawConfig);
   $("saveConfigBtn").addEventListener("click", saveRawConfig);
@@ -915,11 +916,39 @@ async function requestArtifactCache(artifact) {
 async function cleanupDryRun() {
   try {
     const result = await api("/api/cleanup", { method: "POST", body: JSON.stringify({ dry_run: true, older_than_days: 7 }) });
-    const bytes = formatBytes(result.cleanup?.bytes || 0);
-    toast(`清理预估：${result.cleanup?.count || 0} 个文件，${bytes}`);
+    renderCleanupResult(result.cleanup);
+    toast(`清理预估：${result.cleanup?.count || 0} 个文件，${formatBytes(result.cleanup?.bytes || 0)}`);
   } catch (error) {
     toast(`清理预估失败：${error.message}`);
   }
+}
+
+async function cleanupApply() {
+  const ok = window.confirm("执行受管理目录清理？只会删除过期缓存、运行中间文件和已软删除任务的产物，不会删除原始课程目录。");
+  if (!ok) return;
+  try {
+    const result = await api("/api/cleanup", { method: "POST", body: JSON.stringify({ dry_run: false, older_than_days: 7 }) });
+    renderCleanupResult(result.cleanup);
+    toast(`清理完成：${result.cleanup?.count || 0} 个文件，${formatBytes(result.cleanup?.bytes || 0)}`);
+    await loadArtifacts();
+    await loadDashboard();
+  } catch (error) {
+    toast(`执行清理失败：${error.message}`);
+  }
+}
+
+function renderCleanupResult(cleanup) {
+  const result = $("cleanupResult");
+  if (!result) return;
+  const items = (cleanup?.items || []).slice(0, 20).map((item) => {
+    const verb = item.dry_run ? "预估" : "删除";
+    const target = item.path || item.error || "";
+    return `${verb} · ${item.reason || "-"} · ${formatBytes(item.bytes || 0)} · ${target}`;
+  });
+  result.textContent = [
+    `${cleanup?.dry_run ? "清理预估" : "清理完成"}：${cleanup?.count || 0} 个文件，${formatBytes(cleanup?.bytes || 0)}`,
+    ...items,
+  ].join("\n");
 }
 
 function row(items, header = false) {

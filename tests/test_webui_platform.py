@@ -172,6 +172,35 @@ def test_webui_admin_can_update_user_quota_and_disable(tmp_path):
     assert response.status_code == 400
 
 
+def test_cleanup_endpoint_is_admin_only(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    app = create_app(write_config(tmp_path))
+    admin = TestClient(app)
+
+    response = admin.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+
+    response = admin.post(
+        "/api/users",
+        json={"username": "student.one", "password": "long-enough-password", "quota_local_gb": 1, "quota_remote_gb": 1},
+    )
+    assert response.status_code == 200
+
+    student = TestClient(app)
+    response = student.post("/api/login", json={"username": "student.one", "password": "long-enough-password"})
+    assert response.status_code == 200
+
+    response = student.post("/api/cleanup", json={"dry_run": False, "older_than_days": 7})
+    assert response.status_code == 403
+
+    response = admin.post("/api/cleanup", json={"dry_run": True, "older_than_days": 7})
+    assert response.status_code == 200
+    cleanup = response.json()["cleanup"]
+    assert cleanup["dry_run"] is True
+    assert "items" in cleanup
+
+
 def test_upload_enforces_remote_quota(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
