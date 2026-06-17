@@ -18,6 +18,7 @@ from ecse_localizer.webui import (
     create_job_record,
     enforce_artifact_cache_request_limits,
     enforce_active_job_limits,
+    enforce_browser_upload_content_length_limit,
     enforce_worker_upload_content_length_limit,
     file_display_name,
     filter_job_records,
@@ -396,6 +397,34 @@ def test_browser_upload_policy_disables_remote_worker_queue_by_default(tmp_path)
 
     state.webui["allow_remote_media_uploads"] = True
     assert browser_upload_policy(state)["enabled"] is True
+
+
+def test_browser_upload_content_length_preflight_rejects_clear_quota_overrun(tmp_path):
+    config_path = write_config(tmp_path)
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    data["webui"]["default_remote_quota_gb"] = 0.000001
+    data["webui"]["upload_preflight_overhead_mb"] = 0
+    config_path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    state = WebState(config_path)
+
+    try:
+        enforce_browser_upload_content_length_limit({"content-length": str(2 * 1024 * 1024)}, state, "admin")
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 413
+        assert "Remote quota exceeded" in str(exc)
+    else:
+        raise AssertionError("expected browser upload preflight to reject clear quota overrun")
+
+
+def test_browser_upload_content_length_preflight_allows_multipart_overhead(tmp_path):
+    config_path = write_config(tmp_path)
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    data["webui"]["default_remote_quota_gb"] = 0.000001
+    data["webui"]["upload_preflight_overhead_mb"] = 1
+    config_path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    state = WebState(config_path)
+
+    enforce_browser_upload_content_length_limit({"Content-Length": str(1200)}, state, "admin")
 
 
 def fake_worker_request(state: WebState, headers: dict[str, str], *, path: str = "/api/worker/jobs/claim"):

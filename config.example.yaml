@@ -171,6 +171,7 @@ webui:
   job_dir: "C:/path/to/ECSE 4961/_localizer_project/runs/webui_jobs"
   platform_dir: "C:/path/to/ECSE 4961/_localizer_project/runs/platform"
   max_upload_mb: 20480
+  upload_preflight_overhead_mb: 4
   worker_preview_max_upload_mb: 256
   worker_artifact_cache_max_upload_mb: 2048
   global_remote_quota_gb: 50

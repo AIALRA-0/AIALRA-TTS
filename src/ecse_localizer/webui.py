@@ -144,6 +144,9 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     async def csrf_origin_guard(request: Request, call_next: Any) -> Response:
         if csrf_origin_check_required(request, state) and not csrf_origin_allowed(request, state):
             return JSONResponse({"detail": "CSRF origin check failed"}, status_code=403)
+        upload_rejection = preflight_browser_upload_request(request, state)
+        if upload_rejection:
+            return upload_rejection
         return await call_next(request)
 
     @app.get("/")
@@ -1234,6 +1237,53 @@ def upload_fits_quota(base_used_bytes: int, reserved_bytes: int, current_file_by
     if quota_bytes <= 0:
         return True
     return base_used_bytes + reserved_bytes + current_file_bytes <= quota_bytes
+
+
+def preflight_browser_upload_request(request: Request, state: WebState) -> JSONResponse | None:
+    if request.method.upper() != "POST" or request.url.path != "/api/upload":
+        return None
+    state.reload_config()
+    user = verify_session(request, state)
+    if not user:
+        return JSONResponse({"detail": "Login required"}, status_code=401)
+    policy = browser_upload_policy(state)
+    if not policy["enabled"]:
+        return JSONResponse({"detail": policy["message"]}, status_code=403)
+    try:
+        enforce_browser_upload_content_length_limit(request.headers, state, user)
+    except HTTPException as exc:
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    return None
+
+
+def enforce_browser_upload_content_length_limit(headers: Mapping[str, str], state: WebState, username: str) -> None:
+    raw = headers.get("content-length") or headers.get("Content-Length")
+    if raw is None or str(raw).strip() == "":
+        return
+    try:
+        content_length = int(str(raw).strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid Content-Length") from exc
+    if content_length < 0:
+        raise HTTPException(status_code=400, detail="Invalid Content-Length")
+    configured_overhead = state.webui.get("upload_preflight_overhead_mb", 4)
+    if configured_overhead is None:
+        configured_overhead = 4
+    try:
+        overhead_bytes = max(0, int(float(configured_overhead) * 1024 * 1024))
+    except (TypeError, ValueError):
+        overhead_bytes = 4 * 1024 * 1024
+    quota = state.store.quota_status(username)
+    quota_bytes = int(quota.get("remote_quota_bytes") or 0)
+    used = int(quota.get("remote_used_bytes") or 0)
+    if quota_bytes > 0 and content_length > max(0, quota_bytes - used) + overhead_bytes:
+        remaining = max(0, quota_bytes - used)
+        raise HTTPException(status_code=413, detail=f"Remote quota exceeded. Remaining bytes: {remaining}")
+    global_quota = int(quota.get("remote_global_quota_bytes") or 0)
+    global_used = int(quota.get("remote_global_used_bytes") or 0)
+    if global_quota > 0 and content_length > max(0, global_quota - global_used) + overhead_bytes:
+        remaining = max(0, global_quota - global_used)
+        raise HTTPException(status_code=413, detail=f"Global remote quota exceeded. Remaining bytes: {remaining}")
 
 
 def enforce_worker_upload_content_length_limit(
