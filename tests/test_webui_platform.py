@@ -109,7 +109,9 @@ def test_static_job_history_has_deleted_filter_and_restore_action():
 
     assert '<option value="deleted">deleted</option>' in html
     assert 'params.set("include_deleted", "true")' in js
+    assert "查看产物" in js
     assert "恢复记录" in js
+    assert "function viewJobArtifacts(job)" in js
     assert "async function restoreJob(jobId)" in js
     assert '`/api/jobs/${encodeURIComponent(jobId)}/restore`' in js
 
@@ -978,6 +980,18 @@ def test_artifacts_endpoint_filters_by_project_folder_job_and_kind(tmp_path):
     assert response.status_code == 200
     names = [row["name"] for row in response.json()["artifacts"]]
     assert names == ["other_zh_dub.mp4"]
+
+    response = client.get(f"/api/jobs/{course_job['id']}/artifacts")
+    assert response.status_code == 200
+    names = {row["name"] for row in response.json()["artifacts"]}
+    assert {"course_zh_dub.mp4", "course"}.issubset(names)
+
+    response = client.delete(f"/api/jobs/{course_job['id']}")
+    assert response.status_code == 200
+    response = client.get(f"/api/jobs/{course_job['id']}/artifacts")
+    assert response.status_code == 200
+    names = {row["name"] for row in response.json()["artifacts"]}
+    assert "course_zh_dub.mp4" in names
 
     response = client.get(f"/api/artifacts?project_id={course['id']}&folder_id=root")
     assert response.status_code == 200

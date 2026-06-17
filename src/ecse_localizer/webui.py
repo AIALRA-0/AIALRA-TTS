@@ -788,6 +788,18 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Job not found")
         return public_job_record(record)
 
+    @app.get("/api/jobs/{job_id}/artifacts")
+    def job_artifacts(job_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
+        record = read_job(state, job_id)
+        if not record or not can_access_record(state, user, record):
+            raise HTTPException(status_code=404, detail="Job not found")
+        state.reload_config()
+        rows = artifact_catalog(state.config, list_jobs(state, None, include_deleted=True))
+        rows = filter_artifacts_for_user(rows, user, admin=is_admin(state, user))
+        rows = filter_artifact_records(rows, job_id=job_id)
+        rows = with_signed_urls(rows[:300], secret=download_secret(state), username=user, ttl_seconds=int(state.webui.get("signed_url_ttl_seconds", 900)))
+        return {"job": public_job_record(record), "artifacts": rows, "quota": state.store.quota_status(user)}
+
     @app.get("/api/jobs/{job_id}/log")
     def job_log(job_id: str, lines: int = 240, user: str = Depends(require_user)) -> PlainTextResponse:
         record = read_job(state, job_id)

@@ -1484,6 +1484,15 @@ function renderJobs() {
       });
       actions.appendChild(retry);
     }
+    const artifacts = document.createElement("button");
+    artifacts.type = "button";
+    artifacts.className = "secondary";
+    artifacts.textContent = "查看产物";
+    artifacts.addEventListener("click", (event) => {
+      event.stopPropagation();
+      viewJobArtifacts(job);
+    });
+    actions.appendChild(artifacts);
     if (job.status === "deleted") {
       const restore = document.createElement("button");
       restore.type = "button";
@@ -1557,6 +1566,14 @@ function canCancelJob(job) {
 
 function jobStatusLabel(job) {
   return job.cancel_requested && ["claimed", "running", "paused"].includes(job.status) ? "取消中" : job.status;
+}
+
+function viewJobArtifacts(job) {
+  if ($("artifactFilterProject")) $("artifactFilterProject").value = "";
+  if ($("artifactFilterFolder")) $("artifactFilterFolder").value = "";
+  if ($("artifactFilterKind")) $("artifactFilterKind").value = "";
+  if ($("artifactFilterJob")) $("artifactFilterJob").value = job.id || "";
+  showTab("artifacts");
 }
 
 async function cancelJob(jobId) {
