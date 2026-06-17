@@ -1,4 +1,10 @@
-from ecse_localizer.tts import is_valid_tts_compression, local_compact_tts_text, normalize_tts_compression_candidate, preserves_numbers
+from ecse_localizer.tts import (
+    final_audio_filter_for_speaker,
+    is_valid_tts_compression,
+    local_compact_tts_text,
+    normalize_tts_compression_candidate,
+    preserves_numbers,
+)
 
 
 def test_local_tts_compression_preserves_numbers():
@@ -18,3 +24,26 @@ def test_non_chinese_tts_compression_keeps_spaces_and_validates():
     assert normalize_tts_compression_candidate("  Ajusta   el umbral a 25 mV.  ", config) == "Ajusta el umbral a 25 mV."
     assert is_valid_tts_compression(original, compressed, 48, config)
     assert not is_valid_tts_compression(original, "Ajusta el umbral antes de medir.", 48, config)
+
+
+def test_final_audio_filter_fallback_normalizes_loudness_and_brightness():
+    audio_filter = final_audio_filter_for_speaker({}, {"gender": "unknown"})
+
+    assert "loudnorm=I=-16" in audio_filter
+    assert "alimiter=limit=0.98" in audio_filter
+    assert "equalizer=f=3000" in audio_filter
+    assert "highpass=f=100" in audio_filter
+
+
+def test_final_audio_filter_uses_gender_specific_overrides():
+    config = {
+        "tts": {
+            "final_audio_filter": "base-filter",
+            "final_audio_filter_male": "male-filter",
+            "final_audio_filter_female": "female-filter",
+        }
+    }
+
+    assert final_audio_filter_for_speaker(config, {"gender": "male"}) == "male-filter"
+    assert final_audio_filter_for_speaker(config, {"gender": "female"}) == "female-filter"
+    assert final_audio_filter_for_speaker(config, {"gender": "unknown"}) == "base-filter"

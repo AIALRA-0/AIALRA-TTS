@@ -645,7 +645,7 @@ def final_audio_filter_for_speaker(config: dict, speaker_info: dict[str, Any] | 
     return str(
         tts.get(
             "final_audio_filter",
-            "volume=0.90,highpass=f=90,lowpass=f=9500,equalizer=f=260:t=q:w=1.0:g=-2.5,equalizer=f=3200:t=q:w=1.0:g=3.0,equalizer=f=5200:t=q:w=1.0:g=1.5,acompressor=threshold=-18dB:ratio=2.0:attack=8:release=120,alimiter=limit=0.95",
+            "highpass=f=100,lowpass=f=9800,equalizer=f=240:t=q:w=1.0:g=-2.5,equalizer=f=3000:t=q:w=1.0:g=2.5,equalizer=f=5200:t=q:w=1.0:g=1.8,acompressor=threshold=-20dB:ratio=2.4:attack=5:release=100,loudnorm=I=-16:TP=-1.0:LRA=8,alimiter=limit=0.98",
         )
     )
 
