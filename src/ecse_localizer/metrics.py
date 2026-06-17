@@ -23,19 +23,99 @@ class MEMORYSTATUSEX(ctypes.Structure):
 
 def collect_system_metrics(config: dict[str, Any]) -> dict[str, Any]:
     output_dir = Path(config.get("output_dir", "."))
-    disk = shutil.disk_usage(output_dir if output_dir.exists() else output_dir.parent)
+    disk = shutil.disk_usage(disk_usage_root(output_dir))
     return {
         "cpu": collect_cpu_metrics(),
         "memory": collect_memory_metrics(),
         "gpu": collect_gpu_metrics(),
         "disk": {
-            "path": str(output_dir),
+            "scope": "output_volume",
             "total_bytes": disk.total,
             "used_bytes": disk.used,
             "free_bytes": disk.free,
             "used_percent": round((disk.used / disk.total) * 100, 2) if disk.total else 0,
         },
+        "local_storage": collect_local_storage_metrics(config),
     }
+
+
+def disk_usage_root(path: Path) -> Path:
+    current = path
+    while not current.exists() and current.parent != current:
+        current = current.parent
+    return current if current.exists() else Path(".")
+
+
+def collect_local_storage_metrics(config: dict[str, Any]) -> dict[str, Any]:
+    worker_cfg = config.get("worker", {}) if isinstance(config.get("worker"), dict) else {}
+    include_input = bool(worker_cfg.get("report_input_storage_usage", False))
+    max_files = max(1000, int(worker_cfg.get("local_storage_scan_max_files", 250000) or 250000))
+    roots = []
+    if config.get("output_dir"):
+        roots.append(("output", Path(config["output_dir"])))
+    if config.get("work_dir"):
+        roots.append(("work", Path(config["work_dir"])))
+    if include_input and config.get("input_dir"):
+        roots.insert(0, ("input", Path(config.get("input_dir", "."))))
+    rows: list[dict[str, Any]] = []
+    remaining_files = max_files
+    for label, root in roots:
+        if not root.exists():
+            rows.append({"label": label, "exists": False, "bytes": 0, "file_count": 0, "partial": False})
+            continue
+        usage = directory_usage_limited(root, remaining_files)
+        remaining_files = max(0, remaining_files - int(usage["file_count"]))
+        rows.append({"label": label, "exists": True, **usage})
+    managed_bytes = sum(int(row.get("bytes", 0) or 0) for row in rows if row.get("label") != "input")
+    total_bytes = sum(int(row.get("bytes", 0) or 0) for row in rows)
+    return {
+        "managed_bytes": managed_bytes,
+        "total_reported_bytes": total_bytes,
+        "roots": rows,
+        "input_included": include_input,
+        "scan_max_files": max_files,
+        "partial": any(bool(row.get("partial")) for row in rows),
+    }
+
+
+def directory_usage_limited(root: Path, max_files: int) -> dict[str, Any]:
+    total = 0
+    count = 0
+    partial = False
+    try:
+        for child in root.rglob("*"):
+            if not child.is_file():
+                continue
+            if count >= max_files:
+                partial = True
+                break
+            try:
+                total += child.stat().st_size
+                count += 1
+            except OSError:
+                partial = True
+    except OSError:
+        partial = True
+    return {"bytes": total, "file_count": count, "partial": partial}
+
+
+def sanitize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+    """Remove filesystem paths from metrics before storing/sending remotely."""
+    if not isinstance(metrics, dict):
+        return {}
+    return sanitize_metric_value(metrics)
+
+
+def sanitize_metric_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): sanitize_metric_value(item)
+            for key, item in value.items()
+            if str(key).lower() not in {"path", "input_dir", "output_dir", "work_dir"}
+        }
+    if isinstance(value, list):
+        return [sanitize_metric_value(item) for item in value]
+    return value
 
 
 def collect_cpu_metrics() -> dict[str, Any]:

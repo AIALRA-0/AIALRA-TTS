@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from .metrics import sanitize_metrics
 from .utils import PROJECT_ROOT, ensure_dir, read_json, write_json
 
 
@@ -348,12 +349,14 @@ class PlatformStore:
         local_quota = int(user.get("quota_local_bytes") or gb_to_bytes(500))
         remote_quota = int(user.get("quota_remote_bytes") or gb_to_bytes(10))
         remote_used = self.remote_usage_bytes(username)
+        local_used, local_source = self.local_usage_bytes()
         return {
             "user": username,
-            "local_used_bytes": 0,
+            "local_used_bytes": local_used,
             "local_quota_bytes": local_quota,
-            "local_remaining_bytes": local_quota,
-            "local_percent": 0,
+            "local_remaining_bytes": max(0, local_quota - local_used),
+            "local_percent": round((local_used / local_quota) * 100, 2) if local_quota else 0,
+            "local_usage_source": local_source,
             "remote_used_bytes": remote_used,
             "remote_quota_bytes": remote_quota,
             "remote_remaining_bytes": max(0, remote_quota - remote_used),
@@ -381,6 +384,24 @@ class PlatformStore:
                         total += file_size(row.get("thumbnail_path"))
         return total
 
+    def local_usage_bytes(self) -> tuple[int, str]:
+        metrics = self.worker_status(offline_after_seconds=int(self.config.get("webui", {}).get("worker_offline_after_seconds", 45) or 45)).get("metrics", {})
+        if isinstance(metrics, dict):
+            local_storage = metrics.get("local_storage")
+            if isinstance(local_storage, dict):
+                managed = local_storage.get("managed_bytes")
+                if isinstance(managed, (int, float)) and managed >= 0:
+                    return int(managed), "worker_heartbeat"
+        webui = self.config.get("webui", {}) if isinstance(self.config.get("webui"), dict) else {}
+        if str(webui.get("execution_mode", "local_subprocess")) == "worker_queue":
+            return 0, "worker_heartbeat_unavailable"
+        total = 0
+        for key in ["output_dir", "work_dir"]:
+            value = self.config.get(key)
+            if value:
+                total += directory_size(Path(str(value)))
+        return total, "local_filesystem"
+
     def default_project_quota_gb(self) -> float:
         web = self.config.get("webui", {})
         return float(web.get("default_project_quota_gb", web.get("default_local_quota_gb", 500)) or 500)
@@ -391,7 +412,7 @@ class PlatformStore:
             "worker_id": str(payload.get("worker_id") or "local-windows-worker"),
             "version": str(payload.get("version") or ""),
             "message": str(payload.get("message") or ""),
-            "metrics": payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {},
+            "metrics": sanitize_metrics(payload.get("metrics")) if isinstance(payload.get("metrics"), dict) else {},
             "updated_at": iso_now(),
             "updated_at_epoch": int(time.time()),
         }

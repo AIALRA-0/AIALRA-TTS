@@ -64,7 +64,8 @@ Deployment steps:
      ```
    - queued job metadata for source language, target subtitle language, TTS language, quality mode, and style is applied on the Windows worker through a generated local job config under `runs/worker_job_configs`.
    - if the Windows worker heartbeat is missing or stale, new jobs must stay `queued` and the UI must show that they are waiting for the local worker, not that GPU processing has already started.
-   - during long jobs, the worker posts `running` status updates with best-effort progress, GPU/CPU/disk metrics, and a short log tail; do not require Contabo to read Windows log files directly.
+   - during long jobs, the worker posts `running` status updates with best-effort progress, GPU/CPU/disk metrics, local managed-storage byte counts, and a short log tail; do not require Contabo to read Windows log files directly.
+   - worker metrics must be sanitized before storage/display; do not expose Windows filesystem paths in dashboard, quota, job, artifact, or heartbeat responses.
    - if a claimed/running worker job becomes stale, the WebUI should move it to `retrying` so the restored Windows worker can claim it again; after the configured retry cap, it should become `failed`.
    - after successful jobs, the worker may upload a low-bitrate MP4 preview and JPG thumbnail to `/api/worker/jobs/{job_id}/preview`; this endpoint must require HMAC signatures, enforce `webui.worker_preview_max_upload_mb`, count files against `remote_quota_bytes`, and never store Windows source paths in the manifest.
    - after successful jobs, the worker registers opaque full-output artifact refs; users request full downloads by queuing an `upload_artifact_cache` worker action, and the worker uploads only that selected file to `/api/worker/jobs/{job_id}/artifact-cache` as temporary remote cache.
@@ -90,6 +91,7 @@ Deployment steps:
    - unsigned worker requests are rejected when `worker_auth_mode=hmac`
    - job submission while the worker is offline shows a queued/waiting state and records the worker status at submit time
    - GPU/CPU metrics update
+   - dashboard metrics in `worker_queue` mode come from the Windows worker heartbeat and contain no Windows path fields
    - worker offline status appears when the tunnel is stopped
    - users cannot see each other's jobs
    - jobs move through `queued/claimed/running/retrying/done/failed/cancelled/deleted`

@@ -274,7 +274,11 @@ def test_worker_log_endpoint_returns_remote_log_tail_when_file_missing(tmp_path)
 def test_worker_status_update_refreshes_heartbeat_and_job_progress(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
-    app = create_app(write_config(tmp_path))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
     state = app.state.web
     client = TestClient(app)
 
@@ -298,7 +302,11 @@ def test_worker_status_update_refreshes_heartbeat_and_job_progress(tmp_path):
             "worker_id": "worker-1",
             "progress": 33,
             "log_tail": "overall progress: 33%",
-            "metrics": {"gpu": [{"available": True, "util_percent": 50}]},
+            "metrics": {
+                "gpu": [{"available": True, "util_percent": 50, "memory_used_percent": 25}],
+                "disk": {"path": r"C:\private\worker-output", "used_percent": 61},
+                "local_storage": {"managed_bytes": 12345, "total_reported_bytes": 12345, "roots": []},
+            },
         },
     )
     assert response.status_code == 200
@@ -313,6 +321,10 @@ def test_worker_status_update_refreshes_heartbeat_and_job_progress(tmp_path):
     assert worker["status"] == "online"
     assert worker["worker_id"] == "worker-1"
     assert worker["heartbeat_online"] is True
+    assert "path" not in worker["metrics"]["disk"]
+    assert response.json()["metrics"]["source"] == "worker_heartbeat"
+    assert response.json()["metrics"]["gpu"][0]["util_percent"] == 50
+    assert response.json()["quota"]["local_used_bytes"] == 12345
 
 
 def test_worker_preview_upload_registers_manifest_and_artifact(tmp_path):

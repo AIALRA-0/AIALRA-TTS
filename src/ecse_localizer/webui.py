@@ -37,7 +37,7 @@ from .capabilities import language_capabilities
 from .config import load_config, privacy_guard, save_config
 from .job_config import write_job_config
 from .llm_local import LocalLLMClient
-from .metrics import collect_system_metrics
+from .metrics import collect_system_metrics, sanitize_metrics
 from .platform_store import PlatformStore
 from .scan import VIDEO_SUFFIXES, find_videos
 from .tts import tts_health
@@ -186,6 +186,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         videos = list_video_records(state.config, state.store.user_upload_dir(user))
         llm = LocalLLMClient(state.config).status()
         tts = tts_health(state.config)
+        worker = worker_status_payload(state)
         return {
             "input_dir": state.config["input_dir"],
             "output_dir": state.config["output_dir"],
@@ -200,8 +201,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             "capabilities": language_capabilities(state.config, llm_status=llm, tts_status=tts),
             "quota": state.store.quota_status(user),
             "projects": state.store.list_projects(user, admin=is_admin(state, user)),
-            "worker": worker_status_payload(state),
-            "metrics": collect_system_metrics(state.config),
+            "worker": worker,
+            "metrics": dashboard_metrics(state, worker),
         }
 
     @app.get("/api/videos")
@@ -462,7 +463,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.get("/api/metrics")
     def metrics(user: str = Depends(require_user)) -> dict[str, Any]:
-        return {"metrics": collect_system_metrics(state.config), "worker": worker_status_payload(state), "quota": state.store.quota_status(user)}
+        worker = worker_status_payload(state)
+        return {"metrics": dashboard_metrics(state, worker), "worker": worker, "quota": state.store.quota_status(user)}
 
     @app.get("/api/users")
     def users(user: str = Depends(require_user)) -> dict[str, Any]:
@@ -1354,6 +1356,28 @@ def worker_status_payload(state: WebState) -> dict[str, Any]:
         }
     )
     return row
+
+
+def dashboard_metrics(state: WebState, worker: dict[str, Any] | None = None) -> dict[str, Any]:
+    execution_mode = str(state.webui.get("execution_mode", "local_subprocess") or "local_subprocess")
+    if execution_mode == "worker_queue":
+        worker = worker or worker_status_payload(state)
+        metrics = worker.get("metrics") if isinstance(worker, dict) else {}
+        if isinstance(metrics, dict) and metrics:
+            out = sanitize_metrics(metrics)
+            out["source"] = "worker_heartbeat" if worker.get("heartbeat_online") else "worker_heartbeat_stale"
+            return out
+        return {
+            "source": "worker_unavailable",
+            "cpu": {},
+            "memory": {},
+            "gpu": [{"available": False, "error": "No worker heartbeat metrics"}],
+            "disk": {},
+            "local_storage": {"managed_bytes": 0, "total_reported_bytes": 0, "roots": [], "partial": False},
+        }
+    out = sanitize_metrics(collect_system_metrics(state.config))
+    out["source"] = "webui_host"
+    return out
 
 
 def worker_args_from_command(command: list[str]) -> list[str]:
