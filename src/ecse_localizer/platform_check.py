@@ -10,6 +10,7 @@ from .capabilities import language_capabilities
 from .deploy_check import check_deploy_config
 from .llm_local import LocalLLMClient
 from .metrics import collect_system_metrics
+from .platform_store import safe_worker_id
 from .release_check import run_release_check
 from .remote_smoke import run_remote_smoke
 from .translation_sample import write_translation_quality_sample
@@ -65,7 +66,7 @@ def build_worker_health_payload(config: dict[str, Any], *, worker_id: str = "loc
     tts = tts_health(config)
     llm = local_llm_status(config)
     return {
-        "worker_id": worker_id,
+        "worker_id": safe_worker_id(worker_id),
         "version": __version__,
         "max_concurrent_jobs": worker_concurrency(config),
         "privacy": config.get("privacy", {}),

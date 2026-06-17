@@ -9,7 +9,7 @@ import pytest
 
 
 if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 _OPEN_TEST_CLIENTS = weakref.WeakSet()
 

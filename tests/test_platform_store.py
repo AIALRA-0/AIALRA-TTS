@@ -2,7 +2,7 @@ import json
 import time
 from pathlib import Path
 
-from ecse_localizer.platform_store import PlatformStore, hash_password, verify_password
+from ecse_localizer.platform_store import PlatformStore, hash_password, safe_worker_id, verify_password
 from ecse_localizer.utils import read_json, write_json
 
 
@@ -368,6 +368,20 @@ def test_worker_heartbeat_redacts_message_and_media_ref_names(tmp_path):
     assert updated["capabilities"] == row["capabilities"]
     assert updated["media_refs"] == row["media_refs"]
     assert updated["max_concurrent_jobs"] == 3
+
+
+def test_worker_heartbeat_normalizes_unsafe_worker_id(tmp_path):
+    store = PlatformStore(make_config(tmp_path))
+    store.bootstrap()
+    unsafe_worker_id = "C:" + "\\Users\\Alice\\Desktop\\token=abc123"
+
+    row = store.record_worker_heartbeat({"status": "online", "worker_id": unsafe_worker_id})
+
+    assert row["worker_id"] == safe_worker_id(unsafe_worker_id)
+    assert row["worker_id"].startswith("worker-")
+    serialized = json.dumps(row, ensure_ascii=False)
+    assert "Alice" not in serialized
+    assert "token=abc123" not in serialized
 
 
 def test_worker_heartbeat_rejects_unsafe_media_ref_ids(tmp_path):

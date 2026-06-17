@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .platform_store import safe_worker_id
+
 
 Finding = dict[str, str]
 
@@ -58,7 +60,7 @@ def assess_worker_health(
         "pass": errors == 0,
         "errors": errors,
         "warnings": warnings,
-        "worker_id": str(payload.get("worker_id") or ""),
+        "worker_id": safe_worker_id(payload.get("worker_id"), default=""),
         "version": str(payload.get("version") or ""),
         "remote": {"checked": remote_checked, "ok": bool(remote_ok) if remote_checked else None},
         "findings": findings,

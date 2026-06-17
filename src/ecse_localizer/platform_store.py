@@ -665,7 +665,7 @@ class PlatformStore:
         max_concurrent_jobs = worker_max_concurrent_jobs(payload, previous if isinstance(previous, dict) else {})
         row = {
             "status": str(payload.get("status") or "online"),
-            "worker_id": str(payload.get("worker_id") or "local-windows-worker"),
+            "worker_id": safe_worker_id(payload.get("worker_id")),
             "version": str(payload.get("version") or ""),
             "max_concurrent_jobs": max_concurrent_jobs,
             "message": sanitize_remote_text(payload.get("message") or ""),
@@ -794,6 +794,16 @@ def sanitize_worker_media_refs(value: Any) -> list[dict[str, Any]]:
 def safe_worker_ref_id(value: Any) -> str:
     text = str(value or "").strip()[:80]
     return text if re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", text) else ""
+
+
+def safe_worker_id(value: Any, *, default: str = "local-windows-worker") -> str:
+    text = str(value or "").strip()
+    if re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", text):
+        return text
+    if not text:
+        return default
+    digest = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:16]
+    return f"worker-{digest}"
 
 
 def safe_worker_media_name(value: Any) -> str:

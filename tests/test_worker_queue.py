@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from ecse_localizer.redaction import is_remote_safe_reference, sanitize_remote_command
+from ecse_localizer.platform_store import safe_worker_id
 from ecse_localizer.webui import (
     WebState,
     active_job_counts,
@@ -114,6 +115,13 @@ def test_worker_slot_id_is_stable_for_parallel_claims():
     assert worker_slot_id("worker-main", 0, 1) == "worker-main"
     assert worker_slot_id("worker-main", 0, 3) == "worker-main-1"
     assert worker_slot_id("worker-main", 2, 3) == "worker-main-3"
+
+
+def test_worker_slot_id_normalizes_unsafe_base_id():
+    unsafe_worker_id = "C:" + "\\Users\\Alice\\Desktop\\token=abc123"
+
+    assert worker_slot_id(unsafe_worker_id, 0, 1) == safe_worker_id(unsafe_worker_id)
+    assert worker_slot_id(unsafe_worker_id, 1, 3) == f"{safe_worker_id(unsafe_worker_id)}-2"
 
 
 def test_poll_concurrent_once_uses_per_slot_worker_ids(monkeypatch, tmp_path):
@@ -641,6 +649,26 @@ def test_claim_worker_job_marks_job_claimed(tmp_path):
     assert claimed["status"] == "claimed"
     assert claimed["claimed_by"] == "worker-1"
     assert claim_worker_job(state, "worker-1") is None
+
+
+def test_claim_worker_job_normalizes_unsafe_worker_id(tmp_path):
+    state = WebState(write_config(tmp_path))
+    create_job_record(
+        state,
+        "audit",
+        "Audit input directory",
+        ["python", "-m", "ecse_localizer", "audit"],
+        user="admin",
+        metadata={"worker_args": ["audit", "--input", "x"]},
+        dispatch_target="worker",
+    )
+    unsafe_worker_id = "C:" + "\\Users\\Alice\\Desktop\\token=abc123"
+
+    claimed = claim_worker_job(state, unsafe_worker_id)
+
+    assert claimed
+    assert claimed["claimed_by"] == safe_worker_id(unsafe_worker_id)
+    assert "Alice" not in json.dumps(claimed, ensure_ascii=False)
 
 
 def test_pause_and_resume_worker_queue_job(tmp_path):

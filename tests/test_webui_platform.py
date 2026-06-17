@@ -14,6 +14,7 @@ else:
     TESTCLIENT_IMPORT_ERROR = None
 
 from ecse_localizer.artifacts import artifact_catalog
+from ecse_localizer.platform_store import safe_worker_id
 from ecse_localizer.utils import read_json
 from ecse_localizer.webui import create_app, create_job_record, fields_from_config, list_all_video_records, read_job, resolve_video_reference, update_job
 from ecse_localizer.worker_client import worker_headers
@@ -1525,6 +1526,48 @@ def test_worker_queue_process_one_accepts_worker_ref_without_paths(tmp_path):
     assert payload["job"]["metadata"]["worker_args"] == ["process-one", "--video", "worker-ref:media123"]
     assert payload["job"]["title"] == "Process one: lecture.mp4"
     assert "worker-media" not in json.dumps(payload, ensure_ascii=False)
+
+
+def test_worker_queue_normalizes_unsafe_worker_id_across_claim_and_status(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    project = client.get("/api/projects").json()["projects"][0]
+    response = client.post(
+        "/api/jobs",
+        json={"type": "process_one", "video": "worker-ref:media123", "video_name": "lecture.mp4", "project_id": project["id"], "folder_id": "root"},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job"]["id"]
+    unsafe_worker_id = "C:" + "\\Users\\Alice\\Desktop\\token=abc123"
+    expected_worker_id = safe_worker_id(unsafe_worker_id)
+
+    response = client.post(
+        "/api/worker/jobs/claim",
+        headers={"x-worker-token": "worker-token"},
+        json={"worker_id": unsafe_worker_id},
+    )
+    assert response.status_code == 200
+    assert response.json()["job"]["claimed_by"] == expected_worker_id
+
+    response = client.post(
+        f"/api/worker/jobs/{job_id}/status",
+        headers={"x-worker-token": "worker-token"},
+        json={"status": "running", "worker_id": unsafe_worker_id, "progress": 50},
+    )
+    assert response.status_code == 200
+    rendered = json.dumps(response.json(), ensure_ascii=False)
+    assert "Alice" not in rendered
+    assert "token=abc123" not in rendered
+    assert response.json()["job"]["worker_id"] == expected_worker_id
 
 
 def test_worker_queue_process_one_rejects_unsafe_worker_ref(tmp_path):

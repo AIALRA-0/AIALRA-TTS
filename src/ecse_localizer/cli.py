@@ -24,7 +24,7 @@ from .glossary import GlossaryTerm, extract_from_title, extract_glossary, write_
 from .llm_local import LocalLLMClient
 from .metrics import collect_system_metrics
 from .mux import hardsub_video, mux_video
-from .platform_store import PlatformStore
+from .platform_store import PlatformStore, safe_worker_id
 from .platform_check import build_worker_health_payload, run_platform_check
 from .qa import run_qa
 from .repair import repair_from_fidelity
@@ -313,7 +313,7 @@ def build_worker_status_payload(config: dict[str, Any], *, worker_id: str = "loc
     llm = LocalLLMClient(config).status()
     tts = tts_health(config)
     return {
-        "worker_id": worker_id,
+        "worker_id": safe_worker_id(worker_id),
         "version": __version__,
         "max_concurrent_jobs": worker_concurrency(config),
         "privacy": config.get("privacy", {}),

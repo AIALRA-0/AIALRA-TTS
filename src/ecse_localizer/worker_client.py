@@ -23,6 +23,7 @@ from .config import load_config
 from .job_config import write_job_config
 from .llm_local import LocalLLMClient
 from .metrics import collect_system_metrics
+from .platform_store import safe_worker_id
 from .redaction import sanitize_remote_command, sanitize_remote_text
 from .scan import VIDEO_SUFFIXES, should_skip
 from .tts import tts_health
@@ -38,6 +39,7 @@ def poll_once(
     worker_id: str = "local-windows-worker",
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    worker_id = safe_worker_id(worker_id)
     job = claim_job(remote_base_url, worker_token, worker_id, config)
     if not job:
         return {"ok": True, "claimed": False}
@@ -60,6 +62,7 @@ def poll_concurrent_once(
     max_concurrent_jobs: int | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    worker_id = safe_worker_id(worker_id)
     max_jobs = worker_concurrency(config, max_concurrent_jobs)
     if dry_run or max_jobs <= 1:
         result = poll_once(
@@ -145,13 +148,14 @@ def worker_concurrency(config: dict[str, Any], override: int | None = None) -> i
 
 
 def worker_slot_id(worker_id: str, slot: int, max_jobs: int) -> str:
-    base = str(worker_id or "local-windows-worker")
+    base = safe_worker_id(worker_id)
     if max_jobs <= 1:
         return base
     return f"{base}-{slot + 1}"
 
 
 def claim_job(remote_base_url: str, worker_token: str, worker_id: str, config: dict[str, Any]) -> dict[str, Any] | None:
+    worker_id = safe_worker_id(worker_id)
     path = "/api/worker/jobs/claim"
     payload = {
         "worker_id": worker_id,
@@ -175,6 +179,8 @@ def claim_job(remote_base_url: str, worker_token: str, worker_id: str, config: d
 
 def post_worker_heartbeat(remote_base_url: str, worker_token: str, payload: dict[str, Any], *, timeout: int = 30) -> dict[str, Any]:
     path = "/api/worker/heartbeat"
+    payload = dict(payload)
+    payload["worker_id"] = safe_worker_id(payload.get("worker_id"))
     body = canonical_json(payload)
     response = requests.post(
         endpoint(remote_base_url, path),
@@ -195,6 +201,7 @@ def run_worker_job(
     *,
     worker_id: str,
 ) -> dict[str, Any]:
+    worker_id = safe_worker_id(worker_id)
     job_id = str(job["id"])
     args = resolve_worker_media_args(worker_args(job))
     if not args:
@@ -333,6 +340,7 @@ def run_upload_artifact_cache_job(
     *,
     worker_id: str,
 ) -> dict[str, Any]:
+    worker_id = safe_worker_id(worker_id)
     job_id = str(job["id"])
     config = load_config(config_path)
     metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
@@ -767,6 +775,7 @@ def upload_worker_preview(
     source_output_key: str,
     worker_id: str,
 ) -> dict[str, Any]:
+    worker_id = safe_worker_id(worker_id)
     path = f"/api/worker/jobs/{job_id}/preview"
     body = file_path.read_bytes()
     headers = worker_headers(worker_token, path=path, body=body)
@@ -794,6 +803,7 @@ def upload_worker_artifact_cache(
     source_output_key: str,
     worker_id: str,
 ) -> dict[str, Any]:
+    worker_id = safe_worker_id(worker_id)
     path = f"/api/worker/jobs/{job_id}/artifact-cache"
     body = file_path.read_bytes()
     headers = worker_headers(worker_token, path=path, body=body)
@@ -815,6 +825,9 @@ def media_type_for(file_path: Path) -> str:
 
 def post_status(remote_base_url: str, worker_token: str, job_id: str, payload: dict[str, Any]) -> None:
     path = f"/api/worker/jobs/{job_id}/status"
+    payload = dict(payload)
+    if "worker_id" in payload:
+        payload["worker_id"] = safe_worker_id(payload.get("worker_id"), default="")
     body = canonical_json(payload)
     last_error = ""
     for attempt in range(1, 4):
@@ -836,6 +849,7 @@ def post_status(remote_base_url: str, worker_token: str, job_id: str, payload: d
 
 def get_worker_control(remote_base_url: str, worker_token: str, job_id: str, *, worker_id: str) -> dict[str, Any]:
     path = f"/api/worker/jobs/{job_id}/control"
+    worker_id = safe_worker_id(worker_id)
     body = canonical_json({"worker_id": worker_id, "version": __version__})
     response = requests.post(
         endpoint(remote_base_url, path),
@@ -939,6 +953,7 @@ def running_status_payload(
     command: list[str] | None = None,
     lines: int = 160,
 ) -> dict[str, Any]:
+    worker_id = safe_worker_id(worker_id)
     tail = sanitize_remote_text(tail_text(log_path, lines) if log_path.exists() else "")
     payload: dict[str, Any] = {
         "status": "running",

@@ -41,7 +41,7 @@ from .config import load_config, privacy_guard, save_config
 from .job_config import write_job_config
 from .llm_local import LocalLLMClient
 from .metrics import collect_system_metrics, sanitize_metrics
-from .platform_store import PlatformStore
+from .platform_store import PlatformStore, safe_worker_id
 from .redaction import is_remote_safe_reference, sanitize_remote_command, sanitize_remote_text, sanitize_remote_value
 from .scan import VIDEO_SUFFIXES, find_videos
 from .tts import tts_health
@@ -688,7 +688,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     @app.post("/api/worker/jobs/claim")
     async def worker_claim_job(request: Request) -> dict[str, Any]:
         body = await require_worker_request(request, state)
-        worker_id = str(body.get("worker_id") or "local-windows-worker")
+        worker_id = safe_worker_id(body.get("worker_id"))
         job = claim_worker_job(state, worker_id)
         state.store.record_worker_heartbeat(
             {
@@ -710,7 +710,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         record = read_job(state, job_id)
         if not record:
             raise HTTPException(status_code=404, detail="Job not found")
-        worker_id = str(body.get("worker_id") or request.headers.get("x-worker-id") or "")
+        worker_id = safe_worker_id(body.get("worker_id") or request.headers.get("x-worker-id"), default="")
         require_claimed_worker(record, worker_id, action="update job status")
         changes = worker_status_changes(body)
         if record.get("cancel_requested") and changes.get("status") in {"done", "failed"}:
@@ -747,7 +747,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         record = read_job(state, job_id)
         if not record:
             raise HTTPException(status_code=404, detail="Job not found")
-        worker_id = str(body.get("worker_id") or request.headers.get("x-worker-id") or "")
+        worker_id = safe_worker_id(body.get("worker_id") or request.headers.get("x-worker-id"), default="")
         require_claimed_worker(record, worker_id, action="poll job control")
         state.store.record_worker_heartbeat(
             {
@@ -775,7 +775,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         record = read_job(state, job_id)
         if not record:
             raise HTTPException(status_code=404, detail="Job not found")
-        worker_id = str(request.headers.get("x-worker-id") or "")
+        worker_id = safe_worker_id(request.headers.get("x-worker-id"), default="")
         require_claimed_worker(record, worker_id, action="upload job preview")
         row = save_worker_preview_upload(state, record, request, body)
         update_job(
@@ -810,7 +810,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         record = read_job(state, job_id)
         if not record:
             raise HTTPException(status_code=404, detail="Job not found")
-        worker_id = str(request.headers.get("x-worker-id") or "")
+        worker_id = safe_worker_id(request.headers.get("x-worker-id"), default="")
         require_claimed_worker(record, worker_id, action="upload artifact cache")
         row = save_worker_artifact_cache_upload(state, record, request, body)
         update_job(
@@ -1350,7 +1350,7 @@ def browser_upload_policy(state: WebState) -> dict[str, Any]:
 def save_worker_preview_upload(state: WebState, record: dict[str, Any], request: Request, body: bytes) -> dict[str, Any]:
     if not body:
         raise HTTPException(status_code=400, detail="Preview body is empty")
-    worker_id = str(request.headers.get("x-worker-id") or "")
+    worker_id = safe_worker_id(request.headers.get("x-worker-id"), default="")
     claimed_by = str(record.get("claimed_by") or "")
     if claimed_by and worker_id and worker_id != claimed_by:
         raise HTTPException(status_code=403, detail="Worker does not own this job")
@@ -1394,7 +1394,7 @@ def save_worker_artifact_cache_upload(state: WebState, record: dict[str, Any], r
     metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
     if metadata.get("worker_action") != "upload_artifact_cache":
         raise HTTPException(status_code=400, detail="Job is not an artifact cache upload")
-    worker_id = str(request.headers.get("x-worker-id") or "")
+    worker_id = safe_worker_id(request.headers.get("x-worker-id"), default="")
     claimed_by = str(record.get("claimed_by") or "")
     if claimed_by and worker_id and worker_id != claimed_by:
         raise HTTPException(status_code=403, detail="Worker does not own this job")
@@ -1788,6 +1788,7 @@ def worker_hmac_signature(worker_token: str, *, timestamp: str, method: str, pat
 
 
 def claim_worker_job(state: WebState, worker_id: str) -> dict[str, Any] | None:
+    worker_id = safe_worker_id(worker_id)
     with state.lock:
         requeue_stale_worker_jobs_locked(state)
         for path in sorted(state.job_dir.glob("*.json"), key=lambda p: p.stat().st_mtime):
@@ -1922,6 +1923,8 @@ def worker_status_changes(body: dict[str, Any]) -> dict[str, Any]:
                 changes[key] = sanitize_remote_value(body[key])
             elif key in {"result_report", "result_video"}:
                 changes[key] = sanitize_remote_text(file_display_name(str(body[key])))
+            elif key == "worker_id":
+                changes[key] = safe_worker_id(body[key], default="")
             else:
                 changes[key] = body[key]
     result = body.get("result")
