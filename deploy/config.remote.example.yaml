@@ -40,6 +40,8 @@ webui:
   max_active_jobs_per_user: 2
   max_active_jobs_global: 8
   worker_token: "${WORKER_SHARED_TOKEN}"
+  worker_auth_mode: "hmac"
+  worker_signature_max_skew_seconds: 300
   download_secret: "${WEBUI_DOWNLOAD_SECRET}"
   signed_url_ttl_seconds: 900
   cleanup_older_than_days: 7

@@ -70,7 +70,7 @@ Windows worker heartbeat:
 ```powershell
 cd "<VIDEO_ROOT>\_localizer_project"
 $env:REMOTE_PUBLIC_BASE_URL="https://your-contabo-domain.example"
-$env:WORKER_SHARED_TOKEN="<generated-worker-token>"
+$env:WORKER_SHARED_TOKEN="<generated-worker-hmac-secret>"
 .\06_worker_heartbeat.ps1 -Loop
 ```
 
@@ -81,6 +81,8 @@ Windows worker queue polling:
 ```
 
 For Contabo production, set `webui.execution_mode: "worker_queue"` in the remote config. In this mode the web server only queues jobs; the Windows worker claims them and runs local GPU/CPU processing. If the worker heartbeat is missing or stale, the WebUI keeps the job queued and shows `等待 worker` instead of claiming the task has started.
+
+Worker API authentication supports signed requests. Production remote config should set `webui.worker_auth_mode: "hmac"` so worker heartbeat, claim, and status requests must include `X-Worker-Timestamp` and `X-Worker-Signature`; the shared secret stays in `WORKER_SHARED_TOKEN` and is not sent as a plaintext header. Local development can keep `hmac_or_token` for compatibility with older scripts.
 
 Queued jobs carry only portable worker arguments plus non-secret job metadata such as source language, target subtitle language, TTS language, quality mode, style, and the worker availability state at submit time. The Windows worker applies those values to a local generated job config before running the CLI.
 

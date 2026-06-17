@@ -48,7 +48,8 @@ Deployment steps:
    - reject new uploads when quota would be exceeded
 8. Configure worker connectivity:
    - prefer WireGuard/Tailscale/cloudflared reverse tunnel
-   - require `X-Worker-Token: $WORKER_SHARED_TOKEN` for worker heartbeat/API
+   - set `webui.worker_auth_mode: "hmac"` and require `X-Worker-Timestamp` + `X-Worker-Signature` for worker heartbeat/API
+   - treat `WORKER_SHARED_TOKEN` as an HMAC secret; do not send it as a plaintext production header
    - mark worker offline after missed heartbeats
    - on Windows, run:
      ```powershell
@@ -78,6 +79,7 @@ Deployment steps:
    - admins can disable users and update local/remote user quotas without disabling the last active admin
    - project quota usage is visible for generated managed artifacts
    - worker heartbeat appears online
+   - unsigned worker requests are rejected when `worker_auth_mode=hmac`
    - job submission while the worker is offline shows a queued/waiting state and records the worker status at submit time
    - GPU/CPU metrics update
    - worker offline status appears when the tunnel is stopped

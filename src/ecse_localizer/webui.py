@@ -457,14 +457,12 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/api/worker/heartbeat")
     async def worker_heartbeat(request: Request) -> dict[str, Any]:
-        require_worker_token(request, state)
-        payload = await request.json()
+        payload = await require_worker_request(request, state)
         return {"ok": True, "worker": state.store.record_worker_heartbeat(payload)}
 
     @app.post("/api/worker/jobs/claim")
     async def worker_claim_job(request: Request) -> dict[str, Any]:
-        require_worker_token(request, state)
-        body = await request.json()
+        body = await require_worker_request(request, state)
         worker_id = str(body.get("worker_id") or "local-windows-worker")
         job = claim_worker_job(state, worker_id)
         state.store.record_worker_heartbeat(
@@ -480,8 +478,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/api/worker/jobs/{job_id}/status")
     async def worker_update_job(job_id: str, request: Request) -> dict[str, Any]:
-        require_worker_token(request, state)
-        body = await request.json()
+        body = await require_worker_request(request, state)
         record = read_job(state, job_id)
         if not record:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -736,13 +733,65 @@ def enforce_active_job_limits(state: WebState, user: str) -> None:
         raise HTTPException(status_code=429, detail=f"Global active job limit reached: {counts['global']}/{max_global}")
 
 
-def require_worker_token(request: Request, state: WebState) -> None:
+async def require_worker_request(request: Request, state: WebState) -> dict[str, Any]:
+    body = await request.body()
+    require_worker_token(request, state, body)
+    if not body:
+        return {}
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid worker JSON payload") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Worker payload must be a JSON object")
+    return payload
+
+
+def require_worker_token(request: Request, state: WebState, body: bytes = b"") -> None:
     token = request.headers.get("x-worker-token", "")
     expected = str(state.webui.get("worker_token") or os.environ.get("WORKER_SHARED_TOKEN") or "")
     if not expected:
         raise HTTPException(status_code=503, detail="Worker token is not configured")
+    mode = str(state.webui.get("worker_auth_mode", "hmac_or_token") or "hmac_or_token").lower()
+    signature = request.headers.get("x-worker-signature", "")
+    timestamp = request.headers.get("x-worker-timestamp", "")
+    if signature or timestamp:
+        require_worker_hmac(request, expected, body)
+        return
+    if mode in {"hmac", "signed", "signature"}:
+        raise HTTPException(status_code=401, detail="Worker HMAC signature is required")
     if not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="Invalid worker token")
+
+
+def require_worker_hmac(request: Request, expected_token: str, body: bytes) -> None:
+    timestamp = request.headers.get("x-worker-timestamp", "")
+    signature = request.headers.get("x-worker-signature", "")
+    if not timestamp or not signature:
+        raise HTTPException(status_code=401, detail="Worker HMAC timestamp and signature are required")
+    try:
+        timestamp_int = int(timestamp)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Invalid worker HMAC timestamp") from exc
+    state = request.app.state.web
+    max_skew = int(state.webui.get("worker_signature_max_skew_seconds", 300) or 300)
+    if abs(int(time.time()) - timestamp_int) > max(30, max_skew):
+        raise HTTPException(status_code=401, detail="Worker HMAC timestamp is outside the allowed window")
+    expected_signature = worker_hmac_signature(
+        expected_token,
+        timestamp=timestamp,
+        method=request.method,
+        path=request.url.path,
+        body=body,
+    )
+    if not hmac.compare_digest(signature, expected_signature):
+        raise HTTPException(status_code=401, detail="Invalid worker HMAC signature")
+
+
+def worker_hmac_signature(worker_token: str, *, timestamp: str, method: str, path: str, body: bytes) -> str:
+    body_hash = hashlib.sha256(body or b"").hexdigest()
+    message = "\n".join([str(timestamp), method.upper(), path, body_hash]).encode("utf-8")
+    return hmac.new(worker_token.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
 def claim_worker_job(state: WebState, worker_id: str) -> dict[str, Any] | None:

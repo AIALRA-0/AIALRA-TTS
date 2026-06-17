@@ -17,11 +17,40 @@ if (-not $WorkerToken) {
   throw "WorkerToken is required. Set WORKER_SHARED_TOKEN or pass -WorkerToken."
 }
 
+function ConvertTo-LowerHex {
+  param([byte[]]$Bytes)
+  return ([System.BitConverter]::ToString($Bytes)).Replace("-", "").ToLowerInvariant()
+}
+
+function New-WorkerSignedHeaders {
+  param(
+    [string]$Token,
+    [string]$Method,
+    [string]$Path,
+    [string]$Body
+  )
+  $timestamp = [string][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+  $encoding = [System.Text.Encoding]::UTF8
+  $bodyBytes = $encoding.GetBytes($Body)
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  $bodyHash = ConvertTo-LowerHex -Bytes ($sha.ComputeHash($bodyBytes))
+  $message = "$timestamp`n$($Method.ToUpperInvariant())`n$Path`n$bodyHash"
+  $hmac = [System.Security.Cryptography.HMACSHA256]::new($encoding.GetBytes($Token))
+  $signature = ConvertTo-LowerHex -Bytes ($hmac.ComputeHash($encoding.GetBytes($message)))
+  return @{
+    "X-Worker-Auth" = "hmac-sha256"
+    "X-Worker-Timestamp" = $timestamp
+    "X-Worker-Signature" = $signature
+  }
+}
+
 function Send-Heartbeat {
   $statusJson = & $Py -m ecse_localizer --config (Join-Path $ProjectRoot "config.yaml") worker-status
   if ($LASTEXITCODE -ne 0) { throw "worker-status failed with exit code $LASTEXITCODE" }
-  $uri = ($RemoteBaseUrl.TrimEnd('/')) + "/api/worker/heartbeat"
-  Invoke-RestMethod -Method Post -Uri $uri -Headers @{ "X-Worker-Token" = $WorkerToken } -Body $statusJson -ContentType "application/json" | Out-Null
+  $path = "/api/worker/heartbeat"
+  $uri = ($RemoteBaseUrl.TrimEnd('/')) + $path
+  $headers = New-WorkerSignedHeaders -Token $WorkerToken -Method "POST" -Path $path -Body $statusJson
+  Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $statusJson -ContentType "application/json" | Out-Null
   Write-Host ("Heartbeat sent to {0} at {1}" -f $uri, (Get-Date).ToString("s"))
 }
 

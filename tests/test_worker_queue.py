@@ -1,4 +1,6 @@
 import json
+import time
+from types import SimpleNamespace
 from pathlib import Path
 
 import yaml
@@ -14,6 +16,7 @@ from ecse_localizer.webui import (
     file_display_name,
     infer_job_type,
     list_jobs,
+    require_worker_token,
     read_job,
     retry_job_record,
     soft_delete_job,
@@ -23,7 +26,7 @@ from ecse_localizer.webui import (
     worker_status_payload,
     worker_status_changes,
 )
-from ecse_localizer.worker_client import extract_progress_from_text, redacted_command, summarize_result, worker_args
+from ecse_localizer.worker_client import canonical_json, extract_progress_from_text, redacted_command, summarize_result, worker_args, worker_headers, worker_signature
 
 
 def write_config(tmp_path: Path) -> Path:
@@ -113,10 +116,58 @@ def test_worker_status_payload_marks_missing_worker_unavailable(tmp_path):
     assert "queued jobs will wait" in payload["message"]
 
 
+def test_worker_hmac_signature_is_accepted_without_static_token(tmp_path):
+    state = WebState(write_config(tmp_path))
+    state.webui["worker_auth_mode"] = "hmac"
+    body_text = canonical_json({"worker_id": "worker-1"})
+    body = body_text.encode("utf-8")
+    timestamp = str(int(time.time()))
+    headers = {
+        "x-worker-timestamp": timestamp,
+        "x-worker-signature": worker_signature(
+            "worker-token",
+            timestamp=timestamp,
+            method="POST",
+            path="/api/worker/heartbeat",
+            body=body,
+        ),
+    }
+
+    require_worker_token(fake_worker_request(state, headers, path="/api/worker/heartbeat"), state, body)
+
+
+def test_signed_worker_headers_do_not_send_plaintext_token():
+    headers = worker_headers("worker-token", path="/api/worker/jobs/claim", body=b"{}")
+    assert headers["X-Worker-Auth"] == "hmac-sha256"
+    assert "X-Worker-Signature" in headers
+    assert "X-Worker-Timestamp" in headers
+    assert "X-Worker-Token" not in headers
+
+
+def test_worker_hmac_mode_rejects_legacy_static_token(tmp_path):
+    state = WebState(write_config(tmp_path))
+    state.webui["worker_auth_mode"] = "hmac"
+    try:
+        require_worker_token(fake_worker_request(state, {"x-worker-token": "worker-token"}), state, b"{}")
+    except Exception as exc:
+        assert "HMAC signature is required" in str(exc)
+    else:
+        raise AssertionError("expected HMAC mode to reject legacy static token")
+
+
 def test_upload_quota_counts_reserved_bytes_without_double_counting_current_file():
     assert upload_fits_quota(base_used_bytes=4, reserved_bytes=0, current_file_bytes=6, quota_bytes=10)
     assert upload_fits_quota(base_used_bytes=4, reserved_bytes=3, current_file_bytes=3, quota_bytes=10)
     assert not upload_fits_quota(base_used_bytes=4, reserved_bytes=3, current_file_bytes=4, quota_bytes=10)
+
+
+def fake_worker_request(state: WebState, headers: dict[str, str], *, path: str = "/api/worker/jobs/claim"):
+    return SimpleNamespace(
+        headers=headers,
+        method="POST",
+        url=SimpleNamespace(path=path),
+        app=SimpleNamespace(state=SimpleNamespace(web=state)),
+    )
 
 
 def test_command_with_config_replaces_only_config_path(tmp_path):

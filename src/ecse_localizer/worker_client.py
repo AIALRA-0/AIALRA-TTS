@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
 import os
 import re
 import subprocess
@@ -60,15 +62,17 @@ def poll_loop(
 
 
 def claim_job(remote_base_url: str, worker_token: str, worker_id: str, config: dict[str, Any]) -> dict[str, Any] | None:
+    path = "/api/worker/jobs/claim"
     payload = {
         "worker_id": worker_id,
         "version": __version__,
         "metrics": collect_system_metrics(config),
     }
+    body = canonical_json(payload)
     response = requests.post(
-        endpoint(remote_base_url, "/api/worker/jobs/claim"),
-        json=payload,
-        headers=worker_headers(worker_token),
+        endpoint(remote_base_url, path),
+        data=body.encode("utf-8"),
+        headers=worker_headers(worker_token, path=path, body=body),
         timeout=30,
     )
     response.raise_for_status()
@@ -153,13 +157,15 @@ def run_worker_job(
 
 
 def post_status(remote_base_url: str, worker_token: str, job_id: str, payload: dict[str, Any]) -> None:
+    path = f"/api/worker/jobs/{job_id}/status"
+    body = canonical_json(payload)
     last_error = ""
     for attempt in range(1, 4):
         try:
             response = requests.post(
-                endpoint(remote_base_url, f"/api/worker/jobs/{job_id}/status"),
-                json=payload,
-                headers=worker_headers(worker_token),
+                endpoint(remote_base_url, path),
+                data=body.encode("utf-8"),
+                headers=worker_headers(worker_token, path=path, body=body),
                 timeout=30,
             )
             response.raise_for_status()
@@ -290,8 +296,31 @@ def redacted_command(command: list[str]) -> list[str]:
     return redacted
 
 
-def worker_headers(worker_token: str) -> dict[str, str]:
-    return {"X-Worker-Token": worker_token}
+def worker_headers(worker_token: str, *, path: str | None = None, body: str | bytes = b"", method: str = "POST") -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if path:
+        timestamp = str(int(time.time()))
+        body_bytes = body.encode("utf-8") if isinstance(body, str) else body
+        headers.update(
+            {
+                "X-Worker-Auth": "hmac-sha256",
+                "X-Worker-Timestamp": timestamp,
+                "X-Worker-Signature": worker_signature(worker_token, timestamp=timestamp, method=method, path=path, body=body_bytes),
+            }
+        )
+    else:
+        headers["X-Worker-Token"] = worker_token
+    return headers
+
+
+def worker_signature(worker_token: str, *, timestamp: str, method: str, path: str, body: bytes) -> str:
+    body_hash = hashlib.sha256(body or b"").hexdigest()
+    message = "\n".join([str(timestamp), method.upper(), path, body_hash]).encode("utf-8")
+    return hmac.new(worker_token.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def canonical_json(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
 def endpoint(remote_base_url: str, path: str) -> str:
