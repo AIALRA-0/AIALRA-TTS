@@ -30,22 +30,34 @@ def artifact_id(path: str | Path) -> str:
     return hashlib.sha256(str(Path(path).resolve()).encode("utf-8", errors="ignore")).hexdigest()[:24]
 
 
-def artifact_catalog(config: dict[str, Any], jobs: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+def artifact_catalog(config: dict[str, Any], jobs: list[dict[str, Any]] | None = None, *, include_deleted: bool = False) -> list[dict[str, Any]]:
     output_dir = Path(config["output_dir"]).resolve()
     records: dict[str, dict[str, Any]] = {}
     reports = sorted(output_dir.glob("*_report.json"), key=lambda p: p.stat().st_mtime, reverse=True) if output_dir.exists() else []
     job_by_report = {}
-    for job in jobs or []:
+    job_rows = jobs or []
+    deleted_job_ids = {str(job.get("id")) for job in job_rows if job_is_deleted(job) and job.get("id")}
+    deleted_report_keys: set[str] = set()
+    for job in job_rows:
         report = str(job.get("result_report") or "")
         if report:
-            job_by_report[str(Path(report).resolve()).lower()] = job
+            report_key = str(Path(report).resolve()).lower()
+            if job_is_deleted(job):
+                deleted_report_keys.add(report_key)
+                if include_deleted:
+                    job_by_report[report_key] = job
+            else:
+                job_by_report[report_key] = job
 
     for report_path in reports:
         try:
             report = read_json(report_path)
         except Exception:
             continue
-        job = job_by_report.get(str(report_path.resolve()).lower())
+        report_key = str(report_path.resolve()).lower()
+        if not include_deleted and (report_key in deleted_report_keys or row_references_deleted_job(report, deleted_job_ids)):
+            continue
+        job = job_by_report.get(report_key)
         metadata = job.get("metadata") if job and isinstance(job.get("metadata"), dict) else {}
         owner = job.get("user") if job else report.get("user")
         project_id = metadata.get("project_id") if job else report.get("project_id")
@@ -108,13 +120,30 @@ def artifact_catalog(config: dict[str, Any], jobs: list[dict[str, Any]] | None =
                 source_output_key=str(key),
             )
     for preview in load_preview_manifest(config):
+        if not include_deleted and row_references_deleted_job(preview, deleted_job_ids):
+            continue
         add_preview_record(records, preview, config=config)
-    add_worker_artifact_records(records, jobs or [])
+    add_worker_artifact_records(records, job_rows, include_deleted=include_deleted)
     return sorted(records.values(), key=lambda row: float(row.get("mtime") or 0), reverse=True)
 
 
-def add_worker_artifact_records(records: dict[str, dict[str, Any]], jobs: list[dict[str, Any]]) -> None:
+def job_is_deleted(job: dict[str, Any]) -> bool:
+    return str(job.get("status") or "").strip().lower() == "deleted"
+
+
+def row_references_deleted_job(row: dict[str, Any], deleted_job_ids: set[str]) -> bool:
+    if not deleted_job_ids:
+        return False
+    for key in ["job_id", "source_job_id", "cache_job_id"]:
+        if str(row.get(key) or "") in deleted_job_ids:
+            return True
+    return False
+
+
+def add_worker_artifact_records(records: dict[str, dict[str, Any]], jobs: list[dict[str, Any]], *, include_deleted: bool = False) -> None:
     for job in jobs:
+        if job_is_deleted(job) and not include_deleted:
+            continue
         artifacts = job.get("worker_artifacts")
         if not isinstance(artifacts, list):
             continue

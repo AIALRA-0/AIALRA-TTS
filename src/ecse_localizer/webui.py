@@ -255,7 +255,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         user: str = Depends(require_user),
     ) -> dict[str, Any]:
         state.reload_config()
-        rows = artifact_catalog(state.config, list_jobs(state, None))
+        rows = artifact_catalog(state.config, list_jobs(state, None, include_deleted=True))
         rows = filter_artifacts_for_user(rows, user, admin=is_admin(state, user))
         rows = filter_artifact_records(rows, project_id=project_id, folder_id=folder_id, job_id=job_id, kind=kind)
         rows = with_signed_urls(rows[:300], secret=download_secret(state), username=user, ttl_seconds=int(state.webui.get("signed_url_ttl_seconds", 900)))
@@ -269,7 +269,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=401, detail="Login or signed token required")
         if token and not verify_artifact_token(download_secret(state), token, artifact_id, token_user):
             raise HTTPException(status_code=401, detail="Invalid signed URL")
-        rows = filter_artifacts_for_user(artifact_catalog(state.config, list_jobs(state, None)), token_user, admin=is_admin(state, token_user))
+        rows = filter_artifacts_for_user(artifact_catalog(state.config, list_jobs(state, None, include_deleted=True)), token_user, admin=is_admin(state, token_user))
         row = find_artifact(rows, artifact_id)
         if not row:
             raise HTTPException(status_code=404, detail="Artifact not found")
@@ -289,7 +289,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.delete("/api/artifacts/{artifact_id}")
     def delete_artifact(artifact_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
-        rows = filter_artifacts_for_user(artifact_catalog(state.config, list_jobs(state, None)), user, admin=is_admin(state, user))
+        rows = filter_artifacts_for_user(artifact_catalog(state.config, list_jobs(state, None, include_deleted=True)), user, admin=is_admin(state, user))
         row = find_artifact(rows, artifact_id)
         if not row:
             raise HTTPException(status_code=404, detail="Artifact not found")
@@ -303,7 +303,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/api/artifacts/{artifact_id}/request-cache")
     def request_artifact_cache(artifact_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
-        rows = filter_artifacts_for_user(artifact_catalog(state.config, list_jobs(state, None)), user, admin=is_admin(state, user))
+        rows = filter_artifacts_for_user(artifact_catalog(state.config, list_jobs(state, None, include_deleted=True)), user, admin=is_admin(state, user))
         row = find_artifact(rows, artifact_id)
         if not row:
             raise HTTPException(status_code=404, detail="Artifact not found")
@@ -798,7 +798,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         if not record or not can_access_record(state, user, record):
             raise HTTPException(status_code=404, detail="Job not found")
         state.reload_config()
-        rows = artifact_catalog(state.config, list_jobs(state, None, include_deleted=True))
+        rows = artifact_catalog(state.config, list_jobs(state, None, include_deleted=True), include_deleted=True)
         rows = filter_artifacts_for_user(rows, user, admin=is_admin(state, user))
         rows = filter_artifact_records(rows, job_id=job_id)
         rows = with_signed_urls(rows[:300], secret=download_secret(state), username=user, ttl_seconds=int(state.webui.get("signed_url_ttl_seconds", 900)))
@@ -1902,7 +1902,7 @@ def projects_with_usage(state: WebState, user: str, *, include_archived: bool = 
 
 
 def project_artifact_usage(state: WebState, user: str, *, admin: bool) -> dict[str, int]:
-    rows = filter_artifacts_for_user(artifact_catalog(state.config, list_jobs(state, None)), user, admin=admin)
+    rows = filter_artifacts_for_user(artifact_catalog(state.config, list_jobs(state, None, include_deleted=True)), user, admin=admin)
     usage: dict[str, int] = {}
     seen_paths: set[str] = set()
     for row in rows:

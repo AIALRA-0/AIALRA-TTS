@@ -146,6 +146,7 @@ Deployment steps:
    - running jobs refresh progress/log-tail summaries without exposing local Windows paths or full logs
    - failed jobs can be retried without rewriting the base config
    - deleted jobs are soft-deleted from normal history, visible through the deleted history filter, and restorable before any physical artifact cleanup
+   - artifacts linked to deleted jobs are hidden from the normal artifact list and signed download/cache endpoints, but remain visible through that job's deleted-detail artifact endpoint
    - cleanup dry-runs report old deleted-job artifacts without deleting them; cleanup apply removes only managed output/run/upload/job-log/preview files and preserves metadata JSON
    - a queued job can be claimed through `/api/worker/jobs/claim`
    - a queued `repair_fidelity` job claims portable worker args beginning with `repair-fidelity`

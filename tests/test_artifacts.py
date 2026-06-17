@@ -166,6 +166,40 @@ def test_artifact_records_filter_by_project_folder_job_and_kind(tmp_path):
     assert filter_artifact_records(rows, kind="bilingual_srt") == []
 
 
+def test_artifact_catalog_hides_deleted_job_artifacts_by_default(tmp_path):
+    config = make_config(tmp_path)
+    out = Path(config["output_dir"])
+    video = out / "lecture_zh_dub.mp4"
+    video.write_bytes(b"mp4")
+    report = out / "lecture_report.json"
+    report.write_text(json.dumps({"name": "lecture", "outputs": {"zh_dub_mp4": str(video)}}), encoding="utf-8")
+    preview_dir = Path(config["webui"]["preview_dir"])
+    preview_dir.mkdir()
+    preview = preview_dir / "lecture_preview.mp4"
+    preview.write_bytes(b"preview")
+    (preview_dir / "preview_manifest.json").write_text(
+        json.dumps({"previews": [{"id": "preview-1", "job_id": "job-1", "preview_path": str(preview)}]}),
+        encoding="utf-8",
+    )
+    jobs = [
+        {
+            "id": "job-1",
+            "status": "deleted",
+            "user": "student",
+            "result_report": str(report),
+            "metadata": {"project_id": "course", "folder_id": "week_1"},
+            "worker_artifacts": [{"ref_id": "ref1", "name": "lecture_zh_dub.mp4"}],
+        }
+    ]
+
+    visible = artifact_catalog(config, jobs)
+    deleted_view = artifact_catalog(config, jobs, include_deleted=True)
+
+    assert visible == []
+    assert {row["kind"] for row in deleted_view} >= {"report_bundle", "zh_dub_mp4", "remote_preview"}
+    assert any(row.get("remote_worker_artifact") for row in deleted_view)
+
+
 def test_artifact_filter_hides_ownerless_rows_from_non_admin():
     rows = [
         {"id": "student", "owner": "student.one"},

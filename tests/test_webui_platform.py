@@ -699,6 +699,48 @@ def test_deleted_job_can_be_filtered_and_restored(tmp_path):
     assert record["id"] in {job["id"] for job in response.json()["jobs"]}
 
 
+def test_deleted_job_artifacts_hide_from_normal_page_but_remain_job_scoped(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    output = Path(state.config["output_dir"])
+    video = output / "lecture_zh_dub.mp4"
+    video.write_bytes(b"mp4")
+    report = output / "lecture_report.json"
+    report.write_text(json.dumps({"name": "lecture", "outputs": {"zh_dub_mp4": str(video)}}), encoding="utf-8")
+    record = create_job_record(
+        state,
+        "process_one",
+        "Lecture",
+        ["python", "-m", "ecse_localizer", "process-one"],
+        user="admin",
+        metadata={"project_id": "course", "folder_id": "root"},
+        dispatch_target="worker",
+    )
+    update_job(state, record["id"], {"status": "done", "returncode": 0, "result_report": str(report), "result_video": str(video)})
+
+    response = client.get("/api/artifacts")
+    assert response.status_code == 200
+    assert "lecture_zh_dub.mp4" in {item["name"] for item in response.json()["artifacts"]}
+
+    response = client.delete(f"/api/jobs/{record['id']}")
+    assert response.status_code == 200
+
+    response = client.get("/api/artifacts")
+    assert response.status_code == 200
+    assert "lecture_zh_dub.mp4" not in {item["name"] for item in response.json()["artifacts"]}
+
+    response = client.get(f"/api/jobs/{record['id']}/artifacts")
+    assert response.status_code == 200
+    assert "lecture_zh_dub.mp4" in {item["name"] for item in response.json()["artifacts"]}
+
+
 def test_ownerless_legacy_jobs_are_admin_only(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
