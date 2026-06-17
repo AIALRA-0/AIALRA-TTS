@@ -102,6 +102,9 @@ tts:
   compact_lead_in_seconds: 0.0
   prevent_audio_overlap: true
   min_audio_gap_seconds: 0.08
+  trim_overlong_audio_to_slot: true
+  slot_trim_tolerance_seconds: 0.03
+  slot_trim_fade_seconds: 0.06
   max_audio_delay_warning_seconds: 1.5
   compact_subtitle_hold_seconds: 0.18
   compact_subtitle_gap_seconds: 0.04

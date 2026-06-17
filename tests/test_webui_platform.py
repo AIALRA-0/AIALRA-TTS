@@ -15,7 +15,7 @@ else:
 
 from ecse_localizer.artifacts import artifact_catalog
 from ecse_localizer.utils import read_json
-from ecse_localizer.webui import create_app, create_job_record, update_job
+from ecse_localizer.webui import create_app, create_job_record, fields_from_config, update_job
 from ecse_localizer.worker_client import worker_headers
 
 
@@ -49,6 +49,15 @@ def write_config(tmp_path: Path) -> Path:
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
     return path
+
+
+def test_tuning_fields_include_tts_slot_trim_controls():
+    fields = {field["path"]: field for field in fields_from_config({"tts": {"trim_overlong_audio_to_slot": True}})}
+
+    assert fields["tts.trim_overlong_audio_to_slot"]["type"] == "bool"
+    assert fields["tts.trim_overlong_audio_to_slot"]["value"] is True
+    assert fields["tts.slot_trim_tolerance_seconds"]["type"] == "float"
+    assert fields["tts.slot_trim_fade_seconds"]["type"] == "float"
 
 
 def test_webui_login_project_and_quota(tmp_path):

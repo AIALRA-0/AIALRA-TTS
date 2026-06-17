@@ -312,6 +312,8 @@ def build_aligned_dub(
                 )
                 final_clip = compressed
 
+        final_clip = enforce_tts_slot_limit(final_clip, target, work, unit, flags, config, logger)
+
         pcm = work / f"seg_{unit.id:05d}_pcm.wav"
         run_cmd(
             [
@@ -512,6 +514,62 @@ def tts_target_duration(unit: TTSUnit, next_unit: TTSUnit | None, video_duration
     if slot <= 0:
         return 0.25
     return max(0.25, min(target, slot))
+
+
+def enforce_tts_slot_limit(
+    clip: str | Path,
+    target_duration: float,
+    work: str | Path,
+    unit: TTSUnit,
+    flags: list[dict[str, Any]],
+    config: dict,
+    logger: logging.Logger | None = None,
+) -> Path:
+    tts_cfg = config.get("tts", {})
+    if not bool(tts_cfg.get("trim_overlong_audio_to_slot", True)):
+        return Path(clip)
+
+    tolerance = float(tts_cfg.get("slot_trim_tolerance_seconds", 0.03))
+    target = max(0.05, float(target_duration))
+    duration = audio_duration(clip)
+    if duration <= target + tolerance:
+        return Path(clip)
+
+    fade = max(0.0, float(tts_cfg.get("slot_trim_fade_seconds", 0.06)))
+    fade = min(fade, max(0.0, target / 3.0))
+    trim_path = Path(work) / f"seg_{unit.id:05d}_slot.wav"
+    filters = [f"atrim=0:{target:.3f}", "asetpts=PTS-STARTPTS"]
+    if fade >= 0.01:
+        filters.append(f"afade=t=out:st={max(0.0, target - fade):.3f}:d={fade:.3f}")
+    run_cmd(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-nostdin",
+            "-nostats",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(clip),
+            "-filter:a",
+            ",".join(filters),
+            str(trim_path),
+        ],
+        logger=logger,
+    )
+    flags.append(
+        {
+            "segment_id": unit.id,
+            "segment_ids": unit.segment_ids,
+            "type": "tts_slot_trimmed",
+            "pre_trim_duration": round(duration, 3),
+            "target_duration": round(target, 3),
+            "trimmed_seconds": round(max(0.0, duration - target), 3),
+            "fade_seconds": round(fade, 3),
+        }
+    )
+    return trim_path
 
 
 def select_tts_backend(config: dict) -> str:
