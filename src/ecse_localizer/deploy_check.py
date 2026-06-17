@@ -40,6 +40,7 @@ def check_deploy_config(config: dict[str, Any], *, mode: str = "remote") -> dict
     webui = get_dict(config, "webui")
     require_true(findings, webui, "enabled", "webui.enabled")
     require_true(findings, webui, "cookie_secure", "webui.cookie_secure")
+    require_true(findings, webui, "csrf_origin_check", "webui.csrf_origin_check")
     if str(webui.get("execution_mode", "")).lower() != "worker_queue":
         add(findings, "error", "worker_queue_required", "webui.execution_mode", "Contabo must queue jobs for the Windows worker.")
     if bool(webui.get("allow_remote_media_uploads", False)):

@@ -15,6 +15,7 @@ import time
 import uuid
 from pathlib import Path, PureWindowsPath
 from typing import Any
+from urllib.parse import urlparse
 
 import uvicorn
 import yaml
@@ -48,6 +49,7 @@ from .utils import PROJECT_ROOT, ensure_dir, now_id, read_json, slugify, write_j
 ALLOWED_UPLOAD_SUFFIXES = VIDEO_SUFFIXES | {".srt", ".vtt", ".ass", ".wav", ".mp3", ".m4a"}
 COOKIE_NAME = "ecse_webui_session"
 TOKEN_TTL_SECONDS = 12 * 60 * 60
+SAFE_HTTP_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 ACTIVE_JOB_STATUSES = {"queued", "claimed", "running", "retrying", "paused"}
 TERMINAL_JOB_STATUSES = {"done", "passed", "failed", "cancelled"}
 JOB_SCHEMA_VERSION = 2
@@ -130,6 +132,12 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     app.state.web = state
     static_dir = Path(__file__).resolve().parent / "static"
     app.mount("/assets", StaticFiles(directory=static_dir), name="assets")
+
+    @app.middleware("http")
+    async def csrf_origin_guard(request: Request, call_next: Any) -> Response:
+        if csrf_origin_check_required(request, state) and not csrf_origin_allowed(request, state):
+            return JSONResponse({"detail": "CSRF origin check failed"}, status_code=403)
+        return await call_next(request)
 
     @app.get("/")
     def index() -> FileResponse:
@@ -816,6 +824,67 @@ def require_user(request: Request) -> str:
     if not user:
         raise HTTPException(status_code=401, detail="Login required")
     return user
+
+
+def csrf_origin_check_required(request: Request, state: WebState) -> bool:
+    if not bool(state.webui.get("csrf_origin_check", False)):
+        return False
+    if request.method.upper() in SAFE_HTTP_METHODS:
+        return False
+    path = request.url.path
+    if path.startswith("/api/worker/"):
+        return False
+    return True
+
+
+def csrf_origin_allowed(request: Request, state: WebState) -> bool:
+    origin = normalize_origin(str(request.headers.get("origin") or ""))
+    if not origin:
+        origin = origin_from_url(str(request.headers.get("referer") or ""))
+    if not origin:
+        return False
+    return origin in allowed_csrf_origins(request, state)
+
+
+def allowed_csrf_origins(request: Request, state: WebState) -> set[str]:
+    origins = {request_origin(request)}
+    configured = state.webui.get("csrf_trusted_origins")
+    if isinstance(configured, list):
+        origins.update(normalize_origin(str(item)) for item in configured)
+    return {origin for origin in origins if origin}
+
+
+def request_origin(request: Request) -> str:
+    scheme = str(request.headers.get("x-forwarded-proto") or request.url.scheme or "http").split(",")[0].strip()
+    host = str(request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",")[0].strip()
+    return normalize_origin(f"{scheme}://{host}") if host else ""
+
+
+def origin_from_url(value: str) -> str:
+    parsed = urlparse(value)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    return normalize_origin(f"{parsed.scheme}://{parsed.netloc}")
+
+
+def normalize_origin(value: str) -> str:
+    text = value.strip().rstrip("/")
+    if not text:
+        return ""
+    parsed = urlparse(text)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    scheme = parsed.scheme.lower()
+    hostname = (parsed.hostname or "").lower()
+    if not hostname:
+        return ""
+    try:
+        port = parsed.port
+    except ValueError:
+        return ""
+    if port and not ((scheme == "https" and port == 443) or (scheme == "http" and port == 80)):
+        return f"{scheme}://{hostname}:{port}"
+    return f"{scheme}://{hostname}"
 
 
 def verify_credentials(username: str, password: str, state: WebState) -> bool:

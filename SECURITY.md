@@ -24,6 +24,8 @@ Preferred production access is a reverse tunnel or private VPN initiated by the 
 
 Worker requests must use a shared token or mTLS. Rotate the token if it appears in logs or terminal output.
 
+Remote WebUI deployments should keep `webui.cookie_secure=true` and `webui.csrf_origin_check=true`. The reverse proxy must preserve the public `Host` and `X-Forwarded-Proto` headers so same-origin browser writes pass and cross-site writes are rejected.
+
 ## Artifact Access And Deletion
 
 Generated artifact download URLs are short-lived HMAC-signed URLs. The URL binds to the artifact id and user; it does not expose the filesystem path in the token.

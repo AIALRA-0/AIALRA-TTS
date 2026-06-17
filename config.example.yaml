@@ -159,6 +159,8 @@ webui:
   password: "change-me-before-use"
   session_secret: "change-me-generate-a-long-random-secret"
   cookie_secure: false
+  csrf_origin_check: false
+  csrf_trusted_origins: []
   bind_local_only: true
   upload_dir: "C:/path/to/ECSE 4961/_localizer_output/uploads"
   allow_remote_media_uploads: true

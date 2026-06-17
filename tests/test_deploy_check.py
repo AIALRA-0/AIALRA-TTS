@@ -23,6 +23,7 @@ def valid_remote_config() -> dict:
             "host": "0.0.0.0",
             "execution_mode": "worker_queue",
             "cookie_secure": True,
+            "csrf_origin_check": True,
             "allow_remote_media_uploads": False,
             "allow_worker_path_submission": False,
             "bind_local_only": False,
@@ -65,6 +66,7 @@ def test_deploy_check_rejects_placeholders_and_unsafe_remote_mode():
     config["webui"]["worker_auth_mode"] = "hmac_or_token"
     config["webui"]["worker_require_nonce"] = False
     config["webui"]["cookie_secure"] = False
+    config["webui"]["csrf_origin_check"] = False
     config["webui"]["session_secret"] = "${WEBUI_SESSION_SECRET}"
     config["webui"]["worker_token"] = "change-me-token"
     private_ip = ".".join(["10", "0", "0", "5"])
@@ -130,6 +132,7 @@ webui:
   host: "0.0.0.0"
   execution_mode: "worker_queue"
   cookie_secure: true
+  csrf_origin_check: true
   allow_remote_media_uploads: false
   bind_local_only: false
   upload_dir: "/srv/aialra/previews/uploads"

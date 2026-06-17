@@ -156,6 +156,49 @@ def test_webui_secure_session_cookie_when_configured(tmp_path):
     assert "; secure" in cookie
 
 
+def test_webui_csrf_origin_check_blocks_cross_site_mutations(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["csrf_origin_check"] = True
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app, base_url="https://localizer.example.com")
+
+    response = client.post(
+        "/api/login",
+        json={"username": "admin", "password": "local-password"},
+        headers={"origin": "https://localizer.example.com"},
+    )
+    assert response.status_code == 200
+
+    response = client.post("/api/projects", json={"name": "No Origin"})
+    assert response.status_code == 403
+
+    response = client.post("/api/projects", json={"name": "Cross Site"}, headers={"origin": "https://evil.example"})
+    assert response.status_code == 403
+
+    response = client.post("/api/projects", json={"name": "Same Site"}, headers={"origin": "https://localizer.example.com"})
+    assert response.status_code == 200
+
+
+def test_webui_csrf_origin_check_exempts_signed_worker_api(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["csrf_origin_check"] = True
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/worker/heartbeat", headers={"x-worker-token": "worker-token"}, json={"worker_id": "worker-1"})
+
+    assert response.status_code == 200
+    assert response.json()["worker"]["worker_id"] == "worker-1"
+
+
 def test_webui_admin_can_update_user_quota_and_disable(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
