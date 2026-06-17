@@ -207,7 +207,7 @@ Before committing:
 .\10_release_check.ps1
 ```
 
-The public template files are `config.example.yaml` and `.env.example`. Release rules live in `RELEASE.md`; CI runs tests, compile checks, WebUI JS syntax, PowerShell syntax, secret scan, translation sample, remote worker smoke, worker health, aggregate platform check, and release metadata gates on GitHub. CI explicitly uses `config.example.yaml`; never commit local `config.yaml`.
+The public template files are `config.example.yaml` and `.env.example`. Release rules live in `RELEASE.md`; CI runs tests, compile checks, WebUI JS syntax, PowerShell syntax, secret scan, translation sample, remote worker smoke, isolated WebUI API smoke, worker health, aggregate platform check, and release metadata gates on GitHub. CI explicitly uses `config.example.yaml`; never commit local `config.yaml`.
 
 ## Useful Commands
 

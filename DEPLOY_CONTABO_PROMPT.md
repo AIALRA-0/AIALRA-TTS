@@ -119,6 +119,7 @@ Deployment steps:
    - `.\09_worker_healthcheck.ps1` returns PASS on the Windows worker before scheduled tasks are installed
    - `python -m ecse_localizer translation-sample --output runs/translation_quality_sample` creates JSON/Markdown comparing literal, lecture, coherence, and repair stages
    - `python -m ecse_localizer remote-smoke --output runs/remote_smoke` passes the local Contabo/worker queue simulation
+   - `python -m ecse_localizer platform-check --output runs/platform_check` passes release, translation, worker queue, isolated WebUI API, worker health, and deploy-template gates
    - `.\14_manage_worker_task.ps1 -Action Status -Json` returns installed/running state for the unified Windows worker task after scheduled-task installation
    - login works
    - project creation works

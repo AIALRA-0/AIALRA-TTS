@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import Any, Callable
 
@@ -36,6 +37,7 @@ def run_platform_check(
     gates["release_check"] = run_gate("release_check", lambda: run_release_check(config.get("project_root") or PROJECT_ROOT))
     gates["translation_sample"] = run_gate("translation_sample", lambda: translation_sample_gate(config, out))
     gates["remote_smoke"] = run_gate("remote_smoke", lambda: remote_smoke_gate(config, out))
+    gates["webui_api_smoke"] = run_gate("webui_api_smoke", lambda: webui_api_smoke_gate(config, out))
     gates["worker_health_local"] = run_gate(
         "worker_health_local",
         lambda: assess_worker_health(worker_payload or build_worker_health_payload(config, worker_id=worker_id), remote_checked=False),
@@ -111,6 +113,126 @@ def remote_smoke_gate(config: dict[str, Any], output_dir: Path | None) -> dict[s
         "summary": result.get("summary", {}),
         "steps": result.get("steps", []),
     }
+
+
+def webui_api_smoke_gate(config: dict[str, Any], output_dir: Path | None) -> dict[str, Any]:
+    try:
+        from fastapi.testclient import TestClient
+    except Exception as exc:
+        return {
+            "pass": False,
+            "errors": 1,
+            "warnings": 0,
+            "findings": [
+                {
+                    "level": "error",
+                    "code": "testclient_unavailable",
+                    "path": "fastapi.testclient",
+                    "message": type(exc).__name__,
+                }
+            ],
+        }
+
+    from .webui import create_app
+
+    root = ensure_dir((output_dir or Path(config.get("work_dir") or PROJECT_ROOT / "runs") / "platform_check") / "webui_api_smoke")
+    smoke_config = isolated_webui_smoke_config(config, root)
+    config_path = root / "config.yaml"
+    config_path.write_text(yaml.safe_dump(smoke_config, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    username = smoke_config["webui"]["username"]
+    password = smoke_config["webui"]["password"]
+    app = create_app(config_path)
+    steps: list[dict[str, Any]] = []
+
+    def add_step(name: str, response_status: int, passed: bool, detail: str = "") -> None:
+        row: dict[str, Any] = {"name": name, "status_code": response_status, "pass": passed}
+        if detail:
+            row["detail"] = detail
+        steps.append(row)
+
+    with TestClient(app) as client:
+        protected = client.get("/api/dashboard")
+        add_step("auth_required", protected.status_code, protected.status_code in {401, 403}, "dashboard rejects anonymous access")
+
+        login = client.post("/api/login", json={"username": username, "password": password})
+        login_json = response_json(login)
+        add_step("login", login.status_code, login.status_code == 200 and bool(login_json.get("ok")), "API login sets a session cookie")
+
+        session = client.get("/api/session")
+        session_json = response_json(session)
+        add_step("session", session.status_code, session.status_code == 200 and session_json.get("authenticated") is True)
+
+        dashboard = client.get("/api/dashboard")
+        dashboard_json = response_json(dashboard)
+        dashboard_ok = dashboard.status_code == 200 and all(
+            key in dashboard_json for key in ["worker", "queue", "quota", "metrics", "capabilities", "upload_policy"]
+        )
+        add_step("dashboard", dashboard.status_code, dashboard_ok, "dashboard exposes worker, queue, quota, metrics, and capability state")
+
+        quota = client.get("/api/quota")
+        quota_json = response_json(quota)
+        quota_ok = quota.status_code == 200 and all(key in quota_json for key in ["local_quota_bytes", "remote_quota_bytes"])
+        add_step("quota", quota.status_code, quota_ok)
+
+        metrics = client.get("/api/metrics")
+        metrics_json = response_json(metrics)
+        metrics_ok = metrics.status_code == 200 and all(key in metrics_json for key in ["metrics", "worker", "queue", "quota"])
+        add_step("metrics", metrics.status_code, metrics_ok)
+
+        capabilities = client.get("/api/capabilities")
+        capabilities_json = response_json(capabilities)
+        capabilities_ok = capabilities.status_code == 200 and all(key in capabilities_json for key in ["asr", "translation", "tts"])
+        add_step("capabilities", capabilities.status_code, capabilities_ok)
+
+        artifacts = client.get("/api/artifacts")
+        artifacts_json = response_json(artifacts)
+        artifacts_ok = artifacts.status_code == 200 and isinstance(artifacts_json.get("artifacts"), list)
+        add_step("artifacts", artifacts.status_code, artifacts_ok)
+
+        healthz = client.get("/healthz")
+        healthz_json = response_json(healthz)
+        health_ok = healthz.status_code == 200 and "ok" in healthz_json and "worker_token" not in str(healthz_json).lower()
+        add_step("healthz_redacted", healthz.status_code, health_ok)
+
+    failed = [step for step in steps if not step.get("pass")]
+    return {
+        "pass": not failed,
+        "errors": len(failed),
+        "warnings": 0,
+        "config": str(config_path),
+        "steps": steps,
+    }
+
+
+def isolated_webui_smoke_config(config: dict[str, Any], root: Path) -> dict[str, Any]:
+    smoke = copy.deepcopy(config)
+    smoke["input_dir"] = str(ensure_dir(root / "input"))
+    smoke["output_dir"] = str(ensure_dir(root / "output"))
+    smoke["work_dir"] = str(ensure_dir(root / "runs"))
+    webui = smoke.setdefault("webui", {})
+    webui["username"] = "platform-smoke-admin"
+    webui["password"] = "platform-smoke-password"
+    webui["session_secret"] = "platform-smoke-session-secret"
+    webui["download_secret"] = "platform-smoke-download-secret"
+    webui.setdefault("worker_token", "platform-smoke-worker-token")
+    webui["platform_dir"] = str(root / "platform")
+    webui["job_dir"] = str(root / "jobs")
+    webui["upload_dir"] = str(root / "uploads")
+    webui["preview_dir"] = str(root / "previews")
+    webui["preview_manifest"] = str(root / "previews" / "preview_manifest.json")
+    webui.setdefault("worker_auth_mode", "hmac")
+    webui.setdefault("worker_require_nonce", True)
+    webui.setdefault("signed_url_ttl_seconds", 900)
+    return smoke
+
+
+def response_json(response: Any) -> dict[str, Any]:
+    try:
+        data = response.json()
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def deploy_template_guard() -> dict[str, Any]:
@@ -189,6 +311,9 @@ def render_platform_check_markdown(result: dict[str, Any]) -> str:
         if gate.get("summary"):
             failed = gate["summary"].get("failed_steps", [])
             lines.append(f"- Failed steps: {', '.join(failed) or 'none'}")
+        if gate.get("steps"):
+            failed_steps = [str(step.get("name")) for step in gate.get("steps", []) if not step.get("pass")]
+            lines.append(f"- Step failures: {', '.join(failed_steps) or 'none'}")
         if gate.get("placeholder_errors") is not None:
             lines.append(f"- Template placeholder checks: {gate.get('placeholder_errors', 0)}")
         for finding in gate.get("findings", [])[:20]:

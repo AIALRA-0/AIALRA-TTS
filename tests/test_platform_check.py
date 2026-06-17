@@ -4,7 +4,7 @@ from pathlib import Path
 import yaml
 
 from ecse_localizer.cli import main
-from ecse_localizer.platform_check import run_platform_check
+from ecse_localizer.platform_check import run_platform_check, webui_api_smoke_gate
 from ecse_localizer.utils import PROJECT_ROOT
 
 
@@ -71,9 +71,11 @@ def test_platform_check_aggregates_release_worker_remote_and_template_gates(tmp_
         "release_check",
         "translation_sample",
         "remote_smoke",
+        "webui_api_smoke",
         "worker_health_local",
         "deploy_template_guard",
     }
+    assert result["gates"]["webui_api_smoke"]["pass"] is True
     assert result["gates"]["deploy_template_guard"]["placeholder_errors"] > 0
     assert Path(result["json"]).exists()
     assert Path(result["markdown"]).exists()
@@ -96,3 +98,19 @@ def test_platform_check_cli_writes_reports(tmp_path, capsys):
     assert payload["summary"]["failed_gates"] == []
     assert Path(payload["json"]).exists()
     assert Path(payload["markdown"]).exists()
+
+
+def test_webui_api_smoke_gate_uses_isolated_state_and_checks_core_apis(tmp_path):
+    out = tmp_path / "platform"
+
+    result = webui_api_smoke_gate(config(tmp_path), out)
+
+    assert result["pass"] is True
+    assert Path(result["config"]).exists()
+    assert Path(result["config"]).is_relative_to(out)
+    steps = {step["name"]: step for step in result["steps"]}
+    assert steps["auth_required"]["pass"] is True
+    assert steps["login"]["pass"] is True
+    assert steps["dashboard"]["pass"] is True
+    assert steps["quota"]["pass"] is True
+    assert steps["capabilities"]["pass"] is True
