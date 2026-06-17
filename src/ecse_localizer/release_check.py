@@ -29,6 +29,8 @@ REQUIRED_FILES = [
     "10_release_check.ps1",
     "11_remote_smoke.ps1",
     "12_platform_check.ps1",
+    "13_start_worker.ps1",
+    "install_worker_task.ps1",
 ]
 
 REQUIRED_GITIGNORE_PATTERNS = [

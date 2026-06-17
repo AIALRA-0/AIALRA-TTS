@@ -77,28 +77,25 @@ Contabo should store only metadata, small thumbnails, low-bitrate previews, and 
 
 Remote production config should keep `webui.allow_remote_media_uploads: false` and `webui.allow_worker_path_submission: false`. The Windows worker can publish opaque `worker-ref:<id>` media options from `worker.media_roots` or `input_dir`; Contabo stores only file name, size, media type, and ref id, while the real path stays in the worker's local registry. A raw Windows worker-visible path can be enabled only for a private trusted deployment by setting `webui.allow_worker_path_submission: true`; public Contabo deployments should not store these paths. Add a private worker upload tunnel later if users need browser uploads without placing originals on the Contabo disk.
 
-Windows worker heartbeat:
+Windows worker health and unified runner:
 
 ```powershell
 cd "<VIDEO_ROOT>\_localizer_project"
 $env:REMOTE_PUBLIC_BASE_URL="https://your-contabo-domain.example"
 $env:WORKER_SHARED_TOKEN="<generated-worker-hmac-secret>"
 .\09_worker_healthcheck.ps1
-.\06_worker_heartbeat.ps1 -Loop
+.\13_start_worker.ps1 -LocalCheck
+.\13_start_worker.ps1
 ```
 
-Windows worker queue polling:
-
-```powershell
-.\07_worker_poll.ps1 -RemoteBaseUrl $env:REMOTE_PUBLIC_BASE_URL -WorkerToken $env:WORKER_SHARED_TOKEN
-```
-
-The preferred long-running worker entry is now the unified worker mode. It sends HMAC-signed heartbeats and claims queued jobs from the same process:
+The preferred long-running worker entry sends HMAC-signed heartbeats and claims queued jobs from the same process:
 
 ```powershell
 python -m ecse_localizer worker --local-check
 python -m ecse_localizer worker --remote-base-url $env:REMOTE_PUBLIC_BASE_URL --worker-token $env:WORKER_SHARED_TOKEN
 ```
+
+`06_worker_heartbeat.ps1` and `07_worker_poll.ps1` remain as compatibility split scripts, but production should run the unified worker unless there is a specific operational reason to split heartbeat and polling.
 
 `worker.max_concurrent_jobs` defaults to `1`. Increase it only after smoke testing GPU memory use; the long-running worker can claim multiple jobs in parallel using per-slot worker IDs such as `local-windows-worker-1` and `local-windows-worker-2`.
 
@@ -125,9 +122,10 @@ Full-output downloads in remote mode are request-based. The Windows worker keeps
 Optional Windows Scheduled Tasks:
 
 ```powershell
-.\install_worker_heartbeat_task.ps1 -RemoteBaseUrl $env:REMOTE_PUBLIC_BASE_URL -WorkerToken $env:WORKER_SHARED_TOKEN
-.\install_worker_poll_task.ps1 -RemoteBaseUrl $env:REMOTE_PUBLIC_BASE_URL -WorkerToken $env:WORKER_SHARED_TOKEN
+.\install_worker_task.ps1 -RemoteBaseUrl $env:REMOTE_PUBLIC_BASE_URL -WorkerToken $env:WORKER_SHARED_TOKEN -StoreUserEnvironment
 ```
+
+The unified task reads `REMOTE_PUBLIC_BASE_URL` and `WORKER_SHARED_TOKEN` from the user environment at runtime, so the token is not embedded in the scheduled task command line. The older `install_worker_heartbeat_task.ps1` and `install_worker_poll_task.ps1` scripts are still available for split deployments.
 
 Contabo deployment templates live in `deploy/`:
 

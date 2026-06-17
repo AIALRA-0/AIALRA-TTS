@@ -72,17 +72,15 @@ Deployment steps:
    - on Windows, run:
      ```powershell
      .\09_worker_healthcheck.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
-     .\06_worker_heartbeat.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN" -Loop
-     ```
-   - to claim and execute queued jobs on Windows, run:
-     ```powershell
-     .\07_worker_poll.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
+     .\13_start_worker.ps1 -LocalCheck
+     .\13_start_worker.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
      ```
    - preferred direct worker entry:
      ```powershell
      python -m ecse_localizer worker --local-check
      python -m ecse_localizer worker --remote-base-url "https://your-domain.example" --worker-token "$env:WORKER_SHARED_TOKEN"
      ```
+   - `06_worker_heartbeat.ps1` and `07_worker_poll.ps1` remain available only as compatibility split scripts; the unified worker is the production default.
    - queued job metadata for source language, target subtitle language, TTS language, quality mode, and style is applied on the Windows worker through a generated local job config under `runs/worker_job_configs`.
    - if the Windows worker heartbeat is missing or stale, new jobs must stay `queued` and the UI must show that they are waiting for the local worker, not that GPU processing has already started.
    - during long jobs, the worker posts `running` status updates with best-effort progress, GPU/CPU/disk metrics, local managed-storage byte counts, and a short log tail; do not require Contabo to read Windows log files directly.
@@ -97,9 +95,9 @@ Deployment steps:
    - after successful jobs, the worker registers opaque full-output artifact refs; users request full downloads by queuing an `upload_artifact_cache` worker action, and the worker uploads only that selected file to `/api/worker/jobs/{job_id}/artifact-cache` as temporary remote cache.
    - or install the scheduled task:
      ```powershell
-     .\install_worker_heartbeat_task.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
-     .\install_worker_poll_task.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
+     .\install_worker_task.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN" -StoreUserEnvironment
      ```
+     The unified scheduled task reads the remote URL and worker token from the user environment at runtime instead of embedding the token in task arguments.
 11. Validate:
    - `python -m ecse_localizer --config deploy/config.remote.yaml deploy-check` returns PASS before the service is exposed
    - `.\09_worker_healthcheck.ps1` returns PASS on the Windows worker before scheduled tasks are installed
