@@ -106,11 +106,13 @@ Deployment steps:
      .\install_worker_task.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN" -StoreUserEnvironment
      ```
      The unified scheduled task reads the remote URL and worker token from the persistent User/Machine environment at runtime instead of embedding the token in task arguments; the installer refuses to create the task unless those values are already persistent or `-StoreUserEnvironment` is used.
+     Manage the installed task with `.\14_manage_worker_task.ps1 -Action Status|Start|Stop|Restart|Uninstall`; the management script redacts task action arguments and supports `-Json` for monitoring.
 11. Validate:
    - `python -m ecse_localizer --config deploy/config.remote.yaml deploy-check` returns PASS before the service is exposed
    - `.\09_worker_healthcheck.ps1` returns PASS on the Windows worker before scheduled tasks are installed
    - `python -m ecse_localizer translation-sample --output runs/translation_quality_sample` creates JSON/Markdown comparing literal, lecture, coherence, and repair stages
    - `python -m ecse_localizer remote-smoke --output runs/remote_smoke` passes the local Contabo/worker queue simulation
+   - `.\14_manage_worker_task.ps1 -Action Status -Json` returns installed/running state for the unified Windows worker task after scheduled-task installation
    - login works
    - project creation works
    - project folders can be created and selected for jobs
@@ -183,6 +185,10 @@ The repository includes:
 - `deploy/systemd/aialra-worker-tunnel.service`
 - `deploy/systemd/aialra-cleanup.service`
 - `deploy/systemd/aialra-cleanup.timer`
+- `09_worker_healthcheck.ps1`
+- `13_start_worker.ps1`
+- `install_worker_task.ps1`
+- `14_manage_worker_task.ps1`
 - `RELEASE.md`
 - `.github/workflows/ci.yml`
 

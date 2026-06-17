@@ -32,3 +32,15 @@ def test_start_worker_script_reads_remote_secret_from_environment_by_default():
     assert '[string]$WorkerToken = $env:WORKER_SHARED_TOKEN' in text
     assert "$env:WORKER_SHARED_TOKEN = $WorkerToken" in text
     assert "WorkerToken is required" in text
+
+
+def test_manage_worker_task_script_does_not_read_or_print_worker_secret():
+    script = Path(__file__).resolve().parents[1] / "14_manage_worker_task.ps1"
+    text = script.read_text(encoding="utf-8")
+
+    assert "WORKER_SHARED_TOKEN" not in text
+    assert "REMOTE_PUBLIC_BASE_URL" not in text
+    assert "actions_redacted" in text
+    assert "Task command arguments are intentionally omitted" in text
+    for action in ["Status", "Start", "Stop", "Restart", "Uninstall"]:
+        assert f'"{action}"' in text

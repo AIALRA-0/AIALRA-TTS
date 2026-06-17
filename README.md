@@ -133,6 +133,17 @@ Optional Windows Scheduled Tasks:
 
 The unified task reads `REMOTE_PUBLIC_BASE_URL` and `WORKER_SHARED_TOKEN` from the persistent User/Machine environment at runtime, so the token is not embedded in the scheduled task command line. The installer refuses to create the task unless those values are already persistent or `-StoreUserEnvironment` is used. The older `install_worker_heartbeat_task.ps1` and `install_worker_poll_task.ps1` scripts are still available for split deployments.
 
+Manage the unified scheduled task without exposing command-line secrets:
+
+```powershell
+.\14_manage_worker_task.ps1 -Action Status
+.\14_manage_worker_task.ps1 -Action Restart
+.\14_manage_worker_task.ps1 -Action Stop
+.\14_manage_worker_task.ps1 -Action Uninstall
+```
+
+The management script intentionally omits task action arguments from its output. Use `-Json` when a monitoring script needs machine-readable status.
+
 Contabo deployment templates live in `deploy/`:
 
 - `deploy/docker-compose.yml`
@@ -213,6 +224,7 @@ python -m ecse_localizer worker-health --skip-remote
 python -m ecse_localizer worker --local-check
 python -m ecse_localizer worker --once --dry-run
 python -m ecse_localizer worker-poll --once --dry-run
+.\14_manage_worker_task.ps1 -Action Status -Json
 python -m ecse_localizer --config deploy/config.remote.yaml deploy-check
 python -m ecse_localizer release-check
 python -m ecse_localizer cleanup --older-than-days 7
