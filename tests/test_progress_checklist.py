@@ -4,7 +4,13 @@ from pathlib import Path
 import yaml
 
 from ecse_localizer.cli import main
-from ecse_localizer.progress_checklist import STATUS_DONE, STATUS_NEEDS_VALIDATION, build_progress_checklist, write_progress_checklist
+from ecse_localizer.progress_checklist import (
+    STATUS_DONE,
+    STATUS_IN_PROGRESS,
+    STATUS_NEEDS_VALIDATION,
+    build_progress_checklist,
+    write_progress_checklist,
+)
 from ecse_localizer.utils import read_json
 
 
@@ -43,6 +49,38 @@ def write_platform_report(tmp_path: Path, *, passed: bool = True) -> Path:
     return path
 
 
+def write_smoke_report(tmp_path: Path, *, passed: bool = True) -> Path:
+    output = tmp_path / "output"
+    output.mkdir(parents=True, exist_ok=True)
+    paths = {
+        "en_srt": output / "sample_smoke_90s_en.srt",
+        "zh_srt": output / "sample_smoke_90s_zh.srt",
+        "bilingual_srt": output / "sample_smoke_90s_bilingual.srt",
+        "bilingual_ass": output / "sample_smoke_90s_bilingual.ass",
+        "zh_dub_wav": output / "sample_smoke_90s_zh_dub.wav",
+        "zh_dub_mp4": output / "sample_smoke_90s_zh_dub.mp4",
+    }
+    for path in paths.values():
+        path.write_text("ok", encoding="utf-8")
+    path = output / "sample_smoke_90s_report.json"
+    path.write_text(
+        json.dumps(
+            {
+                "name": "sample_smoke_90s",
+                "mode": "smoke",
+                "source_video": str(tmp_path / "input" / "sample.mp4"),
+                "asr_backend": "existing_subtitle",
+                "translation_backend": "local_llm",
+                "tts": {"backend": "cosyvoice_sft", "segment_count": 12},
+                "outputs": {key: str(value) for key, value in paths.items()},
+                "qa": {"pass": passed, "issues": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_progress_checklist_tracks_objective_and_latest_platform_gate(tmp_path):
     write_platform_report(tmp_path, passed=True)
 
@@ -55,7 +93,25 @@ def test_progress_checklist_tracks_objective_and_latest_platform_gate(tmp_path):
     assert rows["worker.lifecycle"]["status"] == STATUS_DONE
     assert rows["storage.preview_cache"]["status"] == STATUS_DONE
     assert rows["deploy.real_contabo"]["status"] == STATUS_NEEDS_VALIDATION
+    assert rows["validation.smoke_90s"]["status"] == STATUS_NEEDS_VALIDATION
+    assert rows["validation.first_full_lecture"]["status"] == STATUS_NEEDS_VALIDATION
+    assert rows["validation.batch_all"]["status"] == STATUS_NEEDS_VALIDATION
     assert rows["validation.real_video"]["status"] == STATUS_NEEDS_VALIDATION
+
+
+def test_progress_checklist_marks_real_smoke_done_but_full_validation_in_progress(tmp_path):
+    write_platform_report(tmp_path, passed=True)
+    smoke_path = write_smoke_report(tmp_path, passed=True)
+
+    checklist = build_progress_checklist(config(tmp_path))
+
+    assert checklist["latest_real_video_smoke"]["pass"] is True
+    assert checklist["latest_real_video_smoke"]["path"] == str(smoke_path)
+    rows = {item["id"]: item for item in checklist["items"]}
+    assert rows["validation.smoke_90s"]["status"] == STATUS_DONE
+    assert rows["validation.real_video"]["status"] == STATUS_IN_PROGRESS
+    assert rows["validation.first_full_lecture"]["status"] == STATUS_NEEDS_VALIDATION
+    assert rows["validation.batch_all"]["status"] == STATUS_NEEDS_VALIDATION
 
 
 def test_write_progress_checklist_creates_markdown_and_json(tmp_path):
@@ -72,6 +128,7 @@ def test_write_progress_checklist_creates_markdown_and_json(tmp_path):
     text = md_path.read_text(encoding="utf-8")
     assert "AIALRA Local Video Localizer Progress Checklist" in text
     assert "deploy.real_contabo" in text
+    assert "validation.smoke_90s" in text
     assert "validation.real_video" in text
 
 
