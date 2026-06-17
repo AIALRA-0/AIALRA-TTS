@@ -4,6 +4,7 @@ param(
   [string]$WorkerId = "local-windows-worker",
   [int]$IntervalSeconds = 15,
   [int]$HeartbeatIntervalSeconds = 60,
+  [int]$MaxConcurrentJobs = 1,
   [switch]$Once,
   [switch]$DryRun,
   [switch]$NoHeartbeat
@@ -24,6 +25,7 @@ $argsList = @(
   "--worker-token", $WorkerToken,
   "--worker-id", $WorkerId,
   "--interval-seconds", [string]$IntervalSeconds,
+  "--max-concurrent-jobs", [string]$MaxConcurrentJobs,
   "--heartbeat-interval-seconds", [string]$HeartbeatIntervalSeconds
 )
 if ($Once) { $argsList += "--once" }

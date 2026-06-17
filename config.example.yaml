@@ -186,6 +186,7 @@ webui:
   cleanup_older_than_days: 7
 
 worker:
+  max_concurrent_jobs: 1
   status_interval_seconds: 15
   log_tail_lines: 160
   report_input_storage_usage: false

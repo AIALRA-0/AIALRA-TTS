@@ -39,14 +39,17 @@ from ecse_localizer.worker_client import (
     collect_worker_media_refs,
     extract_progress_from_text,
     get_worker_control,
+    poll_concurrent_once,
     redacted_command,
     resolve_worker_media_args,
     running_status_payload,
     summarize_result,
     worker_control_cancel_requested,
     worker_args,
+    worker_concurrency,
     worker_headers,
     worker_signature,
+    worker_slot_id,
 )
 from ecse_localizer.worker_client import find_registered_artifact, preview_source_path, register_worker_artifacts, upload_worker_artifact_cache, upload_worker_preview
 
@@ -89,6 +92,43 @@ def test_worker_args_are_portable(tmp_path):
     )
     args = worker_args_from_command(command)
     assert args == ["process-one", "--video", r"C:\worker-local\lecture.mp4"]
+
+
+def test_worker_concurrency_is_configurable_and_clamped():
+    assert worker_concurrency({}) == 1
+    assert worker_concurrency({"worker": {"max_concurrent_jobs": 3}}) == 3
+    assert worker_concurrency({"worker": {"max_concurrent_jobs": 99}}) == 8
+    assert worker_concurrency({"worker": {"max_concurrent_jobs": "bad"}}) == 1
+    assert worker_concurrency({}, override=2) == 2
+
+
+def test_worker_slot_id_is_stable_for_parallel_claims():
+    assert worker_slot_id("worker-main", 0, 1) == "worker-main"
+    assert worker_slot_id("worker-main", 0, 3) == "worker-main-1"
+    assert worker_slot_id("worker-main", 2, 3) == "worker-main-3"
+
+
+def test_poll_concurrent_once_uses_per_slot_worker_ids(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_poll_once(**kwargs):
+        calls.append(kwargs["worker_id"])
+        return {"ok": True, "claimed": kwargs["worker_id"].endswith("-1"), "worker_id": kwargs["worker_id"]}
+
+    monkeypatch.setattr("ecse_localizer.worker_client.poll_once", fake_poll_once)
+
+    result = poll_concurrent_once(
+        remote_base_url="https://remote.example",
+        worker_token="worker-token",
+        config={"worker": {"max_concurrent_jobs": 3}},
+        config_path=tmp_path / "config.yaml",
+        worker_id="worker-main",
+    )
+
+    assert result["ok"] is True
+    assert result["max_concurrent_jobs"] == 3
+    assert result["claimed_count"] == 1
+    assert set(calls) == {"worker-main-1", "worker-main-2", "worker-main-3"}
 
 
 def test_file_display_name_handles_windows_and_posix_paths():

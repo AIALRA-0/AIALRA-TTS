@@ -46,7 +46,7 @@ from .translate import translate_segments
 from .translation_sample import write_translation_quality_sample
 from .tts import build_aligned_dub, tts_health
 from .utils import PROJECT_ROOT, copy_text, ensure_dir, now_id, setup_logger, slugify, write_json
-from .worker_client import collect_worker_media_refs, poll_loop, poll_once, post_worker_heartbeat
+from .worker_client import collect_worker_media_refs, poll_concurrent_once, poll_loop, poll_once, post_worker_heartbeat, worker_concurrency
 from .worker_health import assess_worker_health
 
 
@@ -115,6 +115,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--worker-id", default="local-windows-worker")
     p.add_argument("--interval-seconds", type=int, default=15)
     p.add_argument("--heartbeat-interval-seconds", type=int, default=60)
+    p.add_argument("--max-concurrent-jobs", type=int, help="Override worker.max_concurrent_jobs for this worker process.")
     p.add_argument("--once", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--no-heartbeat", action="store_true")
@@ -128,6 +129,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--worker-token", required=True)
     p.add_argument("--worker-id", default="local-windows-worker")
     p.add_argument("--interval-seconds", type=int, default=15)
+    p.add_argument("--max-concurrent-jobs", type=int, help="Override worker.max_concurrent_jobs for this poller.")
     p.add_argument("--once", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("deploy-check")
@@ -318,7 +320,7 @@ def build_worker_status_payload(config: dict[str, Any], *, worker_id: str = "loc
         "tts": tts,
         "llm": llm.__dict__,
         "capabilities": language_capabilities(config, llm_status=llm, tts_status=tts),
-        "worker": store.worker_status(),
+        "worker": {**store.worker_status(), "max_concurrent_jobs": worker_concurrency(config)},
     }
 
 
@@ -412,14 +414,26 @@ def cmd_worker(args: argparse.Namespace, config: dict[str, Any]) -> int:
             heartbeat = send_worker_heartbeat(args, config)
         poll_result = None
         if not args.heartbeat_only:
-            poll_result = poll_once(
-                remote_base_url=args.remote_base_url,
-                worker_token=args.worker_token,
-                worker_id=args.worker_id,
-                config=config,
-                config_path=args.config,
-                dry_run=args.dry_run,
-            )
+            max_jobs = worker_concurrency(config, args.max_concurrent_jobs)
+            if max_jobs <= 1:
+                poll_result = poll_once(
+                    remote_base_url=args.remote_base_url,
+                    worker_token=args.worker_token,
+                    worker_id=args.worker_id,
+                    config=config,
+                    config_path=args.config,
+                    dry_run=args.dry_run,
+                )
+            else:
+                poll_result = poll_concurrent_once(
+                    remote_base_url=args.remote_base_url,
+                    worker_token=args.worker_token,
+                    worker_id=args.worker_id,
+                    config=config,
+                    config_path=args.config,
+                    max_concurrent_jobs=max_jobs,
+                    dry_run=args.dry_run,
+                )
         print(json.dumps({"ok": True, "heartbeat": heartbeat, "poll": poll_result}, ensure_ascii=False, indent=2))
         return 0
     worker_loop(args, config)
@@ -438,14 +452,26 @@ def worker_loop(args: argparse.Namespace, config: dict[str, Any]) -> None:
                 print(f"worker heartbeat warning: {type(exc).__name__}", file=sys.stderr)
         if not args.heartbeat_only:
             try:
-                poll_once(
-                    remote_base_url=args.remote_base_url,
-                    worker_token=args.worker_token,
-                    worker_id=args.worker_id,
-                    config=config,
-                    config_path=args.config,
-                    dry_run=args.dry_run,
-                )
+                max_jobs = worker_concurrency(config, args.max_concurrent_jobs)
+                if max_jobs <= 1:
+                    poll_once(
+                        remote_base_url=args.remote_base_url,
+                        worker_token=args.worker_token,
+                        worker_id=args.worker_id,
+                        config=config,
+                        config_path=args.config,
+                        dry_run=args.dry_run,
+                    )
+                else:
+                    poll_concurrent_once(
+                        remote_base_url=args.remote_base_url,
+                        worker_token=args.worker_token,
+                        worker_id=args.worker_id,
+                        config=config,
+                        config_path=args.config,
+                        max_concurrent_jobs=max_jobs,
+                        dry_run=args.dry_run,
+                    )
             except Exception as exc:
                 print(f"worker poll warning: {type(exc).__name__}", file=sys.stderr)
         sleep_seconds = args.heartbeat_interval_seconds if args.heartbeat_only else args.interval_seconds
@@ -464,14 +490,26 @@ def send_worker_heartbeat(args: argparse.Namespace, config: dict[str, Any]) -> d
 
 def cmd_worker_poll(args: argparse.Namespace, config: dict[str, Any]) -> int:
     if args.once or args.dry_run:
-        result = poll_once(
-            remote_base_url=args.remote_base_url,
-            worker_token=args.worker_token,
-            worker_id=args.worker_id,
-            config=config,
-            config_path=args.config,
-            dry_run=args.dry_run,
-        )
+        max_jobs = worker_concurrency(config, args.max_concurrent_jobs)
+        if max_jobs <= 1:
+            result = poll_once(
+                remote_base_url=args.remote_base_url,
+                worker_token=args.worker_token,
+                worker_id=args.worker_id,
+                config=config,
+                config_path=args.config,
+                dry_run=args.dry_run,
+            )
+        else:
+            result = poll_concurrent_once(
+                remote_base_url=args.remote_base_url,
+                worker_token=args.worker_token,
+                worker_id=args.worker_id,
+                config=config,
+                config_path=args.config,
+                max_concurrent_jobs=max_jobs,
+                dry_run=args.dry_run,
+            )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     poll_loop(
@@ -481,6 +519,7 @@ def cmd_worker_poll(args: argparse.Namespace, config: dict[str, Any]) -> int:
         config=config,
         config_path=args.config,
         interval_seconds=args.interval_seconds,
+        max_concurrent_jobs=args.max_concurrent_jobs,
     )
     return 0
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import hashlib
 import hmac
@@ -49,6 +50,63 @@ def poll_once(
     return {"ok": True, "claimed": True, "job_id": job.get("id"), "result": result}
 
 
+def poll_concurrent_once(
+    *,
+    remote_base_url: str,
+    worker_token: str,
+    config: dict[str, Any],
+    config_path: str | Path,
+    worker_id: str = "local-windows-worker",
+    max_concurrent_jobs: int | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    max_jobs = worker_concurrency(config, max_concurrent_jobs)
+    if dry_run or max_jobs <= 1:
+        result = poll_once(
+            remote_base_url=remote_base_url,
+            worker_token=worker_token,
+            config=config,
+            config_path=config_path,
+            worker_id=worker_id,
+            dry_run=dry_run,
+        )
+        return {
+            "ok": bool(result.get("ok", True)),
+            "max_concurrent_jobs": 1,
+            "claimed_count": 1 if result.get("claimed") else 0,
+            "results": [result],
+        }
+
+    results: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=max_jobs, thread_name_prefix="ecse-worker") as executor:
+        futures = {
+            executor.submit(
+                poll_once,
+                remote_base_url=remote_base_url,
+                worker_token=worker_token,
+                config=config,
+                config_path=config_path,
+                worker_id=worker_slot_id(worker_id, slot, max_jobs),
+                dry_run=False,
+            ): worker_slot_id(worker_id, slot, max_jobs)
+            for slot in range(max_jobs)
+        }
+        for future in as_completed(futures):
+            slot_id = futures[future]
+            try:
+                result = future.result()
+                result.setdefault("worker_id", slot_id)
+                results.append(result)
+            except Exception as exc:
+                results.append({"ok": False, "claimed": False, "worker_id": slot_id, "error": f"{type(exc).__name__}: {exc}"})
+    return {
+        "ok": not any(not item.get("ok", False) for item in results),
+        "max_concurrent_jobs": max_jobs,
+        "claimed_count": sum(1 for item in results if item.get("claimed")),
+        "results": sorted(results, key=lambda item: str(item.get("worker_id") or "")),
+    }
+
+
 def poll_loop(
     *,
     remote_base_url: str,
@@ -57,19 +115,40 @@ def poll_loop(
     config_path: str | Path,
     worker_id: str = "local-windows-worker",
     interval_seconds: int = 15,
+    max_concurrent_jobs: int | None = None,
 ) -> None:
     while True:
         try:
-            poll_once(
+            poll_concurrent_once(
                 remote_base_url=remote_base_url,
                 worker_token=worker_token,
                 config=config,
                 config_path=config_path,
                 worker_id=worker_id,
+                max_concurrent_jobs=max_concurrent_jobs,
             )
         except Exception as exc:
             print(f"worker poll error: {exc}", file=sys.stderr)
         time.sleep(max(5, interval_seconds))
+
+
+def worker_concurrency(config: dict[str, Any], override: int | None = None) -> int:
+    raw = override
+    if raw is None:
+        worker_cfg = config.get("worker", {}) if isinstance(config.get("worker"), dict) else {}
+        raw = worker_cfg.get("max_concurrent_jobs", 1)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 1
+    return max(1, min(8, value))
+
+
+def worker_slot_id(worker_id: str, slot: int, max_jobs: int) -> str:
+    base = str(worker_id or "local-windows-worker")
+    if max_jobs <= 1:
+        return base
+    return f"{base}-{slot + 1}"
 
 
 def claim_job(remote_base_url: str, worker_token: str, worker_id: str, config: dict[str, Any]) -> dict[str, Any] | None:
