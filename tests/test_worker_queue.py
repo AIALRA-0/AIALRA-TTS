@@ -18,6 +18,7 @@ from ecse_localizer.webui import (
     enforce_active_job_limits,
     file_display_name,
     infer_job_type,
+    job_queue_summary,
     list_jobs,
     pause_job_record,
     require_worker_token,
@@ -458,6 +459,52 @@ def test_active_job_limits_count_user_and_global_records(tmp_path):
 
     update_job(state, list_jobs(state, "admin")[0]["id"], {"status": "done"})
     enforce_active_job_limits(state, "new-user")
+
+
+def test_job_queue_summary_reports_status_counts_and_worker_slots(tmp_path):
+    state = WebState(write_config(tmp_path))
+    state.webui["execution_mode"] = "worker_queue"
+    state.store.record_worker_heartbeat({"worker_id": "worker-main", "max_concurrent_jobs": 3})
+    queued = create_job_record(
+        state,
+        "audit",
+        "Audit input directory",
+        ["python", "-m", "ecse_localizer", "audit"],
+        user="admin",
+        metadata={"worker_args": ["audit", "--input", "x"]},
+        dispatch_target="worker",
+    )
+    running = create_job_record(
+        state,
+        "smoke",
+        "Smoke test",
+        ["python", "-m", "ecse_localizer", "smoke"],
+        user="admin",
+        metadata={"worker_args": ["smoke", "--input", "x"]},
+        dispatch_target="worker",
+    )
+    claimed = create_job_record(
+        state,
+        "process_one",
+        "Process one",
+        ["python", "-m", "ecse_localizer", "process-one"],
+        user="other",
+        metadata={"worker_args": ["process-one", "--video", "x"]},
+        dispatch_target="worker",
+    )
+    update_job(state, running["id"], {"status": "running", "claimed_by": "worker-main-1"})
+    update_job(state, claimed["id"], {"status": "claimed", "claimed_by": "worker-main-2"})
+
+    summary = job_queue_summary(state, "admin")
+
+    assert queued["status"] == "queued"
+    assert summary["status_counts"]["queued"] == 1
+    assert summary["status_counts"]["running"] == 1
+    assert summary["status_counts"]["claimed"] == 1
+    assert summary["worker_max_slots"] == 3
+    assert summary["worker_slots_used"] == 2
+    assert summary["worker_slots_available"] == 1
+    assert summary["worker_waiting_jobs"] == 1
 
 
 def test_claim_worker_job_marks_job_claimed(tmp_path):

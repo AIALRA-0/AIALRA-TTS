@@ -555,6 +555,8 @@ def test_metrics_endpoint_returns_live_worker_metrics_without_paths(tmp_path):
     body = response.json()
     assert body["worker"]["heartbeat_online"] is True
     assert body["worker"]["max_concurrent_jobs"] == 2
+    assert body["queue"]["worker_max_slots"] == 2
+    assert body["queue"]["worker_slots_available"] == 2
     assert body["metrics"]["source"] == "worker_heartbeat"
     assert body["metrics"]["cpu"]["load_percent"] == 42
     assert body["metrics"]["memory"]["used_percent"] == 38

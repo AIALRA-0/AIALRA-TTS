@@ -243,6 +243,11 @@ function renderRuntimeMetrics(data) {
     workerMetric.textContent = workerLabel(data.worker);
     workerMetric.title = data.worker?.message || "";
   }
+  const queueMetric = $("metricQueue");
+  if (queueMetric) {
+    queueMetric.textContent = queueLabel(data.queue);
+    queueMetric.title = queueTitle(data.queue);
+  }
   const diskMetric = $("metricDisk");
   if (diskMetric) diskMetric.textContent = metrics.disk ? percentText(metrics.disk.used_percent) : "-";
 }
@@ -262,6 +267,22 @@ function workerLabel(worker) {
     return "等待 worker";
   }
   return worker.status === "online" ? `online${slotLabel}` : "local";
+}
+
+function queueLabel(queue) {
+  if (!queue) return "-";
+  const running = Number(queue.status_counts?.running || 0) + Number(queue.status_counts?.claimed || 0);
+  const waiting = Number(queue.status_counts?.queued || 0) + Number(queue.status_counts?.retrying || 0);
+  return `${Math.max(0, running)} 运行 / ${Math.max(0, waiting)} 等待`;
+}
+
+function queueTitle(queue) {
+  if (!queue) return "";
+  return [
+    `active user/global: ${queue.active_user || 0}/${queue.active_global || 0}`,
+    `worker slots: ${queue.worker_slots_used || 0}/${queue.worker_max_slots || 1}`,
+    `worker waiting: ${queue.worker_waiting_jobs || 0}`,
+  ].join(" · ");
 }
 
 function renderUploadPolicy() {

@@ -193,6 +193,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         tts = tts_health(state.config)
         worker = worker_status_payload(state)
         caps = effective_language_capabilities(state, llm=llm, tts=tts, worker=worker)
+        jobs = list_jobs(state, user)
         return {
             "input_dir": state.config["input_dir"],
             "output_dir": state.config["output_dir"],
@@ -201,13 +202,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             "video_count": len(videos),
             "report_count": len(list_reports(state.config, limit=10000)),
             "latest_reports": reports,
-            "latest_jobs": [public_job_record(job) for job in list_jobs(state, user)[:8]],
+            "latest_jobs": [public_job_record(job) for job in jobs[:8]],
             "tts": tts,
             "llm": llm.__dict__,
             "capabilities": caps,
             "quota": state.store.quota_status(user),
             "projects": state.store.list_projects(user, admin=is_admin(state, user)),
             "worker": worker,
+            "queue": job_queue_summary(state, user, worker=worker, jobs=jobs),
             "metrics": dashboard_metrics(state, worker),
         }
 
@@ -471,7 +473,12 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     @app.get("/api/metrics")
     def metrics(user: str = Depends(require_user)) -> dict[str, Any]:
         worker = worker_status_payload(state)
-        return {"metrics": dashboard_metrics(state, worker), "worker": worker, "quota": state.store.quota_status(user)}
+        return {
+            "metrics": dashboard_metrics(state, worker),
+            "worker": worker,
+            "quota": state.store.quota_status(user),
+            "queue": job_queue_summary(state, user, worker=worker),
+        }
 
     @app.get("/api/users")
     def users(user: str = Depends(require_user)) -> dict[str, Any]:
@@ -1132,6 +1139,48 @@ def active_job_counts(state: WebState, user: str) -> dict[str, int]:
     return {"user": user_active, "global": global_active}
 
 
+def job_queue_summary(
+    state: WebState,
+    user: str,
+    *,
+    worker: dict[str, Any] | None = None,
+    jobs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    visible_jobs = jobs if jobs is not None else list_jobs(state, user)
+    status_counts = {status: 0 for status in NORMALIZED_JOB_STATUSES}
+    for record in visible_jobs:
+        status = normalize_job_status(str(record.get("status") or "queued"))
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+    all_jobs = list_jobs(state, None)
+    counts = active_job_counts(state, user)
+    worker = worker or worker_status_payload(state)
+    max_slots = max(1, min(8, coerce_int(worker.get("max_concurrent_jobs"), 1)))
+    worker_busy = sum(
+        1
+        for record in all_jobs
+        if record.get("dispatch_target") == "worker" and normalize_job_status(str(record.get("status") or "")) in {"claimed", "running"}
+    )
+    worker_waiting = sum(
+        1
+        for record in all_jobs
+        if record.get("dispatch_target") == "worker" and normalize_job_status(str(record.get("status") or "")) in {"queued", "retrying"}
+    )
+    slots_used = min(max_slots, worker_busy)
+    return {
+        "visible_total": sum(status_counts.values()),
+        "status_counts": status_counts,
+        "active_user": counts["user"],
+        "active_global": counts["global"],
+        "worker_max_slots": max_slots,
+        "worker_slots_used": slots_used,
+        "worker_slots_available": max(0, max_slots - slots_used),
+        "worker_busy_jobs": worker_busy,
+        "worker_waiting_jobs": worker_waiting,
+        "worker_online": bool(worker.get("heartbeat_online")),
+    }
+
+
 def enforce_active_job_limits(state: WebState, user: str) -> None:
     max_user = int(state.webui.get("max_active_jobs_per_user", 2) or 0)
     max_global = int(state.webui.get("max_active_jobs_global", 8) or 0)
@@ -1140,6 +1189,13 @@ def enforce_active_job_limits(state: WebState, user: str) -> None:
         raise HTTPException(status_code=429, detail=f"Active job limit reached for user: {counts['user']}/{max_user}")
     if max_global > 0 and counts["global"] >= max_global:
         raise HTTPException(status_code=429, detail=f"Global active job limit reached: {counts['global']}/{max_global}")
+
+
+def coerce_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 async def require_worker_request(request: Request, state: WebState) -> dict[str, Any]:
