@@ -19,6 +19,18 @@ def test_best_quality_defaults_enabled():
     assert any("Do not omit" in item for item in quality_requirements(config))
 
 
+def test_best_quality_style_guide_is_target_language_aware():
+    config = {"translation": {"quality_mode": "best_quality", "target_language": "es", "style": "natural_lecture"}}
+
+    guide = default_style_guide(config)
+    requirements = quality_requirements(config)
+
+    assert "requested target language (es)" in guide
+    assert "中文表达" not in guide
+    assert any("target-language lecture wording" in item for item in requirements)
+    assert not any("Chinese lecture wording" in item for item in requirements)
+
+
 def test_context_window_keeps_neighbor_segments_only():
     segments = [Segment(i, float(i), float(i + 1), f"text {i}") for i in range(1, 6)]
     before = context_window(segments, 2, -2)
@@ -174,6 +186,48 @@ def test_coherence_pass_cannot_drop_protected_placeholders():
     assert not any(flag.startswith("MISSING_PROTECTED_TERM") for flag in flags)
 
 
+def test_non_chinese_target_translation_is_accepted_and_keeps_spaces():
+    config = {
+        "translation": {
+            "target_language": "es",
+            "max_zh_chars_per_second": 80,
+            "max_zh_chars_per_subtitle_line": 80,
+        }
+    }
+    segments = [
+        Segment(
+            1,
+            0.0,
+            2.0,
+            "Use Vout = Vin * R2 / (R1 + R2) before running sensor_readout.py.",
+        )
+    ]
+    fake = FakeSpanishLLMClient()
+
+    results = request_llm_chunk(
+        segments,
+        0,
+        segments,
+        "",
+        config,
+        fake,
+        "literal",
+        "rewrite",
+        "style",
+        "",
+        {},
+    )
+
+    _, literal, lecture, flags, _ = results[0]
+    assert literal.startswith("Primero usamos ")
+    assert lecture.startswith("Primero usamos ")
+    assert " " in lecture
+    assert "Vout = Vin * R2 / (R1 + R2)" in lecture
+    assert "sensor_readout.py" in lecture
+    assert "HIGH_ASCII_RATIO_TRANSLATION" not in flags
+    assert not any(flag.startswith("MISSING_PROTECTED_TERM") for flag in flags)
+
+
 class FakeLLMClient:
     model = "qwen2.5:14b-instruct"
 
@@ -198,6 +252,33 @@ class FakeCoherenceDropsProtectedClient:
         sid = int(segment["id"])
         if "zh_literal" in schema:
             return {"segments": [{"id": sid, "zh_literal": "先使用<KEEP_001>，再运行<KEEP_002>。", "flags": []}]}
-        if "更连贯自然" in schema:
+        if "more coherent" in schema:
             return {"segments": [{"id": sid, "zh_lecture": "先使用分压器公式，再运行脚本。", "flags": ["COHERENCE_REWRITE"]}]}
         return {"segments": [{"id": sid, "zh_lecture": "先使用<KEEP_001>，再运行<KEEP_002>。", "flags": []}]}
+
+
+class FakeSpanishLLMClient:
+    model = "qwen2.5:14b-instruct"
+
+    def json_chat(self, _system, user, schema):
+        payload = json.loads(user)
+        sid = int(payload["segments"][0]["id"])
+        if "zh_literal" in schema:
+            return {
+                "segments": [
+                    {
+                        "id": sid,
+                        "zh_literal": "Primero usamos <KEEP_001> antes de ejecutar <KEEP_002>.",
+                        "flags": [],
+                    }
+                ]
+            }
+        return {
+            "segments": [
+                {
+                    "id": sid,
+                    "zh_lecture": "Primero usamos <KEEP_001> y luego ejecutamos <KEEP_002>.",
+                    "flags": [],
+                }
+            ]
+        }

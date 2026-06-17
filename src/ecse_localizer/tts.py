@@ -13,6 +13,7 @@ from .ffmpeg_utils import audio_duration
 from .llm_local import LocalLLMClient
 from .speaker_gender import resolve_tts_speaker
 from .subtitle_io import Segment
+from .translation_quality import target_uses_compact_script, translation_target_language
 from .utils import PROJECT_ROOT, ensure_dir, run_cmd, write_json
 
 
@@ -720,12 +721,13 @@ def compress_text_for_tts(
         return None
 
     llm_text = llm_compress_text_for_tts(text, target_duration, char_limit, config, logger)
-    if is_valid_tts_compression(text, llm_text, char_limit):
+    if is_valid_tts_compression(text, llm_text, char_limit, config):
         return llm_text
 
-    local_text = local_compact_tts_text(text, char_limit)
-    if is_valid_tts_compression(text, local_text, char_limit + 4):
-        return local_text
+    if target_uses_compact_script(config):
+        local_text = local_compact_tts_text(text, char_limit)
+        if is_valid_tts_compression(text, local_text, char_limit + 4, config):
+            return local_text
     return None
 
 
@@ -741,16 +743,17 @@ def llm_compress_text_for_tts(
         system = prompt_path.read_text(encoding="utf-8")
         payload = {
             "text": text,
+            "target_language": translation_target_language(config),
             "target_duration": round(target_duration, 3),
             "char_limit": char_limit,
-            "instruction": "Compress only for Chinese dubbing. Preserve technical meaning, numbers, acronyms, formulas, names, and URLs.",
+            "instruction": "Compress only for dubbing alignment in the requested target language. Preserve technical meaning, numbers, acronyms, formulas, names, and URLs.",
         }
         client = LocalLLMClient(config)
         status = client.status()
         if not status.available:
             return None
-        data = client.json_chat(system, json.dumps(payload, ensure_ascii=False), '{"text":"压缩后的中文口播稿","flags":[]}')
-        return re.sub(r"\s+", "", str(data.get("text", ""))).strip()
+        data = client.json_chat(system, json.dumps(payload, ensure_ascii=False), '{"text":"compressed target-language dubbing text","flags":[]}')
+        return normalize_tts_compression_candidate(str(data.get("text", "")), config)
     except Exception as exc:
         if logger:
             logger.warning("LLM TTS compression failed: %s", exc)
@@ -805,16 +808,25 @@ def local_compact_tts_text(text: str, char_limit: int) -> str:
     return ensure_sentence_punctuation(shortened)
 
 
-def is_valid_tts_compression(original: str, compressed: str | None, char_limit: int) -> bool:
+def is_valid_tts_compression(original: str, compressed: str | None, char_limit: int, config: dict[str, Any] | None = None) -> bool:
     if not compressed:
         return False
     if len(compressed) >= len(original):
         return False
     if len(compressed) > max(char_limit + 4, int(len(original) * 0.9)):
         return False
-    if not re.search(r"[\u4e00-\u9fff]", compressed):
+    if target_uses_compact_script(config):
+        if not re.search(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]", compressed):
+            return False
+    elif len(re.sub(r"[\s\W_]+", "", compressed, flags=re.UNICODE)) < 2:
         return False
     return preserves_numbers(original, compressed)
+
+
+def normalize_tts_compression_candidate(text: str, config: dict[str, Any]) -> str:
+    if target_uses_compact_script(config):
+        return re.sub(r"\s+", "", text or "").strip()
+    return re.sub(r"\s+", " ", text or "").strip()
 
 
 def preserves_numbers(original: str, compressed: str) -> bool:

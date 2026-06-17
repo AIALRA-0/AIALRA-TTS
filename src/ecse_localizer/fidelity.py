@@ -8,7 +8,14 @@ from typing import Any
 
 from .config import load_config
 from .llm_local import LocalLLMClient
-from .translation_quality import assess_translation_quality, is_possibly_overcompressed, protected_terms_missing, quality_flag_severity
+from .translation_quality import (
+    COMPACT_TARGET_SCRIPT_RE,
+    assess_translation_quality,
+    is_possibly_overcompressed,
+    protected_terms_missing,
+    quality_flag_severity,
+    translation_target_language,
+)
 from .utils import PROJECT_ROOT, ensure_dir, write_json
 
 
@@ -47,10 +54,10 @@ def run_fidelity_audit(
         chunk = pairs[start : start + max(1, chunk_size)]
         if logger:
             logger.info("Fidelity audit segments %d-%d / %d", chunk[0][0]["id"], chunk[-1][0]["id"], len(pairs))
-        reviews.extend(review_chunk(client, prompt, chunk, logger))
+        reviews.extend(review_chunk(client, prompt, chunk, config, logger))
         write_json(output_json, build_audit(report, status.model, reviews, issues=[], partial=True))
 
-    issues.extend(heuristic_fidelity_issues(en_segments, zh_segments))
+    issues.extend(heuristic_fidelity_issues(en_segments, zh_segments, config))
     issues.extend(review_issues(reviews, en_segments))
     audit = build_audit(report, status.model, reviews, issues=issues, partial=False)
     write_json(output_json, audit)
@@ -62,12 +69,20 @@ def review_chunk(
     client: LocalLLMClient,
     prompt: str,
     chunk: list[tuple[dict[str, Any], dict[str, Any]]],
+    config: dict[str, Any] | None = None,
     logger: logging.Logger | None = None,
 ) -> list[dict[str, Any]]:
+    if logger is None and isinstance(config, logging.Logger):
+        logger = config
+        config = None
+    target_language = translation_target_language(config)
     payload = {
+        "target_language": target_language,
         "segments": [
             {
                 "id": en["id"],
+                "source": en["text"],
+                "translation": zh["text"],
                 "english": en["text"],
                 "chinese": zh["text"],
                 "duration": round(float(en.get("end", 0)) - float(en.get("start", 0)), 3),
@@ -125,7 +140,7 @@ def as_str_list(value: Any) -> list[str]:
     return [str(v)[:200] for v in value if str(v).strip()]
 
 
-def heuristic_fidelity_issues(en_segments: list[dict[str, Any]], zh_segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def heuristic_fidelity_issues(en_segments: list[dict[str, Any]], zh_segments: list[dict[str, Any]], config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     issues: list[dict[str, Any]] = []
     for en, zh in zip(en_segments, zh_segments):
         sid = int(en["id"])
@@ -153,19 +168,19 @@ def heuristic_fidelity_issues(en_segments: list[dict[str, Any]], zh_segments: li
                     "missing": missing_protected_terms[:8],
                 }
             )
-        if is_possibly_overcompressed(en_text, zh_text):
+        if is_possibly_overcompressed(en_text, zh_text, config):
             en_words = len(re.findall(r"[A-Za-z0-9]+", en_text))
-            zh_cjk = len(re.findall(r"[\u4e00-\u9fff]", zh_text))
+            target_script_chars = len(COMPACT_TARGET_SCRIPT_RE.findall(zh_text))
             issues.append(
                 {
                     "type": "possibly_overcompressed_translation",
                     "severity": "medium",
                     "segment_id": sid,
                     "en_words": en_words,
-                    "zh_cjk": zh_cjk,
+                    "target_script_chars": target_script_chars,
                 }
             )
-        quality_flags = assess_translation_quality(en_text, zh_text)
+        quality_flags = assess_translation_quality(en_text, zh_text, config=config)
         if quality_flags:
             issues.append(
                 {

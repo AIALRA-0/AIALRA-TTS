@@ -20,6 +20,24 @@ AWKWARD_ZH_PATTERNS: list[tuple[str, str]] = [
     (r"(?:这个|那个|这些|那些)东西", "VAGUE_OBJECT_REFERENCE"),
     (r"被用来去|用来去|去进行|进行一个", "ENGLISH_WORD_ORDER_CALQUE"),
 ]
+COMPACT_TARGET_SCRIPT_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
+
+
+def translation_target_language(config: dict[str, Any] | None = None) -> str:
+    translation = (config or {}).get("translation", {}) if isinstance((config or {}).get("translation", {}), dict) else {}
+    return str(
+        translation.get("target_language")
+        or translation.get("target_subtitle_language")
+        or translation.get("language")
+        or "zh-CN"
+    ).strip().lower()
+
+
+def target_uses_compact_script(config: dict[str, Any] | None = None) -> bool:
+    target = translation_target_language(config)
+    return target.startswith(("zh", "yue", "cmn", "wuu", "ja", "jp", "ko")) or any(
+        marker in target for marker in ["chinese", "cantonese", "mandarin", "japanese", "korean"]
+    )
 
 
 def assess_translation_quality(
@@ -47,10 +65,10 @@ def assess_translation_quality(
     if source_words >= 10 and literal and compact_text(literal) == compact_zh:
         flags.append("LECTURE_REWRITE_UNCHANGED_REVIEW_REQUIRED")
 
-    if is_possibly_overcompressed(source, zh, config):
+    if target_uses_compact_script(config) and is_possibly_overcompressed(source, zh, config):
         flags.append("POSSIBLY_OVERCOMPRESSED_TRANSLATION")
 
-    if untranslated_ascii_ratio(zh) > float((config or {}).get("qa", {}).get("flag_untranslated_ascii_ratio", 0.5)):
+    if target_uses_compact_script(config) and untranslated_ascii_ratio(zh) > float((config or {}).get("qa", {}).get("flag_untranslated_ascii_ratio", 0.5)):
         flags.append("HIGH_ASCII_RATIO_TRANSLATION")
 
     return sorted(set(flags))
@@ -110,10 +128,12 @@ def quality_flag_severity(flags: list[str]) -> str:
 
 
 def is_possibly_overcompressed(source: str, zh: str, config: dict[str, Any] | None = None) -> bool:
+    if not target_uses_compact_script(config):
+        return False
     source_words = english_word_count(source)
     if source_words < int((config or {}).get("qa", {}).get("overcompression_min_source_words", 16)):
         return False
-    zh_cjk = len(re.findall(r"[\u4e00-\u9fff]", zh or ""))
+    zh_cjk = len(COMPACT_TARGET_SCRIPT_RE.findall(zh or ""))
     ratio = float((config or {}).get("qa", {}).get("overcompression_min_zh_per_en_word", 0.45))
     return zh_cjk < max(8, int(source_words * ratio))
 

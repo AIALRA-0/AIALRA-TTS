@@ -1,4 +1,4 @@
-from ecse_localizer.tts import local_compact_tts_text, preserves_numbers
+from ecse_localizer.tts import is_valid_tts_compression, local_compact_tts_text, normalize_tts_compression_candidate, preserves_numbers
 
 
 def test_local_tts_compression_preserves_numbers():
@@ -8,3 +8,13 @@ def test_local_tts_compression_preserves_numbers():
     assert preserves_numbers(text, compact)
     assert "23" in compact
     assert "6" in compact
+
+
+def test_non_chinese_tts_compression_keeps_spaces_and_validates():
+    config = {"translation": {"target_language": "es"}}
+    original = "Ajusta el umbral del comparador a 25 mV antes de la siguiente medición."
+    compressed = "Ajusta el umbral a 25 mV antes de medir."
+
+    assert normalize_tts_compression_candidate("  Ajusta   el umbral a 25 mV.  ", config) == "Ajusta el umbral a 25 mV."
+    assert is_valid_tts_compression(original, compressed, 48, config)
+    assert not is_valid_tts_compression(original, "Ajusta el umbral antes de medir.", 48, config)

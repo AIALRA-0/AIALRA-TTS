@@ -10,7 +10,7 @@ from .glossary import GlossaryTerm
 from .llm_local import LocalLLMClient
 from .subtitle_io import Segment
 from .text_protection import protect_text, restore_text
-from .translation_quality import assess_translation_quality, protected_terms_missing
+from .translation_quality import assess_translation_quality, protected_terms_missing, target_uses_compact_script, translation_target_language
 
 
 @dataclass
@@ -75,16 +75,16 @@ SAFE_SHORT_PHRASES = {
     "that is number one": "这是第一点。",
 }
 
-SINGLE_SEGMENT_RESCUE_PROMPT = """You are a local English-to-Chinese subtitle translator for engineering lectures.
+SINGLE_SEGMENT_RESCUE_PROMPT = """You are a local lecture subtitle translator for engineering lectures.
 Return strict JSON only.
 
 Task:
-- Translate exactly one English subtitle segment into Chinese.
-- If the English is an incomplete spoken fragment, translate it as a natural incomplete Chinese classroom fragment. Do not complete it with invented information.
+- Translate exactly one subtitle segment into the requested target language.
+- If the source is an incomplete spoken fragment, translate it as a natural incomplete target-language classroom fragment. Do not complete it with invented information.
 - Preserve numbers, formulas, variables, code, file paths, URLs, names, acronyms, and protected placeholders.
 - Keep technical terms accurate and concise.
 - Do not summarize, explain, evaluate, or say that the user should review the subtitle.
-- The field zh_literal is faithful; zh_lecture is a natural Chinese teaching subtitle with the same meaning.
+- The field zh_literal is faithful; zh_lecture is a natural target-language teaching subtitle with the same meaning.
 """
 
 
@@ -304,29 +304,29 @@ def rescue_translate_single_segment(
             "next_original": all_segments[absolute_index + 1].text if absolute_index + 1 < len(all_segments) else "",
         },
     }
-    schema = '{"id":1,"zh_literal":"忠实中文翻译","zh_lecture":"自然中文授课字幕","flags":[]}'
+    schema = '{"id":1,"zh_literal":"faithful target-language translation","zh_lecture":"natural target-language lecture subtitle","flags":[]}'
     for attempt in range(1, 4):
         try:
             data = client.json_chat(SINGLE_SEGMENT_RESCUE_PROMPT, json.dumps(payload, ensure_ascii=False), schema)
             lit = restore_and_repair_protected_terms(str(data.get("zh_literal", "")), protected.mapping, seg.text)
             zh = restore_and_repair_protected_terms(str(data.get("zh_lecture", "")), protected.mapping, seg.text)
-            if not is_usable_zh(lit) or is_forbidden_non_translation(lit):
+            if not is_usable_translation(lit, config) or is_forbidden_non_translation(lit):
                 continue
-            if not is_usable_zh(zh) or is_forbidden_non_translation(zh):
+            if not is_usable_translation(zh, config) or is_forbidden_non_translation(zh):
                 continue
             flags = sanitize_flags(data.get("flags", [])) + ["LOCAL_LLM_SINGLE_RESCUE"]
             missing = numbers_missing(seg.text, zh)
             if missing:
                 flags.append("MISSING_NUMBER:" + ",".join(missing[:6]))
             limit = target_limit(seg, config)
-            zh = normalize_zh(zh)
+            zh = normalize_translation(zh, config)
             if len(zh) > limit:
                 flags.append("ZH_OVER_TARGET_LENGTH")
                 if config.get("translation", {}).get("hard_truncate_over_limit", False):
-                    zh = compress_to_limit(zh, limit)
+                    zh = compress_to_limit(zh, limit, config)
             flags.extend(protected_term_flags(seg.text, zh))
             flags.extend(assess_translation_quality(seg.text, zh, lit, config))
-            return (seg, normalize_zh(lit), zh, flags, limit)
+            return (seg, normalize_translation(lit, config), zh, flags, limit)
         except Exception as exc:
             if logger:
                 logger.warning("LLM single-segment rescue failed for segment %s attempt %d: %s", seg.id, attempt, exc)
@@ -385,7 +385,7 @@ def request_llm_chunk(
         },
         ensure_ascii=False,
     )
-    rewrite = client.json_chat(rewrite_prompt, rewrite_user, '{"segments":[{"id":1,"zh_lecture":"自然中文口播译文","flags":[]}]}')
+    rewrite = client.json_chat(rewrite_prompt, rewrite_user, '{"segments":[{"id":1,"zh_lecture":"natural target-language spoken subtitle","flags":[]}]}')
     rewrite_by_id = {int(x["id"]): x for x in rewrite.get("segments", [])}
     if coherence_prompt:
         rewrite_by_id = run_coherence_pass(
@@ -411,22 +411,22 @@ def request_llm_chunk(
         flags.extend(sanitize_flags(literal_row.get("flags", [])) + sanitize_flags(rewrite_row.get("flags", [])))
         if low_capacity:
             flags.append("LOW_CAPACITY_LLM_REVIEW_REQUIRED")
-        if not is_usable_zh(lit) or is_forbidden_non_translation(lit):
+        if not is_usable_translation(lit, config) or is_forbidden_non_translation(lit):
             raise RuntimeError(f"unusable literal translation for segment {seg.id}: {lit[:80]}")
-        if not is_usable_zh(zh) or is_forbidden_non_translation(zh):
+        if not is_usable_translation(zh, config) or is_forbidden_non_translation(zh):
             raise RuntimeError(f"unusable lecture translation for segment {seg.id}: {zh[:80]}")
         missing_numbers = numbers_missing(seg.text, zh)
         if missing_numbers:
             flags.append("MISSING_NUMBER:" + ",".join(missing_numbers[:6]))
         limit = target_limit(seg, config)
-        zh = normalize_zh(zh)
+        zh = normalize_translation(zh, config)
         if len(zh) > limit:
             flags.append("ZH_OVER_TARGET_LENGTH")
             if config.get("translation", {}).get("hard_truncate_over_limit", False):
-                zh = compress_to_limit(zh, limit)
+                zh = compress_to_limit(zh, limit, config)
         flags.extend(protected_term_flags(seg.text, zh))
         flags.extend(assess_translation_quality(seg.text, zh, lit, config))
-        results.append((seg, normalize_zh(lit), zh, flags, limit))
+        results.append((seg, normalize_translation(lit, config), zh, flags, limit))
     return results
 
 
@@ -440,11 +440,16 @@ def use_best_quality(config: dict) -> bool:
 
 
 def quality_requirements(config: dict) -> list[str]:
-    target_language = config.get("translation", {}).get("target_language", "zh-CN")
+    target_language = translation_target_language(config) or "zh-CN"
+    fluency_rule = (
+        "Prefer fluent Chinese lecture wording over English word order."
+        if target_uses_chinese(config)
+        else "Prefer fluent target-language lecture wording over English word order."
+    )
     return [
         f"Target language: {target_language}",
         "Do not omit technical information, numbers, names, formulas, variables, URLs, file paths, or protected placeholders.",
-        "Prefer fluent Chinese lecture wording over English word order.",
+        fluency_rule,
         "Make adjacent subtitle fragments read as one coherent explanation.",
         "Keep the subtitle concise enough for TTS, but never compress away key facts.",
     ]
@@ -452,6 +457,16 @@ def quality_requirements(config: dict) -> list[str]:
 
 def default_style_guide(config: dict) -> str:
     style = config.get("translation", {}).get("style", "natural_chinese_lecture")
+    target_language = translation_target_language(config) or "zh-CN"
+    if not target_uses_chinese(config):
+        return (
+            f"Style: {style}\n"
+            f"- Write in the requested target language ({target_language}) as clear lecture narration, not word-for-word English.\n"
+            "- Use the course glossary consistently; keep technical acronyms in their standard form when appropriate.\n"
+            "- Preserve every number, unit, formula, variable, code token, file path, URL, person name, and paper title.\n"
+            "- Make adjacent subtitle fragments read coherently with natural transitions in the target language.\n"
+            "- Do not add conclusions, evaluations, or explanations that are not present in the source."
+        )
     return (
         f"Style: {style}\n"
         "- 中文表达要像清晰的授课口播，不要像逐词翻译。\n"
@@ -483,7 +498,7 @@ def build_style_guide(
         "glossary": glossary_text,
         "samples": samples,
     }
-    schema = '{"style_guide":"中文授课风格指南","tone_rules":["rule"],"term_notes":["note"],"risk_notes":["note"]}'
+    schema = '{"style_guide":"target-language lecture style guide","tone_rules":["rule"],"term_notes":["note"],"risk_notes":["note"]}'
     try:
         data = client.json_chat(prompt, json.dumps(payload, ensure_ascii=False), schema)
         pieces = [str(data.get("style_guide", "")).strip()]
@@ -607,7 +622,7 @@ def run_coherence_pass(
             for item in protected
         ],
     }
-    schema = '{"segments":[{"id":1,"zh_lecture":"更连贯自然的中文授课字幕","flags":["COHERENCE_REWRITE"],"notes":""}]}'
+    schema = '{"segments":[{"id":1,"zh_lecture":"more coherent and natural target-language lecture subtitle","flags":["COHERENCE_REWRITE"],"notes":""}]}'
     try:
         data = client.json_chat(prompt, json.dumps(payload, ensure_ascii=False), schema)
         rows = data.get("segments", [])
@@ -615,7 +630,7 @@ def run_coherence_pass(
         for sid, row in by_id.items():
             source_item = next((item for item in protected if int(item.get("id", -1)) == sid), {})
             zh = str(row.get("zh_lecture", "")).strip()
-            if not is_usable_zh(zh) or is_forbidden_non_translation(zh):
+            if not is_usable_translation(zh, config) or is_forbidden_non_translation(zh):
                 continue
             current = rewrite_by_id.get(sid, {})
             rejection_flags = coherence_rejection_flags(
@@ -747,7 +762,7 @@ def translate_with_rules(
         if config.get("dialect", {}).get("enabled"):
             lecture = apply_light_dialect(lecture, config.get("dialect", {}).get("target", "mandarin"))
         limit = target_limit(seg, config)
-        lecture = compress_to_limit(lecture, limit)
+        lecture = compress_to_limit(lecture, limit, config)
         flags.extend(protected_term_flags(seg.text, lecture))
         flags.extend(assess_translation_quality(seg.text, lecture, literal, config))
         zh_segments.append(Segment(seg.id, seg.start, seg.end, lecture))
@@ -835,15 +850,38 @@ def safe_short_phrase_translation(text: str) -> str | None:
 
 
 def is_usable_zh(text: str) -> bool:
+    return is_usable_translation(text, {"translation": {"target_language": "zh-CN"}})
+
+
+def is_usable_translation(text: str, config: dict) -> bool:
     stripped = (text or "").strip()
     if not stripped:
         return False
     if stripped in {"...", "…", "N/A", "null", "None"}:
         return False
-    if not re.search(r"[\u4e00-\u9fff]", stripped):
+    script_pattern = target_script_pattern(config)
+    if script_pattern and not re.search(script_pattern, stripped):
         return False
     non_punct = re.sub(r"[\s\W_]+", "", stripped, flags=re.UNICODE)
     return len(non_punct) >= 2
+
+
+def target_script_pattern(config: dict) -> str:
+    target = translation_target_language(config)
+    if target_uses_chinese(config):
+        return r"[\u4e00-\u9fff]"
+    if target.startswith(("ja", "jp")) or "japanese" in target:
+        return r"[\u3040-\u30ff\u3400-\u9fff]"
+    if target.startswith("ko") or "korean" in target:
+        return r"[\uac00-\ud7af]"
+    return ""
+
+
+def target_uses_chinese(config: dict) -> bool:
+    target = translation_target_language(config)
+    return target.startswith(("zh", "yue", "cmn", "wuu")) or any(
+        marker in target for marker in ["chinese", "cantonese", "mandarin"]
+    )
 
 
 def is_forbidden_non_translation(text: str) -> bool:
@@ -870,6 +908,14 @@ def normalize_zh(text: str) -> str:
     return text
 
 
+def normalize_translation(text: str, config: dict) -> str:
+    if target_uses_compact_script(config):
+        return normalize_zh(text)
+    work = re.sub(r"\s+", " ", text or "").strip()
+    work = re.sub(r"\s+([,.;:!?])", r"\1", work)
+    return work
+
+
 def lecture_rewrite(literal: str, original: str) -> str:
     if literal.endswith("。"):
         return literal
@@ -882,19 +928,23 @@ def target_limit(seg: Segment, config: dict) -> int:
     return max(8, min(line * 2, int(seg.duration * cps)))
 
 
-def compress_to_limit(text: str, limit: int) -> str:
-    text = normalize_zh(text)
+def compress_to_limit(text: str, limit: int, config: dict | None = None) -> str:
+    config = config or {"translation": {"target_language": "zh-CN"}}
+    text = normalize_translation(text, config)
     if len(text) <= limit:
         return text
     nums = re.findall(r"\d+(?:\.\d+)?", text)
     # Preserve final punctuation while keeping speech compact.
-    shortened = text[: max(1, limit - 1)].rstrip("，、；：")
+    compact_target = target_uses_compact_script(config)
+    separator = "，" if compact_target else ", "
+    period = "。" if compact_target else "."
+    shortened = text[: max(1, limit - 1)].rstrip("，、；：,;: ")
     missing = [n for n in nums if n not in shortened]
     if missing:
-        suffix = "，" + "、".join(missing[:4]) + "。"
-        shortened = shortened[: max(1, limit - len(suffix))].rstrip("，、；：。") + suffix
+        suffix = separator + ("、" if compact_target else ", ").join(missing[:4]) + period
+        shortened = shortened[: max(1, limit - len(suffix))].rstrip("，、；：。,;: ") + suffix
     else:
-        shortened += "。"
+        shortened += period
     return shortened
 
 

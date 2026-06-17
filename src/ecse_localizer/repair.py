@@ -11,7 +11,7 @@ from .ffmpeg_utils import media_duration
 from .glossary import GlossaryTerm
 from .llm_local import LocalLLMClient
 from .mux import hardsub_video, mux_video
-from .qa import has_usable_chinese, looks_like_non_translation_narration, run_qa
+from .qa import looks_like_non_translation_narration, run_qa
 from .report import write_video_report
 from .subtitle_io import (
     Segment,
@@ -21,7 +21,8 @@ from .subtitle_io import (
     write_srt,
     write_vtt,
 )
-from .translate import TranslationTrace, numbers_missing, target_limit
+from .translate import TranslationTrace, is_usable_translation, numbers_missing, target_limit
+from .translation_quality import translation_target_language
 from .tts import build_aligned_dub
 from .utils import PROJECT_ROOT, ensure_dir, now_id, slugify, write_json
 
@@ -170,9 +171,14 @@ def repair_chunk(
 ) -> list[RepairResult]:
     payload = {
         "glossary": glossary_text,
+        "target_language": translation_target_language(config),
         "segments": [
             {
                 "id": sid,
+                "previous_source": en_segments[sid - 2].text if sid > 1 else "",
+                "source": en_segments[sid - 1].text,
+                "current_translation": zh_segments[sid - 1].text,
+                "next_source": en_segments[sid].text if sid < len(en_segments) else "",
                 "previous_english": en_segments[sid - 2].text if sid > 1 else "",
                 "english": en_segments[sid - 1].text,
                 "current_chinese": zh_segments[sid - 1].text,
@@ -184,7 +190,7 @@ def repair_chunk(
             for sid in chunk_ids
         ],
     }
-    schema = '{"segments":[{"id":1,"zh":"修复后的中文","flags":["FIDELITY_REPAIRED"],"notes":"why"}]}'
+    schema = '{"segments":[{"id":1,"zh":"repaired target-language subtitle","flags":["FIDELITY_REPAIRED"],"notes":"why"}]}'
     data = client.json_chat(prompt, json.dumps(payload, ensure_ascii=False), schema)
     rows = data.get("segments", [])
     by_id = {int(row.get("id")): row for row in rows if str(row.get("id", "")).isdigit()}
@@ -198,7 +204,7 @@ def repair_chunk(
         old = zh_segments[sid - 1].text
         row = by_id[sid]
         new = clean_repair_text(str(row.get("zh", "")))
-        if not has_usable_chinese(new) or looks_like_non_translation_narration(new):
+        if not is_usable_translation(new, config) or looks_like_non_translation_narration(new):
             raise RuntimeError(f"unusable repair for segment {sid}: {new!r}")
         flags = sanitize_flags(row.get("flags", []))
         flags.append("FIDELITY_REPAIRED")

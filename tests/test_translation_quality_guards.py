@@ -2,6 +2,7 @@ from ecse_localizer.qa import has_usable_chinese, looks_like_non_translation_nar
 from ecse_localizer.translation_quality import protected_terms_missing
 from ecse_localizer.translate import (
     is_forbidden_non_translation,
+    is_usable_translation,
     is_usable_zh,
     restore_and_repair_protected_terms,
     sanitize_flags,
@@ -19,6 +20,11 @@ def test_llm_placeholder_is_not_usable_translation():
 def test_short_real_chinese_is_usable_translation():
     assert is_usable_zh("欢迎大家。")
     assert has_usable_chinese("这一节课我们先看半导体产业的位置。")
+
+
+def test_non_chinese_target_can_use_latin_script_translation():
+    assert is_usable_translation("Bienvenidos a la primera clase.", {"translation": {"target_language": "es"}})
+    assert not is_usable_translation("Bienvenidos a la primera clase.", {"translation": {"target_language": "zh-CN"}})
 
 
 def test_topic_narration_is_rejected_as_translation():

@@ -1,4 +1,4 @@
-Compress Chinese subtitle text for dubbing alignment.
+Compress target-language subtitle text for dubbing alignment.
 
 Return strict JSON:
 {
@@ -10,4 +10,4 @@ Rules:
 - Keep the same technical meaning.
 - Preserve protected placeholders unchanged.
 - Preserve formulas, code, variables, numbers, URLs, and acronyms.
-- Prefer concise instructor-style Chinese.
+- Prefer concise instructor-style wording in the requested target language.
