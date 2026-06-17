@@ -44,6 +44,7 @@ def test_job_overrides_apply_template_runtime_params():
             "tts_emotion": "calm",
             "tts_end_gap_seconds": 0.35,
             "tts_min_audio_gap_seconds": 0.12,
+            "tts_shrink_delayed_slots_to_original_timeline": False,
             "tts_speaker_gender": "female",
             "mux_keep_original_audio": False,
             "mux_original_audio_volume": 0.05,
@@ -56,6 +57,7 @@ def test_job_overrides_apply_template_runtime_params():
     assert out["tts"]["emotion"] == "calm"
     assert out["tts"]["end_gap_seconds"] == 0.35
     assert out["tts"]["min_audio_gap_seconds"] == 0.12
+    assert out["tts"]["shrink_delayed_slots_to_original_timeline"] is False
     assert out["tts"]["speaker_gender"] == "female"
     assert out["mux"]["keep_original_audio"] is False
     assert out["mux"]["original_audio_volume"] == 0.05

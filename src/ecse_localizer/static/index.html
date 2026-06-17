@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-store" />
     <meta http-equiv="Pragma" content="no-cache" />
     <title>AIALRA Localizer</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260617-job-restore" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260617-tts-sync" />
   </head>
   <body>
     <main id="loginView" class="login-view" hidden>
@@ -162,6 +162,10 @@
             <label>
               最小音频间隔
               <input id="jobMinAudioGap" type="number" min="0" max="1" step="0.01" value="0.08" />
+            </label>
+            <label class="check-row">
+              <input id="jobShrinkDelayedSlots" type="checkbox" checked />
+              <span>延迟段按原时间轴收紧</span>
             </label>
             <label>
               配音性别
@@ -410,6 +414,6 @@
     </div>
 
     <div id="toast" class="toast" hidden></div>
-    <script src="/assets/app.js?v=20260617-job-restore"></script>
+    <script src="/assets/app.js?v=20260617-tts-sync"></script>
   </body>
 </html>

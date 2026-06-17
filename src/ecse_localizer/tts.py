@@ -199,7 +199,9 @@ def build_aligned_dub(
         clip_dur = audio_duration(clip)
         next_unit = units[index + 1] if index + 1 < len(units) else None
         unconstrained_target = tts_unconstrained_target_duration(unit, video_duration, config)
-        target = tts_target_duration(unit, next_unit, video_duration, config)
+        static_target = tts_target_duration(unit, next_unit, video_duration, config)
+        scheduled_start_hint = tts_scheduled_start(unit, previous_audio_end, video_duration, config)
+        target = tts_dynamic_target_duration(unit, next_unit, previous_audio_end, video_duration, config)
         if target < unconstrained_target - 0.01:
             flags.append(
                 {
@@ -209,6 +211,18 @@ def build_aligned_dub(
                     "unconstrained_target_duration": round(unconstrained_target, 3),
                     "target_duration": round(target, 3),
                     "next_start": round(next_unit.start, 3) if next_unit else None,
+                }
+            )
+        if target < static_target - 0.01:
+            flags.append(
+                {
+                    "segment_id": unit.id,
+                    "segment_ids": unit.segment_ids,
+                    "type": "tts_slot_constrained_by_delayed_start",
+                    "static_target_duration": round(static_target, 3),
+                    "target_duration": round(target, 3),
+                    "scheduled_start": round(scheduled_start_hint, 3),
+                    "original_start": round(unit.start, 3),
                 }
             )
         final_clip = clip
@@ -338,14 +352,11 @@ def build_aligned_dub(
             ],
             logger=logger,
         )
-        scheduled_start = unit.start
+        scheduled_start = tts_scheduled_start(unit, previous_audio_end, video_duration, config)
         pcm_dur = audio_duration(pcm)
-        would_overlap = previous_audio_end is not None and scheduled_start < previous_audio_end + min_audio_gap
+        would_overlap = previous_audio_end is not None and unit.start < previous_audio_end + min_audio_gap
         if would_overlap:
             audio_overlap_count += 1
-        if prevent_overlap and previous_audio_end is not None:
-            scheduled_start = max(scheduled_start, previous_audio_end + min_audio_gap)
-        scheduled_start = max(0.0, min(scheduled_start, video_duration))
         delay = max(0.0, scheduled_start - unit.start)
         if delay > 0.005:
             audio_delays.append(delay)
@@ -514,6 +525,40 @@ def tts_target_duration(unit: TTSUnit, next_unit: TTSUnit | None, video_duration
     if slot <= 0:
         return 0.25
     return max(0.25, min(target, slot))
+
+
+def tts_scheduled_start(unit: TTSUnit, previous_audio_end: float | None, video_duration: float, config: dict) -> float:
+    tts_cfg = config.get("tts", {})
+    start = max(0.0, min(unit.start, video_duration))
+    if bool(tts_cfg.get("prevent_audio_overlap", True)) and previous_audio_end is not None:
+        min_gap = float(tts_cfg.get("min_audio_gap_seconds", 0.08))
+        start = max(start, previous_audio_end + min_gap)
+    return max(0.0, min(start, video_duration))
+
+
+def tts_dynamic_target_duration(
+    unit: TTSUnit,
+    next_unit: TTSUnit | None,
+    previous_audio_end: float | None,
+    video_duration: float,
+    config: dict,
+) -> float:
+    target = tts_target_duration(unit, next_unit, video_duration, config)
+    tts_cfg = config.get("tts", {})
+    scheduled_start = tts_scheduled_start(unit, previous_audio_end, video_duration, config)
+    if bool(tts_cfg.get("shrink_delayed_slots_to_original_timeline", True)):
+        end_gap = float(tts_cfg.get("end_gap_seconds", 0.2))
+        same_segment_slot = min(unit.end, video_duration) - scheduled_start - max(0.0, end_gap)
+        target = min(target, max(0.25, same_segment_slot))
+    if bool(tts_cfg.get("prevent_audio_overlap", True)) and next_unit is not None:
+        min_gap = float(tts_cfg.get("min_audio_gap_seconds", 0.08))
+        next_start = min(max(0.0, next_unit.start), video_duration)
+        next_slot = next_start - scheduled_start - max(0.0, min_gap)
+        target = min(target, max(0.25, next_slot) if next_slot > 0 else 0.25)
+    remaining_video = video_duration - scheduled_start
+    if remaining_video > 0:
+        target = min(target, max(0.25, remaining_video))
+    return max(0.25, target)
 
 
 def enforce_tts_slot_limit(

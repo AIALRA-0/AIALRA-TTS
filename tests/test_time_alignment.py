@@ -8,6 +8,8 @@ from ecse_localizer.tts import (
     TTSUnit,
     enforce_tts_slot_limit,
     make_tts_units,
+    tts_dynamic_target_duration,
+    tts_scheduled_start,
     tts_target_duration,
     tts_unconstrained_target_duration,
     write_pcm,
@@ -66,6 +68,29 @@ def test_tts_target_duration_keeps_floor_for_tight_overlap():
     next_unit = TTSUnit(2, 1.05, 2.5, "第二句。", [2])
 
     assert tts_target_duration(unit, next_unit, 10.0, config) == 0.25
+
+
+def test_tts_scheduled_start_accounts_for_previous_audio_end():
+    config = {"tts": {"prevent_audio_overlap": True, "min_audio_gap_seconds": 0.1}}
+    unit = TTSUnit(2, 1.0, 3.0, "第二句。", [2])
+
+    assert tts_scheduled_start(unit, previous_audio_end=1.4, video_duration=10.0, config=config) == 1.5
+
+
+def test_tts_dynamic_target_duration_shrinks_when_previous_audio_delays_slot():
+    config = {
+        "tts": {
+            "end_gap_seconds": 0.2,
+            "prevent_audio_overlap": True,
+            "min_audio_gap_seconds": 0.1,
+            "shrink_delayed_slots_to_original_timeline": True,
+        }
+    }
+    unit = TTSUnit(2, 1.0, 3.0, "第二句。", [2])
+    next_unit = TTSUnit(3, 3.0, 4.0, "第三句。", [3])
+
+    assert tts_target_duration(unit, next_unit, 10.0, config) == 1.8
+    assert tts_dynamic_target_duration(unit, next_unit, previous_audio_end=1.4, video_duration=10.0, config=config) == 1.3
 
 
 def test_enforce_tts_slot_limit_trims_audio_and_flags(tmp_path):

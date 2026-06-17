@@ -49,6 +49,7 @@ def apply_job_overrides(config: dict[str, Any], metadata: dict[str, Any] | None)
             "tts_emotion",
             "tts_end_gap_seconds",
             "tts_min_audio_gap_seconds",
+            "tts_shrink_delayed_slots_to_original_timeline",
             "tts_speaker_gender",
             "mux_keep_original_audio",
             "mux_original_audio_volume",
@@ -87,6 +88,7 @@ def apply_optional_overrides(config: dict[str, Any], meta: dict[str, Any]) -> No
     set_text(config, ["tts", "emotion"], meta.get("tts_emotion"))
     set_float(config, ["tts", "end_gap_seconds"], meta.get("tts_end_gap_seconds"))
     set_float(config, ["tts", "min_audio_gap_seconds"], meta.get("tts_min_audio_gap_seconds"))
+    set_bool(config, ["tts", "shrink_delayed_slots_to_original_timeline"], meta.get("tts_shrink_delayed_slots_to_original_timeline"))
     set_text(config, ["tts", "speaker_gender"], meta.get("tts_speaker_gender"))
     set_bool(config, ["mux", "keep_original_audio"], meta.get("mux_keep_original_audio"))
     set_float(config, ["mux", "original_audio_volume"], meta.get("mux_original_audio_volume"))

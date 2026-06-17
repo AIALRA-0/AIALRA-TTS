@@ -579,6 +579,7 @@ function applyTemplateParams(params) {
   setValue("jobTtsEmotion", params.tts_emotion);
   setValue("jobEndGap", params.tts_end_gap_seconds);
   setValue("jobMinAudioGap", params.tts_min_audio_gap_seconds);
+  setChecked("jobShrinkDelayedSlots", params.tts_shrink_delayed_slots_to_original_timeline);
   setValue("jobSpeakerGender", params.tts_speaker_gender);
   setValue("jobMaxLineChars", params.max_subtitle_line_chars);
   setChecked("jobHardSubtitle", params.mux_hard_subtitle);
@@ -1039,6 +1040,7 @@ function currentTemplateParams() {
     tts_emotion: $("jobTtsEmotion").value || "clear_engaged_teaching",
     tts_end_gap_seconds: Number($("jobEndGap").value || 0.2),
     tts_min_audio_gap_seconds: Number($("jobMinAudioGap").value || 0.08),
+    tts_shrink_delayed_slots_to_original_timeline: $("jobShrinkDelayedSlots").checked,
     tts_speaker_gender: $("jobSpeakerGender").value || "auto",
     mux_keep_original_audio: false,
     mux_original_audio_volume: 0.08,
