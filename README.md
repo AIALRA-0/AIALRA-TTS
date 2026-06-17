@@ -100,6 +100,8 @@ Queued jobs carry only portable worker arguments plus non-secret job metadata su
 
 While a worker job is running, the Windows worker periodically reports a remote-safe status payload: `running`, `worker_id`, `pid`, best-effort `progress`, sanitized system metrics, local managed-storage byte counts, and a log tail. Contabo stores only that summary; full logs stay on the Windows worker. Metrics are stripped of filesystem path fields before storage or display, and the dashboard uses worker heartbeat metrics in `worker_queue` mode instead of the Contabo host metrics.
 
+Worker status summaries are redacted before storage: Windows paths, local user names embedded in paths, obvious token/password/API-key values, authorization credentials, and private LAN IP addresses are replaced with placeholders. The complete local log remains on the Windows worker for debugging; Contabo receives only the safe tail.
+
 Running worker jobs can be cancelled from the WebUI. The remote server marks the job with `cancel_requested`; the Windows worker sees that flag through its signed `/api/worker/jobs/{job_id}/control` poll, terminates the local child process, and reports `cancelled`. Contabo still never opens an inbound connection to the Windows machine.
 
 Queued worker jobs can be paused before a worker claims them. A paused job is not claimable until the user resumes it, at which point it returns to the worker queue. Running GPU jobs are not fake-paused; use cancel for work already executing on Windows.

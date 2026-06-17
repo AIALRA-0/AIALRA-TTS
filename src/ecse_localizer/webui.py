@@ -39,6 +39,7 @@ from .job_config import write_job_config
 from .llm_local import LocalLLMClient
 from .metrics import collect_system_metrics, sanitize_metrics
 from .platform_store import PlatformStore
+from .redaction import sanitize_remote_command, sanitize_remote_text, sanitize_remote_value
 from .scan import VIDEO_SUFFIXES, find_videos
 from .tts import tts_health
 from .utils import PROJECT_ROOT, ensure_dir, now_id, read_json, slugify, write_json
@@ -1298,13 +1299,24 @@ def worker_status_changes(body: dict[str, Any]) -> dict[str, Any]:
         "command",
     ]:
         if key in body:
-            changes[key] = sanitize_metrics(body[key]) if key == "metrics" else body[key]
+            if key == "metrics":
+                changes[key] = sanitize_metrics(body[key])
+            elif key == "command":
+                changes[key] = sanitize_remote_command(body[key])
+            elif key in {"log_tail", "error"}:
+                changes[key] = sanitize_remote_text(body[key])
+            elif key in {"result", "worker_artifacts"}:
+                changes[key] = sanitize_remote_value(body[key])
+            elif key in {"result_report", "result_video"}:
+                changes[key] = sanitize_remote_text(file_display_name(str(body[key])))
+            else:
+                changes[key] = body[key]
     result = body.get("result")
     if isinstance(result, dict):
         if result.get("report"):
-            changes["result_report"] = result.get("report")
+            changes["result_report"] = sanitize_remote_text(file_display_name(str(result.get("report"))))
         if result.get("video"):
-            changes["result_video"] = result.get("video")
+            changes["result_video"] = sanitize_remote_text(file_display_name(str(result.get("video"))))
     return changes
 
 

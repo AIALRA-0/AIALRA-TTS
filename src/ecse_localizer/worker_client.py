@@ -19,6 +19,7 @@ from .artifacts import DOWNLOADABLE_OUTPUTS
 from .config import load_config
 from .job_config import write_job_config
 from .metrics import collect_system_metrics
+from .redaction import sanitize_remote_command, sanitize_remote_text
 from .scan import VIDEO_SUFFIXES, should_skip
 from .utils import PROJECT_ROOT, ensure_dir, read_json, run_cmd, write_json
 
@@ -164,7 +165,7 @@ def run_worker_job(
     preview_summary: dict[str, Any] = {}
     if status == "done":
         preview_summary = try_create_and_upload_preview(result, job, remote_base_url, worker_token, base_config, worker_id=worker_id)
-    log_tail = tail_text(log_path, log_tail_lines)
+    log_tail = sanitize_remote_text(tail_text(log_path, log_tail_lines))
     final_progress = 100 if returncode == 0 else extract_progress_from_text(log_tail)
     payload = {
         "status": status,
@@ -233,7 +234,7 @@ def run_upload_artifact_cache_job(
             "worker_id": worker_id,
             "progress": 5,
             "metrics": collect_system_metrics(config),
-            "log_tail": f"Preparing artifact cache upload for {ref_id}",
+            "log_tail": sanitize_remote_text(f"Preparing artifact cache upload for {ref_id}"),
         },
     )
     try:
@@ -259,7 +260,7 @@ def run_upload_artifact_cache_job(
             "progress": 100,
             "result": {"artifact_cache": uploaded.get("artifact", uploaded), "artifact_ref_id": ref_id},
             "metrics": collect_system_metrics(config),
-            "log_tail": f"Uploaded artifact cache for {artifact.get('name') or path.name}",
+            "log_tail": sanitize_remote_text(f"Uploaded artifact cache for {artifact.get('name') or path.name}"),
         }
         post_status(remote_base_url, worker_token, job_id, payload)
         return {"status": "done", "artifact": uploaded}
@@ -269,9 +270,9 @@ def run_upload_artifact_cache_job(
             "returncode": 1,
             "worker_id": worker_id,
             "progress": 100,
-            "error": str(exc),
+            "error": sanitize_remote_text(str(exc)),
             "metrics": collect_system_metrics(config),
-            "log_tail": f"Artifact cache upload failed: {exc}",
+            "log_tail": sanitize_remote_text(f"Artifact cache upload failed: {exc}"),
         }
         try_post_status(remote_base_url, worker_token, job_id, payload)
         return {"status": "failed", "error": str(exc)}
@@ -824,7 +825,7 @@ def running_status_payload(
     command: list[str] | None = None,
     lines: int = 160,
 ) -> dict[str, Any]:
-    tail = tail_text(log_path, lines) if log_path.exists() else ""
+    tail = sanitize_remote_text(tail_text(log_path, lines) if log_path.exists() else "")
     payload: dict[str, Any] = {
         "status": "running",
         "worker_id": worker_id,
@@ -837,7 +838,7 @@ def running_status_payload(
     if pid is not None:
         payload["pid"] = pid
     if command:
-        payload["command"] = command
+        payload["command"] = sanitize_remote_command(command)
     return payload
 
 
@@ -876,7 +877,7 @@ def redacted_command(command: list[str]) -> list[str]:
         redacted.append(item)
         if item == "--config":
             skip_next = True
-    return redacted
+    return sanitize_remote_command(redacted)
 
 
 def worker_headers(worker_token: str, *, path: str | None = None, body: str | bytes = b"", method: str = "POST") -> dict[str, str]:

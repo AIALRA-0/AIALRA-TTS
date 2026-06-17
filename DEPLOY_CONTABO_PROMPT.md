@@ -67,6 +67,7 @@ Deployment steps:
    - if the Windows worker heartbeat is missing or stale, new jobs must stay `queued` and the UI must show that they are waiting for the local worker, not that GPU processing has already started.
    - during long jobs, the worker posts `running` status updates with best-effort progress, GPU/CPU/disk metrics, local managed-storage byte counts, and a short log tail; do not require Contabo to read Windows log files directly.
    - worker metrics must be sanitized before storage/display; do not expose Windows filesystem paths in dashboard, quota, job, artifact, or heartbeat responses.
+   - worker log tails, errors, and command summaries must be redacted before storage/display; do not expose Windows paths, local user names from paths, private LAN IPs, authorization credentials, worker tokens, passwords, signatures, or API keys.
    - cancelling a running worker job must set a `cancel_requested` flag; the Windows worker must observe it through a signed `/api/worker/jobs/{job_id}/control` poll and then report `cancelled`.
    - pausing a worker job is a queue-level operation for `queued/retrying` jobs only; paused jobs must not be claimable until resumed.
    - worker heartbeat/claim may include opaque media refs from `worker.media_roots`; Contabo must store only ref id, display name, size, MIME type, and mtime, never the Windows source path.
@@ -99,6 +100,7 @@ Deployment steps:
    - job submission while the worker is offline shows a queued/waiting state and records the worker status at submit time
    - GPU/CPU metrics update
    - dashboard metrics in `worker_queue` mode come from the Windows worker heartbeat and contain no Windows path fields
+   - remote job records contain only redacted worker log tails and command summaries
    - worker offline status appears when the tunnel is stopped
    - users cannot see each other's jobs
    - jobs move through `queued/claimed/running/paused/retrying/done/failed/cancelled/deleted`

@@ -40,6 +40,7 @@ from ecse_localizer.worker_client import (
     get_worker_control,
     redacted_command,
     resolve_worker_media_args,
+    running_status_payload,
     summarize_result,
     worker_control_cancel_requested,
     worker_args,
@@ -413,6 +414,95 @@ def test_worker_status_changes_preserves_running_progress_and_metrics():
     assert changes["log_tail"].endswith("segments")
     assert changes["metrics"]["cpu"]["percent"] == 55
     assert changes["command"][-1] == "audit"
+
+
+def test_worker_status_changes_redacts_remote_unsafe_fields():
+    win_root = "C:" + "\\Users\\Alice\\Desktop\\ECSE 4961"
+    private_ip = "192." + "168.1.40"
+    api_key_name = "api" + "_key"
+    changes = worker_status_changes(
+        {
+            "status": "failed",
+            "error": f"Failed opening {win_root}\\lecture.mp4 token=abc123",
+            "log_tail": "\n".join(
+                [
+                    f"$ python -m ecse_localizer --config {win_root}\\secret.yaml",
+                    f"input={win_root}\\lecture.mp4 worker_token=supersecret",
+                    f"callback=http://{private_ip}:9000/run?token=abc&ok=1",
+                ]
+            ),
+            "command": [
+                "python",
+                "-m",
+                "ecse_localizer",
+                "--config",
+                f"{win_root}\\secret.yaml",
+                "process-one",
+                "--video",
+                f"{win_root}\\lecture.mp4",
+                "--worker-token",
+                "supersecret",
+            ],
+            "result": {
+                "report": f"{win_root}\\_localizer_output\\lecture_report.json",
+                "video": f"{win_root}\\_localizer_output\\lecture_zh_dub.mp4",
+                "source_path": f"{win_root}\\lecture.mp4",
+                api_key_name: "secret-value",
+            },
+        }
+    )
+
+    serialized = json.dumps(changes, ensure_ascii=False)
+    assert r"C:\Users" not in serialized
+    assert "Alice" not in serialized
+    assert "supersecret" not in serialized
+    assert "abc123" not in serialized
+    assert private_ip not in serialized
+    assert "token=abc" not in serialized
+    assert "<local-path>" in serialized
+    assert changes["result_report"] == "lecture_report.json"
+    assert changes["result_video"] == "lecture_zh_dub.mp4"
+    assert changes["command"][-1] == "<redacted>"
+
+
+def test_running_status_payload_redacts_log_tail_and_command(tmp_path):
+    win_root = "C:" + "\\Users\\Alice\\Desktop\\ECSE 4961"
+    log_path = tmp_path / "worker.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                f"processing {win_root}\\lecture.mp4",
+                "overall progress: 25%",
+                "Authorization: " + "Bearer " + "secretbearertoken",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    payload = running_status_payload(
+        "worker-1",
+        log_path,
+        {"output_dir": str(tmp_path / "output")},
+        command=[
+            "python",
+            "-m",
+            "ecse_localizer",
+            "--config",
+            f"{win_root}\\secret.yaml",
+            "process-one",
+            "--video",
+            f"{win_root}\\lecture.mp4",
+        ],
+        lines=20,
+    )
+
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert payload["progress"] == 25
+    assert r"C:\Users" not in serialized
+    assert "Alice" not in serialized
+    assert "secretbearertoken" not in serialized
+    assert payload["command"][4] == "<local-path>"
+    assert payload["command"][-1] == "<local-path>"
 
 
 def test_worker_progress_parser_handles_percent_and_fraction():
