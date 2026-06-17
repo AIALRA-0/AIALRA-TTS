@@ -70,6 +70,7 @@ def test_tuning_fields_include_tts_slot_trim_controls():
     assert fields["tts.compact_distributed_max_gap_seconds"]["type"] == "float"
     assert fields["tts.slot_trim_tolerance_seconds"]["type"] == "float"
     assert fields["tts.slot_trim_fade_seconds"]["type"] == "float"
+    assert fields["webui.job_storage_reserve_multiplier"]["type"] == "float"
 
 
 def test_static_ui_does_not_expose_raw_worker_path_placeholder():
@@ -2140,6 +2141,82 @@ def test_job_submit_rejects_full_project_quota(tmp_path):
 
     assert response.status_code == 413
     assert "Project quota exceeded" in response.text
+
+
+def test_worker_queue_submit_counts_active_local_storage_reservations(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config["webui"]["default_local_quota_gb"] = 0.00000015
+    config["webui"]["job_storage_reserve_multiplier"] = 1.0
+    config["webui"]["max_active_jobs_per_user"] = 5
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    response = client.post(
+        "/api/worker/heartbeat",
+        headers={"x-worker-token": "worker-token"},
+        json={
+            "worker_id": "worker-1",
+            "media_refs": [{"ref_id": "media123", "name": "lecture.mp4", "size": 100, "media_type": "video/mp4"}],
+            "metrics": {"local_storage": {"managed_bytes": 0, "total_reported_bytes": 0, "roots": []}},
+        },
+    )
+    assert response.status_code == 200
+    project = client.get("/api/projects").json()["projects"][0]
+    payload = {"type": "process_one", "video": "worker-ref:media123", "video_name": "lecture.mp4", "project_id": project["id"], "folder_id": "root"}
+
+    first = client.post("/api/jobs", json=payload)
+    second = client.post("/api/jobs", json=payload)
+
+    assert first.status_code == 200
+    assert first.json()["job"]["metadata"]["estimated_local_bytes"] == 100
+    assert second.status_code == 413
+    assert "Local worker quota exceeded" in second.text
+
+
+def test_worker_queue_submit_counts_active_project_storage_reservations(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config["webui"]["default_local_quota_gb"] = 1
+    config["webui"]["job_storage_reserve_multiplier"] = 1.0
+    config["webui"]["max_active_jobs_per_user"] = 5
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    response = client.post("/api/projects", json={"name": "Tiny Project", "quota_project_gb": 0.00000015})
+    assert response.status_code == 200
+    project = response.json()["project"]
+    response = client.post(
+        "/api/worker/heartbeat",
+        headers={"x-worker-token": "worker-token"},
+        json={
+            "worker_id": "worker-1",
+            "media_refs": [{"ref_id": "media123", "name": "lecture.mp4", "size": 100, "media_type": "video/mp4"}],
+            "metrics": {"local_storage": {"managed_bytes": 0, "total_reported_bytes": 0, "roots": []}},
+        },
+    )
+    assert response.status_code == 200
+    payload = {"type": "process_one", "video": "worker-ref:media123", "video_name": "lecture.mp4", "project_id": project["id"], "folder_id": "root"}
+
+    first = client.post("/api/jobs", json=payload)
+    second = client.post("/api/jobs", json=payload)
+
+    assert first.status_code == 200
+    assert first.json()["job"]["metadata"]["estimated_project_bytes"] == 100
+    assert second.status_code == 413
+    assert "Project quota exceeded" in second.text
 
 
 def test_worker_preview_upload_registers_manifest_and_artifact(tmp_path):

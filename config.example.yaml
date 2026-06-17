@@ -178,6 +178,7 @@ webui:
   default_local_quota_gb: 500
   default_remote_quota_gb: 10
   default_project_quota_gb: 500
+  job_storage_reserve_multiplier: 2.0
   max_active_jobs_per_user: 2
   max_active_jobs_global: 8
   worker_token: "change-me-generate-a-long-random-token"

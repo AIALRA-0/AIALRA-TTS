@@ -122,7 +122,8 @@ Deployment steps:
    - the task form can queue both `fidelity_audit` and `repair_fidelity`; repair jobs must use the selected report and default to its sibling `*_fidelity_report.json`
    - user quota is enforced
    - per-user `remote_quota_bytes` limits Contabo uploads plus preview-cache files, `webui.global_remote_quota_gb` caps total Contabo upload/preview/cache storage across all users, and `local_quota_bytes` remains the Windows worker storage budget
-   - new job submission returns HTTP 413 when the Windows worker local quota or selected project quota is already exhausted
+   - new job submission returns HTTP 413 when the Windows worker local quota or selected project quota cannot fit current usage plus active queued/running job reservations
+   - `webui.job_storage_reserve_multiplier` controls the conservative local/project reservation for `process_one` jobs based on the safe worker-ref or uploaded-media source size
    - upload quota is enforced across multi-file requests and active-job concurrency limits return HTTP 429 with a readable message
    - artifact history can be filtered by project, folder, job id, and output kind before signed preview/download URLs are returned
    - browser media upload is disabled in `worker_queue` mode unless explicitly enabled, so original videos do not land on the Contabo disk by default

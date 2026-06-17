@@ -121,6 +121,7 @@ TUNABLE_FIELDS: dict[str, dict[str, Any]] = {
     "dialect.target": {"label": "方言目标", "type": "choice", "options": ["mandarin", "sichuan", "cantonese", "dongbei", "shanghai", "taiwan"]},
     "mux.hard_subtitle": {"label": "生成硬字幕视频", "type": "bool"},
     "webui.global_remote_quota_gb": {"label": "远端全局存储额度 GB", "type": "float", "min": 0, "max": 10240},
+    "webui.job_storage_reserve_multiplier": {"label": "任务本地产物预留倍率", "type": "float", "min": 0, "max": 10},
     "webui.max_active_jobs_per_user": {"label": "每用户最大活动任务数", "type": "int", "min": 1, "max": 32},
     "webui.max_active_jobs_global": {"label": "全局最大活动任务数", "type": "int", "min": 1, "max": 128},
 }
@@ -931,6 +932,10 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             validate_worker_queue_job_body(job_type, body, state)
         template_params = template_params_for_job(state, user, body)
         metadata = job_metadata_from_body(body, template_params=template_params)
+        estimated_storage_bytes = estimate_job_storage_bytes(state, job_type, body)
+        if estimated_storage_bytes > 0:
+            metadata["estimated_local_bytes"] = estimated_storage_bytes
+            metadata["estimated_project_bytes"] = estimated_storage_bytes
         validate_job_project(state, user, metadata)
         enforce_storage_quota_before_job(state, user, metadata)
         enforce_active_job_limits(state, user)
@@ -2093,16 +2098,67 @@ def validate_job_project(state: WebState, user: str, metadata: dict[str, Any]) -
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def estimate_job_storage_bytes(state: WebState, job_type: str, body: dict[str, Any]) -> int:
+    if job_type != "process_one":
+        return 0
+    source_size = source_video_size_bytes(state, str(body.get("video") or ""))
+    if source_size <= 0:
+        return 0
+    try:
+        multiplier = float(state.webui.get("job_storage_reserve_multiplier", 2.0) or 0)
+    except (TypeError, ValueError):
+        multiplier = 2.0
+    if multiplier <= 0:
+        return 0
+    return int(source_size * min(multiplier, 10.0))
+
+
+def source_video_size_bytes(state: WebState, video: str) -> int:
+    value = str(video or "").strip()
+    if not value:
+        return 0
+    if value.startswith("worker-ref:"):
+        return worker_media_ref_size_bytes(state, value.removeprefix("worker-ref:"))
+    try:
+        path = Path(value)
+        if path.exists() and path.is_file():
+            return int(path.stat().st_size)
+    except OSError:
+        return 0
+    return 0
+
+
+def worker_media_ref_size_bytes(state: WebState, ref_id: str) -> int:
+    worker = worker_status_payload(state)
+    media_refs = worker.get("media_refs") if isinstance(worker, dict) else []
+    if not isinstance(media_refs, list):
+        return 0
+    for item in media_refs:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("ref_id") or "") == ref_id:
+            try:
+                return int(max(0, float(item.get("size") or 0)))
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
 def enforce_storage_quota_before_job(state: WebState, user: str, metadata: dict[str, Any]) -> None:
     quota = state.store.quota_status(user)
     local_quota = int(quota.get("local_quota_bytes") or 0)
     local_used = int(quota.get("local_used_bytes") or 0)
-    if local_quota > 0 and local_used >= local_quota:
+    local_reserved = active_job_storage_reserved_bytes(state, user, "estimated_local_bytes")
+    incoming_local = int(max(0, float(metadata.get("estimated_local_bytes") or 0)))
+    local_committed = local_used + local_reserved
+    if local_quota > 0 and (local_committed >= local_quota or local_committed + incoming_local > local_quota):
+        remaining = max(0, local_quota - local_used - local_reserved)
         raise HTTPException(
             status_code=413,
             detail=(
                 "Local worker quota exceeded. "
-                f"Used bytes: {local_used}; quota bytes: {local_quota}; source: {quota.get('local_usage_source')}"
+                f"Remaining bytes: {remaining}; used bytes: {local_used}; reserved bytes: {local_reserved}; "
+                f"quota bytes: {local_quota}; source: {quota.get('local_usage_source')}"
             ),
         )
 
@@ -2117,11 +2173,48 @@ def enforce_storage_quota_before_job(state: WebState, user: str, metadata: dict[
         return
     usage = project_artifact_usage(state, user, admin=is_admin(state, user))
     project_used = int(usage.get(project_id, 0))
-    if project_used >= project_quota:
+    project_reserved = active_project_storage_reserved_bytes(state, project_id)
+    incoming_project = int(max(0, float(metadata.get("estimated_project_bytes") or 0)))
+    project_committed = project_used + project_reserved
+    if project_committed >= project_quota or project_committed + incoming_project > project_quota:
+        remaining = max(0, project_quota - project_used - project_reserved)
         raise HTTPException(
             status_code=413,
-            detail=f"Project quota exceeded. Used bytes: {project_used}; quota bytes: {project_quota}",
+            detail=(
+                f"Project quota exceeded. Remaining bytes: {remaining}; used bytes: {project_used}; "
+                f"reserved bytes: {project_reserved}; quota bytes: {project_quota}"
+            ),
         )
+
+
+def active_job_storage_reserved_bytes(state: WebState, username: str, metadata_key: str) -> int:
+    total = 0
+    for record in list_jobs(state, None):
+        if str(record.get("user") or "") != username:
+            continue
+        if normalize_job_status(str(record.get("status") or "")) not in ACTIVE_JOB_STATUSES:
+            continue
+        metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+        try:
+            total += int(max(0, float(metadata.get(metadata_key) or 0)))
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def active_project_storage_reserved_bytes(state: WebState, project_id: str) -> int:
+    total = 0
+    for record in list_jobs(state, None):
+        if normalize_job_status(str(record.get("status") or "")) not in ACTIVE_JOB_STATUSES:
+            continue
+        metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+        if str(metadata.get("project_id") or "") != project_id:
+            continue
+        try:
+            total += int(max(0, float(metadata.get("estimated_project_bytes") or 0)))
+        except (TypeError, ValueError):
+            continue
+    return total
 
 
 def projects_with_usage(state: WebState, user: str, *, include_archived: bool = False) -> list[dict[str, Any]]:
