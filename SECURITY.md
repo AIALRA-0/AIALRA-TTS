@@ -26,6 +26,8 @@ Worker requests must use a shared token or mTLS. Rotate the token if it appears 
 
 Remote WebUI deployments should keep `webui.cookie_secure=true` and `webui.csrf_origin_check=true`. The reverse proxy must preserve the public `Host` and `X-Forwarded-Proto` headers so same-origin browser writes pass and cross-site writes are rejected.
 
+Worker job status, control, preview, and cache upload requests are accepted only from the worker id that currently owns the claimed job. Late responses from a stale worker cannot overwrite a job already reclaimed by another worker.
+
 Global tuning and raw YAML configuration endpoints are admin-only. They may expose local paths, worker credentials, download-signing secrets, and deployment controls.
 
 Dashboard storage paths are redacted for non-admin users. Ordinary users receive storage labels, while admins can still see absolute paths for deployment troubleshooting.

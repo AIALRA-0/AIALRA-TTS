@@ -568,6 +568,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         record = read_job(state, job_id)
         if not record:
             raise HTTPException(status_code=404, detail="Job not found")
+        worker_id = str(body.get("worker_id") or request.headers.get("x-worker-id") or "")
+        require_claimed_worker(record, worker_id, action="update job status")
         changes = worker_status_changes(body)
         if record.get("cancel_requested") and changes.get("status") in {"done", "failed"}:
             for key in ["worker_artifacts", "result", "result_report", "result_video"]:
@@ -587,7 +589,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         state.store.record_worker_heartbeat(
             {
                 "status": "online",
-                "worker_id": str(body.get("worker_id") or record.get("claimed_by") or "local-windows-worker"),
+                "worker_id": worker_id or str(record.get("claimed_by") or "local-windows-worker"),
                 "version": str(body.get("version") or ""),
                 "max_concurrent_jobs": body.get("max_concurrent_jobs"),
                 "metrics": body.get("metrics") if isinstance(body.get("metrics"), dict) else {},
@@ -604,6 +606,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         if not record:
             raise HTTPException(status_code=404, detail="Job not found")
         worker_id = str(body.get("worker_id") or request.headers.get("x-worker-id") or "")
+        require_claimed_worker(record, worker_id, action="poll job control")
         state.store.record_worker_heartbeat(
             {
                 "status": "online",
@@ -623,6 +626,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         record = read_job(state, job_id)
         if not record:
             raise HTTPException(status_code=404, detail="Job not found")
+        worker_id = str(request.headers.get("x-worker-id") or "")
+        require_claimed_worker(record, worker_id, action="upload job preview")
         row = save_worker_preview_upload(state, record, request, body)
         update_job(
             state,
@@ -636,7 +641,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         state.store.record_worker_heartbeat(
             {
                 "status": "online",
-                "worker_id": str(request.headers.get("x-worker-id") or record.get("claimed_by") or "local-windows-worker"),
+                "worker_id": worker_id or str(record.get("claimed_by") or "local-windows-worker"),
                 "message": f"job {job_id} preview uploaded",
             }
         )
@@ -649,6 +654,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         record = read_job(state, job_id)
         if not record:
             raise HTTPException(status_code=404, detail="Job not found")
+        worker_id = str(request.headers.get("x-worker-id") or "")
+        require_claimed_worker(record, worker_id, action="upload artifact cache")
         row = save_worker_artifact_cache_upload(state, record, request, body)
         update_job(
             state,
@@ -662,7 +669,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         state.store.record_worker_heartbeat(
             {
                 "status": "online",
-                "worker_id": str(request.headers.get("x-worker-id") or record.get("claimed_by") or "local-windows-worker"),
+                "worker_id": worker_id or str(record.get("claimed_by") or "local-windows-worker"),
                 "message": f"job {job_id} artifact cache uploaded",
             }
         )
@@ -1606,6 +1613,21 @@ def worker_control_payload(record: dict[str, Any]) -> dict[str, Any]:
         "cancel_requested_at": record.get("cancel_requested_at"),
         "cancel_requested_by": record.get("cancel_requested_by"),
     }
+
+
+def require_claimed_worker(record: dict[str, Any], worker_id: str, *, action: str) -> None:
+    if record.get("dispatch_target") != "worker":
+        raise HTTPException(status_code=409, detail=f"Cannot {action}: job is not a worker job")
+    status = normalize_job_status(str(record.get("status") or ""))
+    if status in {"queued", "retrying", "paused"}:
+        raise HTTPException(status_code=409, detail=f"Cannot {action}: job is not claimed by a worker")
+    if status in {"done", "failed", "cancelled", "deleted"}:
+        raise HTTPException(status_code=409, detail=f"Cannot {action}: job is already {status}")
+    claimed_by = str(record.get("claimed_by") or "")
+    if claimed_by and not worker_id:
+        raise HTTPException(status_code=400, detail="worker_id is required for claimed worker jobs")
+    if claimed_by and worker_id != claimed_by:
+        raise HTTPException(status_code=409, detail=f"Cannot {action}: job is claimed by another worker")
 
 
 def template_params_for_job(state: WebState, user: str, body: dict[str, Any]) -> dict[str, Any]:

@@ -15,7 +15,7 @@ else:
 
 from ecse_localizer.artifacts import artifact_catalog
 from ecse_localizer.utils import read_json
-from ecse_localizer.webui import create_app, create_job_record, fields_from_config, list_all_video_records, resolve_video_reference, update_job
+from ecse_localizer.webui import create_app, create_job_record, fields_from_config, list_all_video_records, read_job, resolve_video_reference, update_job
 from ecse_localizer.worker_client import worker_headers
 
 
@@ -916,6 +916,7 @@ def test_worker_status_update_refreshes_heartbeat_and_job_progress(tmp_path):
         metadata={},
         dispatch_target="worker",
     )
+    update_job(state, record["id"], {"status": "claimed", "claimed_by": "worker-1"})
     response = client.post(
         f"/api/worker/jobs/{record['id']}/status",
         headers={"x-worker-token": "worker-token"},
@@ -1099,6 +1100,46 @@ def test_running_worker_job_cancel_is_polled_and_finalized(tmp_path):
     assert job["status"] == "retrying"
     assert job["cancel_requested"] is False
     assert job["cancel_requested_at"] is None
+
+
+def test_stale_worker_status_cannot_override_reclaimed_job(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    record = create_job_record(
+        state,
+        "audit",
+        "Remote audit",
+        ["python", "-m", "ecse_localizer", "audit"],
+        user="admin",
+        metadata={"worker_args": ["audit", "--input", "x"]},
+        dispatch_target="worker",
+    )
+    update_job(state, record["id"], {"status": "running", "claimed_by": "worker-new", "worker_id": "worker-new"})
+
+    response = client.post(
+        f"/api/worker/jobs/{record['id']}/status",
+        headers={"x-worker-token": "worker-token"},
+        json={
+            "status": "done",
+            "worker_id": "worker-old",
+            "returncode": 0,
+            "worker_artifacts": [{"ref_id": "stale-output"}],
+        },
+    )
+
+    assert response.status_code == 409
+    persisted = read_job(state, record["id"])
+    assert persisted["status"] == "running"
+    assert persisted["claimed_by"] == "worker-new"
+    assert "worker_artifacts" not in persisted
 
 
 def test_worker_queue_pause_resume_and_cancel_paused_job(tmp_path):
@@ -1523,6 +1564,7 @@ def test_worker_preview_upload_respects_remote_quota(tmp_path):
         metadata={},
         dispatch_target="worker",
     )
+    update_job(state, record["id"], {"status": "claimed", "claimed_by": "worker-1"})
 
     path = f"/api/worker/jobs/{record['id']}/preview"
     body = b"x" * 100

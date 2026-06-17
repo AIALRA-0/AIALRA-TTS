@@ -89,6 +89,7 @@ Deployment steps:
    - worker metrics must be sanitized before storage/display; do not expose Windows filesystem paths in dashboard, quota, job, artifact, or heartbeat responses.
    - worker log tails, errors, and command summaries must be redacted before storage/display; do not expose Windows paths, local user names from paths, private LAN IPs, authorization credentials, worker tokens, passwords, signatures, or API keys.
    - worker heartbeat messages and media-ref display names must be treated as untrusted and redacted; store only file display names, never full Windows paths.
+   - worker status/control/preview/cache requests must match the job's current `claimed_by` worker id; late updates from a stale worker must be rejected after a job is reclaimed.
    - cancelling a running worker job must set a `cancel_requested` flag; the Windows worker must observe it through a signed `/api/worker/jobs/{job_id}/control` poll and then report `cancelled`.
    - pausing a worker job is a queue-level operation for `queued/retrying` jobs only; paused jobs must not be claimable until resumed.
    - worker heartbeat/claim may include opaque media refs from `worker.media_roots`; Contabo must store only ref id, display name, size, MIME type, and mtime, never the Windows source path.
