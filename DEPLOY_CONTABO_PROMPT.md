@@ -78,11 +78,15 @@ Deployment steps:
      .\13_start_worker.ps1 -LocalCheck
      .\13_start_worker.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
      ```
+     These scripts set process-local environment variables before invoking Python and do not pass the worker token as a Python command-line argument.
    - preferred direct worker entry:
      ```powershell
      python -m ecse_localizer worker --local-check
-     python -m ecse_localizer worker --remote-base-url "https://your-domain.example" --worker-token "$env:WORKER_SHARED_TOKEN"
+     $env:REMOTE_PUBLIC_BASE_URL="https://your-domain.example"
+     $env:WORKER_SHARED_TOKEN="<server-local-secret>"
+     python -m ecse_localizer worker
      ```
+     The CLI reads `REMOTE_PUBLIC_BASE_URL` and `WORKER_SHARED_TOKEN` from the environment when flags are omitted. Avoid long-running worker commands that place the token in process arguments.
    - `06_worker_heartbeat.ps1` and `07_worker_poll.ps1` remain available only as compatibility split scripts; the unified worker is the production default.
    - queued job metadata for source language, target subtitle language, TTS language, quality mode, and style is applied on the Windows worker through a generated local job config under `runs/worker_job_configs`.
    - if the Windows worker heartbeat is missing or stale, new jobs must stay `queued` and the UI must show that they are waiting for the local worker, not that GPU processing has already started.

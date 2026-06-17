@@ -92,8 +92,10 @@ The preferred long-running worker entry sends HMAC-signed heartbeats and claims 
 
 ```powershell
 python -m ecse_localizer worker --local-check
-python -m ecse_localizer worker --remote-base-url $env:REMOTE_PUBLIC_BASE_URL --worker-token $env:WORKER_SHARED_TOKEN
+python -m ecse_localizer worker
 ```
+
+The worker CLI reads `REMOTE_PUBLIC_BASE_URL` and `WORKER_SHARED_TOKEN` from the environment when the corresponding flags are omitted. Avoid passing the token as a command-line argument for long-running workers because process arguments can be inspected locally.
 
 `06_worker_heartbeat.ps1` and `07_worker_poll.ps1` remain as compatibility split scripts, but production should run the unified worker unless there is a specific operational reason to split heartbeat and polling.
 
@@ -207,8 +209,8 @@ python -m ecse_localizer tts-health
 python -m ecse_localizer worker-status
 python -m ecse_localizer worker-health --skip-remote
 python -m ecse_localizer worker --local-check
-python -m ecse_localizer worker --remote-base-url "https://your-domain.example" --worker-token "<token>" --once --dry-run
-python -m ecse_localizer worker-poll --remote-base-url "https://your-domain.example" --worker-token "<token>" --once --dry-run
+python -m ecse_localizer worker --once --dry-run
+python -m ecse_localizer worker-poll --once --dry-run
 python -m ecse_localizer --config deploy/config.remote.yaml deploy-check
 python -m ecse_localizer release-check
 python -m ecse_localizer cleanup --older-than-days 7

@@ -114,6 +114,47 @@ def test_worker_once_can_skip_heartbeat(monkeypatch, tmp_path, capsys):
     assert calls == [("poll", "worker-1", True)]
 
 
+def test_worker_once_reads_remote_values_from_environment(monkeypatch, tmp_path, capsys):
+    calls = []
+
+    def fake_build_payload(config, *, worker_id):
+        return {"worker_id": worker_id, "privacy": config["privacy"], "metrics": {}, "capabilities": {}}
+
+    def fake_heartbeat(remote_base_url, worker_token, payload):
+        calls.append(("heartbeat", remote_base_url, worker_token, payload["worker_id"]))
+        return {"ok": True, "worker": {"status": "online"}}
+
+    def fake_poll_once(**kwargs):
+        calls.append(("poll", kwargs["remote_base_url"], kwargs["worker_token"], kwargs["worker_id"], kwargs["dry_run"]))
+        return {"ok": True, "claimed": False}
+
+    monkeypatch.setenv("REMOTE_PUBLIC_BASE_URL", "https://remote.example")
+    monkeypatch.setenv("WORKER_SHARED_TOKEN", "worker-token")
+    monkeypatch.setattr("ecse_localizer.cli.build_worker_status_payload", fake_build_payload)
+    monkeypatch.setattr("ecse_localizer.cli.post_worker_heartbeat", fake_heartbeat)
+    monkeypatch.setattr("ecse_localizer.cli.poll_once", fake_poll_once)
+
+    rc = main(
+        [
+            "--config",
+            str(write_config(tmp_path)),
+            "worker",
+            "--worker-id",
+            "worker-1",
+            "--once",
+            "--dry-run",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert rc == 0
+    assert calls == [
+        ("heartbeat", "https://remote.example", "worker-token", "worker-1"),
+        ("poll", "https://remote.example", "worker-token", "worker-1", True),
+    ]
+    assert "worker-token" not in output
+
+
 def test_worker_local_check_does_not_require_remote_or_token(monkeypatch, tmp_path, capsys):
     def fake_build_payload(config, *, worker_id):
         return {
@@ -154,8 +195,40 @@ def test_worker_local_check_does_not_require_remote_or_token(monkeypatch, tmp_pa
     assert "C:\\Users" not in output
 
 
-def test_worker_remote_args_required_without_local_check(tmp_path, capsys):
+def test_worker_remote_args_required_without_local_check(monkeypatch, tmp_path, capsys):
+    monkeypatch.delenv("REMOTE_PUBLIC_BASE_URL", raising=False)
+    monkeypatch.delenv("WORKER_SHARED_TOKEN", raising=False)
+
     rc = main(["--config", str(write_config(tmp_path)), "worker", "--once", "--dry-run"])
 
     assert rc == 1
     assert "requires --remote-base-url" in capsys.readouterr().err
+
+
+def test_worker_poll_reads_remote_values_from_environment(monkeypatch, tmp_path, capsys):
+    calls = []
+
+    def fake_poll_once(**kwargs):
+        calls.append((kwargs["remote_base_url"], kwargs["worker_token"], kwargs["worker_id"], kwargs["dry_run"]))
+        return {"ok": True, "claimed": False}
+
+    monkeypatch.setenv("REMOTE_PUBLIC_BASE_URL", "https://remote.example")
+    monkeypatch.setenv("WORKER_SHARED_TOKEN", "worker-token")
+    monkeypatch.setattr("ecse_localizer.cli.poll_once", fake_poll_once)
+
+    rc = main(
+        [
+            "--config",
+            str(write_config(tmp_path)),
+            "worker-poll",
+            "--worker-id",
+            "worker-1",
+            "--once",
+            "--dry-run",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert rc == 0
+    assert calls == [("https://remote.example", "worker-token", "worker-1", True)]
+    assert "worker-token" not in output

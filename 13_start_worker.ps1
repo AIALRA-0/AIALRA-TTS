@@ -41,7 +41,8 @@ if ($LocalCheck) {
   if (-not $WorkerToken) {
     throw "WorkerToken is required. Set WORKER_SHARED_TOKEN or pass -WorkerToken."
   }
-  $argsList += @("--remote-base-url", $RemoteBaseUrl, "--worker-token", $WorkerToken)
+  $env:REMOTE_PUBLIC_BASE_URL = $RemoteBaseUrl
+  $env:WORKER_SHARED_TOKEN = $WorkerToken
 }
 
 if ($Once) { $argsList += "--once" }

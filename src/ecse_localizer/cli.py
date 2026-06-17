@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import time
@@ -125,8 +126,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--older-than-days", type=int, default=7)
     p.add_argument("--apply", action="store_true", help="Delete files. Without this flag cleanup is a dry run.")
     p = sub.add_parser("worker-poll")
-    p.add_argument("--remote-base-url", required=True)
-    p.add_argument("--worker-token", required=True)
+    p.add_argument("--remote-base-url")
+    p.add_argument("--worker-token")
     p.add_argument("--worker-id", default="local-windows-worker")
     p.add_argument("--interval-seconds", type=int, default=15)
     p.add_argument("--max-concurrent-jobs", type=int, help="Override worker.max_concurrent_jobs for this poller.")
@@ -332,6 +333,7 @@ def cmd_worker_status(args: argparse.Namespace, config: dict[str, Any]) -> int:
 
 
 def cmd_worker_health(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    apply_worker_env_defaults(args)
     payload = build_worker_health_payload(config, worker_id=args.worker_id)
     remote_checked = False
     remote_ok = False
@@ -393,6 +395,7 @@ def cmd_cleanup(args: argparse.Namespace, config: dict[str, Any]) -> int:
 
 
 def cmd_worker(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    apply_worker_env_defaults(args)
     if args.local_check:
         payload = build_worker_health_payload(config, worker_id=args.worker_id)
         health = assess_worker_health(payload, remote_checked=False)
@@ -406,9 +409,9 @@ def cmd_worker(args: argparse.Namespace, config: dict[str, Any]) -> int:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if health["pass"] else 2
     if not args.remote_base_url:
-        raise RuntimeError("worker requires --remote-base-url unless --local-check is used")
+        raise RuntimeError("worker requires --remote-base-url or REMOTE_PUBLIC_BASE_URL unless --local-check is used")
     if not args.worker_token:
-        raise RuntimeError("worker requires --worker-token unless --local-check is used")
+        raise RuntimeError("worker requires --worker-token or WORKER_SHARED_TOKEN unless --local-check is used")
     if args.once:
         heartbeat = {"sent": False, "skipped": True}
         if not args.no_heartbeat:
@@ -490,6 +493,11 @@ def send_worker_heartbeat(args: argparse.Namespace, config: dict[str, Any]) -> d
 
 
 def cmd_worker_poll(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    apply_worker_env_defaults(args)
+    if not args.remote_base_url:
+        raise RuntimeError("worker-poll requires --remote-base-url or REMOTE_PUBLIC_BASE_URL")
+    if not args.worker_token:
+        raise RuntimeError("worker-poll requires --worker-token or WORKER_SHARED_TOKEN")
     if args.once or args.dry_run:
         max_jobs = worker_concurrency(config, args.max_concurrent_jobs)
         if max_jobs <= 1:
@@ -523,6 +531,13 @@ def cmd_worker_poll(args: argparse.Namespace, config: dict[str, Any]) -> int:
         max_concurrent_jobs=args.max_concurrent_jobs,
     )
     return 0
+
+
+def apply_worker_env_defaults(args: argparse.Namespace) -> None:
+    if hasattr(args, "remote_base_url") and not getattr(args, "remote_base_url", None):
+        args.remote_base_url = os.environ.get("REMOTE_PUBLIC_BASE_URL", "")
+    if hasattr(args, "worker_token") and not getattr(args, "worker_token", None):
+        args.worker_token = os.environ.get("WORKER_SHARED_TOKEN", "")
 
 
 def cmd_translation_sample(args: argparse.Namespace, config: dict[str, Any]) -> int:

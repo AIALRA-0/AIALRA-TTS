@@ -21,7 +21,8 @@ $argsList = @(
 if ($SkipRemote) {
   $argsList += "--skip-remote"
 } elseif ($RemoteBaseUrl -and $WorkerToken) {
-  $argsList += @("--remote-base-url", $RemoteBaseUrl, "--worker-token", $WorkerToken)
+  $env:REMOTE_PUBLIC_BASE_URL = $RemoteBaseUrl
+  $env:WORKER_SHARED_TOKEN = $WorkerToken
 } else {
   Write-Warning "Remote heartbeat check skipped. Set REMOTE_PUBLIC_BASE_URL and WORKER_SHARED_TOKEN, or pass -SkipRemote explicitly."
   $argsList += "--skip-remote"

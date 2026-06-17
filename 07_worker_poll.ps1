@@ -21,13 +21,13 @@ $argsList = @(
   "-m", "ecse_localizer",
   "--config", (Join-Path $ProjectRoot "config.yaml"),
   "worker",
-  "--remote-base-url", $RemoteBaseUrl,
-  "--worker-token", $WorkerToken,
   "--worker-id", $WorkerId,
   "--interval-seconds", [string]$IntervalSeconds,
   "--max-concurrent-jobs", [string]$MaxConcurrentJobs,
   "--heartbeat-interval-seconds", [string]$HeartbeatIntervalSeconds
 )
+$env:REMOTE_PUBLIC_BASE_URL = $RemoteBaseUrl
+$env:WORKER_SHARED_TOKEN = $WorkerToken
 if ($Once) { $argsList += "--once" }
 if ($DryRun) { $argsList += "--dry-run" }
 if ($NoHeartbeat) { $argsList += "--no-heartbeat" }

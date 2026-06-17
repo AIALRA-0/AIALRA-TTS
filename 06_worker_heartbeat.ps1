@@ -22,12 +22,12 @@ $argsList = @(
   "-m", "ecse_localizer",
   "--config", (Join-Path $ProjectRoot "config.yaml"),
   "worker",
-  "--remote-base-url", $RemoteBaseUrl,
-  "--worker-token", $WorkerToken,
   "--worker-id", $WorkerId,
   "--heartbeat-interval-seconds", [string]$IntervalSeconds,
   "--heartbeat-only"
 )
+$env:REMOTE_PUBLIC_BASE_URL = $RemoteBaseUrl
+$env:WORKER_SHARED_TOKEN = $WorkerToken
 if (-not $Loop) { $argsList += "--once" }
 
 & $Py @argsList
