@@ -5,7 +5,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
-PATH_KEYS = {"path", "source_path", "local_path", "input_dir", "output_dir", "work_dir"}
+PATH_KEYS = {"path", "source_path", "local_path", "input_dir", "output_dir", "work_dir", "job_config", "config_path"}
 PATH_SUFFIXES = ("_path", "_dir")
 SECRET_FLAG_NAMES = {
     "--token",
@@ -52,6 +52,11 @@ SECRET_ASSIGNMENT_RE = re.compile(
 )
 PRIVATE_IPV4_RE = re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2\d|3[01]))(?:\.\d{1,3}){2}\b")
 TOKEN_RE = re.compile(r"\b(?:hf_|ghp_|github_pat_|sk-)[A-Za-z0-9_\-]{12,}\b")
+
+
+def is_remote_safe_reference(value: Any) -> bool:
+    text = str(value or "").strip()
+    return bool(text.startswith("worker-ref:"))
 
 
 def sanitize_remote_text(value: Any) -> str:
@@ -106,7 +111,8 @@ def sanitize_remote_command(command: Any) -> list[str]:
             redact_next = False
             continue
         if local_path_next:
-            cleaned.append(item if item.startswith("<") and item.endswith(">") else "<local-path>")
+            is_placeholder = item.startswith("<") and item.endswith(">")
+            cleaned.append(item if is_placeholder or is_remote_safe_reference(item) else "<local-path>")
             local_path_next = False
             continue
         if lowered in SECRET_FLAG_NAMES:
@@ -123,7 +129,8 @@ def sanitize_remote_command(command: Any) -> list[str]:
             continue
         if any(lowered.startswith(f"{flag}=") for flag in PATH_FLAG_NAMES):
             key = item.split("=", 1)[0]
-            cleaned.append(f"{key}=<local-path>")
+            value = item.split("=", 1)[1]
+            cleaned.append(item if is_remote_safe_reference(value) else f"{key}=<local-path>")
             continue
         cleaned.append(sanitize_remote_text(item))
     return cleaned

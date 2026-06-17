@@ -23,6 +23,7 @@ def valid_remote_config() -> dict:
             "host": "0.0.0.0",
             "execution_mode": "worker_queue",
             "allow_remote_media_uploads": False,
+            "allow_worker_path_submission": False,
             "bind_local_only": False,
             "upload_dir": "/srv/aialra/previews/uploads",
             "preview_dir": "/srv/aialra/previews/cache",
@@ -58,6 +59,7 @@ def test_deploy_check_rejects_placeholders_and_unsafe_remote_mode():
     config["privacy"]["allow_cloud_api"] = True
     config["webui"]["execution_mode"] = "local_subprocess"
     config["webui"]["allow_remote_media_uploads"] = True
+    config["webui"]["allow_worker_path_submission"] = True
     config["webui"]["worker_auth_mode"] = "hmac_or_token"
     config["webui"]["worker_require_nonce"] = False
     config["webui"]["session_secret"] = "${WEBUI_SESSION_SECRET}"
@@ -72,6 +74,7 @@ def test_deploy_check_rejects_placeholders_and_unsafe_remote_mode():
     assert "must_be_false" in codes
     assert "worker_queue_required" in codes
     assert "remote_media_uploads_enabled" in codes
+    assert "worker_path_submission_enabled" in codes
     assert "weak_worker_auth" in codes
     assert "must_be_true" in codes
     assert "secret_placeholder" in codes

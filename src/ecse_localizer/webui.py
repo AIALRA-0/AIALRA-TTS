@@ -39,7 +39,7 @@ from .job_config import write_job_config
 from .llm_local import LocalLLMClient
 from .metrics import collect_system_metrics, sanitize_metrics
 from .platform_store import PlatformStore
-from .redaction import sanitize_remote_command, sanitize_remote_text, sanitize_remote_value
+from .redaction import is_remote_safe_reference, sanitize_remote_command, sanitize_remote_text, sanitize_remote_value
 from .scan import VIDEO_SUFFIXES, find_videos
 from .tts import tts_health
 from .utils import PROJECT_ROOT, ensure_dir, now_id, read_json, slugify, write_json
@@ -198,7 +198,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             "video_count": len(videos),
             "report_count": len(list_reports(state.config, limit=10000)),
             "latest_reports": reports,
-            "latest_jobs": list_jobs(state, user)[:8],
+            "latest_jobs": [public_job_record(job) for job in list_jobs(state, user)[:8]],
             "tts": tts,
             "llm": llm.__dict__,
             "capabilities": caps,
@@ -304,7 +304,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             metadata=metadata,
             dispatch_target="worker",
         )
-        return {"ok": True, "job": record, "dispatch": {"target": "worker", "queued": True, "worker": worker_info}}
+        return {"ok": True, "job": public_job_record(record), "dispatch": {"target": "worker", "queued": True, "worker": worker_info}}
 
     @app.post("/api/cleanup")
     async def cleanup(request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
@@ -643,14 +643,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.get("/api/jobs")
     def jobs(user: str = Depends(require_user)) -> dict[str, Any]:
-        return {"jobs": list_jobs(state, user)}
+        return {"jobs": [public_job_record(record) for record in list_jobs(state, user)]}
 
     @app.get("/api/jobs/{job_id}")
     def job(job_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
         record = read_job(state, job_id)
         if not record or not can_access_record(state, user, record):
             raise HTTPException(status_code=404, detail="Job not found")
-        return record
+        return public_job_record(record)
 
     @app.get("/api/jobs/{job_id}/log")
     def job_log(job_id: str, lines: int = 240, user: str = Depends(require_user)) -> PlainTextResponse:
@@ -662,7 +662,10 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             if record.get("log_tail"):
                 return PlainTextResponse(str(record.get("log_tail") or ""), media_type="text/plain; charset=utf-8")
             return PlainTextResponse("")
-        return PlainTextResponse(tail_text(log_path, max(20, min(2000, lines))), media_type="text/plain; charset=utf-8")
+        text = tail_text(log_path, max(20, min(2000, lines)))
+        if record.get("dispatch_target") == "worker":
+            text = sanitize_remote_text(text)
+        return PlainTextResponse(text, media_type="text/plain; charset=utf-8")
 
     @app.post("/api/jobs")
     async def start_job(request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
@@ -671,6 +674,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         execution_mode = str(state.webui.get("execution_mode", "local_subprocess"))
         worker_queue = execution_mode == "worker_queue" or bool(body.get("queue_for_worker"))
         command, title = build_job_command(job_type, body, state, validate_paths=not worker_queue)
+        if worker_queue:
+            validate_worker_queue_job_body(job_type, body, state)
         template_params = template_params_for_job(state, user, body)
         metadata = job_metadata_from_body(body, template_params=template_params)
         validate_job_project(state, user, metadata)
@@ -713,7 +718,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             thread.start()
         return {
             "ok": True,
-            "job": record,
+            "job": public_job_record(record),
             "dispatch": {
                 "target": "worker" if worker_queue else "local",
                 "queued": worker_queue,
@@ -734,7 +739,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             return {"ok": True}
         if record.get("dispatch_target") == "worker" and record.get("status") in {"queued", "retrying", "paused"}:
             update_job(state, job_id, {"status": "cancelled", "ended_at": iso_now(), "returncode": -9, "updated_at": iso_now()})
-            return {"ok": True, "job": read_job(state, job_id)}
+            return {"ok": True, "job": public_job_record(read_job(state, job_id) or record)}
         if record.get("dispatch_target") == "worker" and record.get("status") in {"claimed", "running"}:
             update_job(
                 state,
@@ -746,7 +751,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                     "updated_at": iso_now(),
                 },
             )
-            return {"ok": True, "job": read_job(state, job_id), "message": "Cancel request sent to Windows worker"}
+            return {"ok": True, "job": public_job_record(read_job(state, job_id) or record), "message": "Cancel request sent to Windows worker"}
         return {"ok": False, "message": "Job is not running in this WebUI process"}
 
     @app.post("/api/jobs/{job_id}/pause")
@@ -754,14 +759,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         record = read_job(state, job_id)
         if not record or not can_access_record(state, user, record):
             raise HTTPException(status_code=404, detail="Job not found")
-        return {"ok": True, "job": pause_job_record(state, job_id, paused_by=user)}
+        return {"ok": True, "job": public_job_record(pause_job_record(state, job_id, paused_by=user))}
 
     @app.post("/api/jobs/{job_id}/resume")
     def resume_job(job_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
         record = read_job(state, job_id)
         if not record or not can_access_record(state, user, record):
             raise HTTPException(status_code=404, detail="Job not found")
-        return {"ok": True, "job": resume_job_record(state, job_id, resumed_by=user)}
+        return {"ok": True, "job": public_job_record(resume_job_record(state, job_id, resumed_by=user))}
 
     @app.post("/api/jobs/{job_id}/retry")
     def retry_job(job_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
@@ -770,10 +775,10 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Job not found")
         record = retry_job_record(state, job_id)
         if record.get("dispatch_target") == "worker":
-            return {"ok": True, "job": record}
+            return {"ok": True, "job": public_job_record(record)}
         thread = threading.Thread(target=run_job, args=(state, record["id"]), daemon=True)
         thread.start()
-        return {"ok": True, "job": record}
+        return {"ok": True, "job": public_job_record(record)}
 
     @app.delete("/api/jobs/{job_id}")
     def delete_job(job_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
@@ -781,7 +786,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         if not record or not can_access_record(state, user, record):
             raise HTTPException(status_code=404, detail="Job not found")
         deleted = soft_delete_job(state, job_id, deleted_by=user)
-        return {"ok": True, "job": deleted}
+        return {"ok": True, "job": public_job_record(deleted)}
 
     return app
 
@@ -893,7 +898,7 @@ def browser_upload_policy(state: WebState) -> dict[str, Any]:
     else:
         message = (
             "Browser media upload is disabled for remote worker_queue mode. "
-            "Keep original videos on the Windows worker and submit a worker-visible local path or use a private worker upload tunnel."
+            "Keep original videos on the Windows worker and submit worker-ref media options from the worker registry."
         )
         mode = "disabled"
     return {
@@ -1588,6 +1593,35 @@ def worker_args_from_command(command: list[str]) -> list[str]:
     if len(args) >= 2 and args[0] == "--config":
         args = args[2:]
     return args
+
+
+def public_job_record(record: dict[str, Any] | None) -> dict[str, Any]:
+    if not record:
+        return {}
+    row = sanitize_remote_value(dict(record))
+    row["command"] = sanitize_remote_command(record.get("command"))
+    metadata = dict(record.get("metadata") or {}) if isinstance(record.get("metadata"), dict) else {}
+    if isinstance(metadata.get("worker_args"), list):
+        metadata["worker_args"] = sanitize_remote_command(metadata["worker_args"])
+    row["metadata"] = sanitize_remote_value(metadata)
+    return row
+
+
+def validate_worker_queue_job_body(job_type: str, body: dict[str, Any], state: WebState) -> None:
+    if job_type != "process_one":
+        return
+    video = str(body.get("video") or "").strip()
+    if not video or is_remote_safe_reference(video):
+        return
+    if bool(state.webui.get("allow_worker_path_submission", False)):
+        return
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "Remote worker_queue process-one requires a worker-ref:<id> video reference. "
+            "Set webui.allow_worker_path_submission=true only for a private trusted deployment."
+        ),
+    )
 
 
 def command_with_config(command: list[str], config_path: str | Path) -> list[str]:

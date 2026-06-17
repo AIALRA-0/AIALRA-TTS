@@ -75,7 +75,7 @@ The intended production layout is:
 
 Contabo should store only metadata, small thumbnails, low-bitrate previews, and optional short-lived caches under `webui.preview_dir`. Original videos and full-resolution outputs remain on the local worker by default.
 
-Remote production config should keep `webui.allow_remote_media_uploads: false`. The Windows worker can publish opaque `worker-ref:<id>` media options from `worker.media_roots` or `input_dir`; Contabo stores only file name, size, media type, and ref id, while the real path stays in the worker's local registry. Users can also paste a Windows worker-visible video path in the task form's `Worker 本地视频路径` field as a fallback, or you can add a private worker upload tunnel later; do not use the public Contabo web disk as the default original-video store.
+Remote production config should keep `webui.allow_remote_media_uploads: false` and `webui.allow_worker_path_submission: false`. The Windows worker can publish opaque `worker-ref:<id>` media options from `worker.media_roots` or `input_dir`; Contabo stores only file name, size, media type, and ref id, while the real path stays in the worker's local registry. A raw Windows worker-visible path can be enabled only for a private trusted deployment by setting `webui.allow_worker_path_submission: true`; public Contabo deployments should not store these paths. Add a private worker upload tunnel later if users need browser uploads without placing originals on the Contabo disk.
 
 Windows worker heartbeat:
 

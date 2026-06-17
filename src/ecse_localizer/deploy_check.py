@@ -43,6 +43,14 @@ def check_deploy_config(config: dict[str, Any], *, mode: str = "remote") -> dict
         add(findings, "error", "worker_queue_required", "webui.execution_mode", "Contabo must queue jobs for the Windows worker.")
     if bool(webui.get("allow_remote_media_uploads", False)):
         add(findings, "error", "remote_media_uploads_enabled", "webui.allow_remote_media_uploads", "Original videos should stay on the Windows worker by default.")
+    if bool(webui.get("allow_worker_path_submission", False)):
+        add(
+            findings,
+            "error",
+            "worker_path_submission_enabled",
+            "webui.allow_worker_path_submission",
+            "Use opaque worker-ref media IDs in production so Contabo does not store Windows source paths.",
+        )
     if bool(webui.get("bind_local_only", False)):
         add(findings, "warn", "bind_local_only_remote", "webui.bind_local_only", "Remote container deployments usually bind 0.0.0.0 behind Caddy/Nginx.")
 

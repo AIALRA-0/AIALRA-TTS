@@ -36,6 +36,7 @@ Deployment steps:
    - Keep full media storage on the Windows worker.
    - Set `webui.execution_mode=worker_queue` on Contabo.
    - Keep `webui.allow_remote_media_uploads=false` on Contabo unless a deliberate short-lived cache policy is approved.
+   - Keep `webui.allow_worker_path_submission=false`; users should select opaque `worker-ref:<id>` options published by the Windows worker, not paste Windows filesystem paths into the public web app.
    - Do not copy local `config.yaml`; use template values and environment variables only.
 4. Run the deployment guard before starting the public service:
    ```bash
@@ -109,7 +110,7 @@ Deployment steps:
    - upload quota is enforced across multi-file requests and active-job concurrency limits return HTTP 429 with a readable message
    - browser media upload is disabled in `worker_queue` mode unless explicitly enabled, so original videos do not land on the Contabo disk by default
    - worker media refs appear in the task video selector as `worker-ref:<id>` options without exposing Windows source paths
-   - the task form can queue `process_one` with a Windows worker-visible local video path without requiring that file to exist on Contabo
+   - the task form rejects raw Windows worker-visible local video paths unless `webui.allow_worker_path_submission=true` is deliberately enabled for a private trusted deployment
    - admins can disable users and update local/remote user quotas without disabling the last active admin
    - project quota usage is visible for generated managed artifacts
    - worker heartbeat appears online
