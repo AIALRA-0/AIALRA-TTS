@@ -14,6 +14,7 @@ from ecse_localizer.webui import (
     claim_worker_job,
     command_with_config,
     create_job_record,
+    enforce_artifact_cache_request_limits,
     enforce_active_job_limits,
     file_display_name,
     infer_job_type,
@@ -1039,3 +1040,35 @@ def test_save_worker_preview_upload_enforces_quota_without_testclient(tmp_path):
         assert "Remote quota exceeded" in str(exc)
     else:
         raise AssertionError("expected worker preview upload to enforce remote quota")
+
+
+def test_artifact_cache_request_preflight_enforces_remote_quota_without_testclient(tmp_path):
+    config_path = write_config(tmp_path)
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    data["webui"]["default_remote_quota_gb"] = 0.00000001
+    config_path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    state = WebState(config_path)
+
+    try:
+        enforce_artifact_cache_request_limits(state, "admin", {"id": "worker_artifact_ref1", "size": 100})
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 413
+        assert "Remote quota exceeded" in str(exc)
+    else:
+        raise AssertionError("expected artifact cache request to enforce remote quota")
+
+
+def test_artifact_cache_request_preflight_enforces_single_file_limit_without_testclient(tmp_path):
+    config_path = write_config(tmp_path)
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    data["webui"]["worker_artifact_cache_max_upload_mb"] = 1
+    config_path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    state = WebState(config_path)
+
+    try:
+        enforce_artifact_cache_request_limits(state, "admin", {"id": "worker_artifact_ref1", "size": 2 * 1024 * 1024})
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 413
+        assert "Worker artifact cache exceeds 1 MB" in str(exc)
+    else:
+        raise AssertionError("expected artifact cache request to enforce cache size limit")

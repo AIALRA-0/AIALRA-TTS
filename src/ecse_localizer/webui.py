@@ -281,6 +281,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Artifact not found")
         if not row.get("remote_worker_artifact") or not row.get("download_requestable"):
             raise HTTPException(status_code=400, detail="Artifact is already cached or cannot be requested from a worker")
+        enforce_artifact_cache_request_limits(state, user, row)
         enforce_active_job_limits(state, user)
         worker_info = worker_status_payload(state)
         metadata = {
@@ -975,6 +976,19 @@ def save_worker_artifact_cache_upload(state: WebState, record: dict[str, Any], r
     target.write_bytes(body)
     row = upsert_worker_artifact_cache_manifest(state, record, request, target)
     return row
+
+
+def enforce_artifact_cache_request_limits(state: WebState, username: str, artifact: dict[str, Any]) -> None:
+    size = int(max(0, float(artifact.get("size") or 0)))
+    if size <= 0:
+        return
+    max_bytes = int(float(state.webui.get("worker_artifact_cache_max_upload_mb", 2048) or 2048) * 1024 * 1024)
+    if size > max_bytes:
+        raise HTTPException(status_code=413, detail=f"Worker artifact cache exceeds {state.webui.get('worker_artifact_cache_max_upload_mb', 2048)} MB")
+    quota = state.store.quota_status(username)
+    remaining = max(0, int(quota["remote_quota_bytes"]) - int(quota["remote_used_bytes"]))
+    if size > remaining:
+        raise HTTPException(status_code=413, detail=f"Remote quota exceeded. Remaining bytes: {remaining}")
 
 
 def upsert_worker_preview_manifest(

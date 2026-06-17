@@ -800,6 +800,93 @@ def test_request_worker_artifact_cache_creates_worker_job(tmp_path):
     assert job["metadata"]["artifact_ref_id"] == "ref1"
 
 
+def test_request_worker_artifact_cache_rejects_known_size_over_remote_quota(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config["webui"]["default_remote_quota_gb"] = 0.00000001
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    source_job = create_job_record(
+        state,
+        "process_one",
+        "Remote process",
+        ["python", "-m", "ecse_localizer", "process-one", "--video", r"C:\private\lecture.mp4"],
+        user="admin",
+        metadata={"project_id": "course", "folder_id": "week_1"},
+        dispatch_target="worker",
+    )
+    update_job(
+        state,
+        source_job["id"],
+        {
+            "status": "done",
+            "worker_artifacts": [{"ref_id": "ref_big", "source_output_key": "zh_dub_mp4", "name": "lecture_zh_dub.mp4", "size": 100}],
+        },
+    )
+    artifact = next(item for item in client.get("/api/artifacts").json()["artifacts"] if item["id"] == "worker_artifact_ref_big")
+
+    response = client.post(artifact["request_cache_url"], json={})
+
+    assert response.status_code == 413
+    assert "Remote quota exceeded" in response.text
+    assert not any(job["type"] == "cache_artifact" for job in client.get("/api/jobs").json()["jobs"])
+
+
+def test_request_worker_artifact_cache_rejects_known_size_over_cache_limit(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config["webui"]["worker_artifact_cache_max_upload_mb"] = 1
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    source_job = create_job_record(
+        state,
+        "process_one",
+        "Remote process",
+        ["python", "-m", "ecse_localizer", "process-one", "--video", r"C:\private\lecture.mp4"],
+        user="admin",
+        metadata={},
+        dispatch_target="worker",
+    )
+    update_job(
+        state,
+        source_job["id"],
+        {
+            "status": "done",
+            "worker_artifacts": [
+                {
+                    "ref_id": "ref_too_large",
+                    "source_output_key": "zh_dub_mp4",
+                    "name": "lecture_zh_dub.mp4",
+                    "size": 2 * 1024 * 1024,
+                }
+            ],
+        },
+    )
+    artifact = next(item for item in client.get("/api/artifacts").json()["artifacts"] if item["id"] == "worker_artifact_ref_too_large")
+
+    response = client.post(artifact["request_cache_url"], json={})
+
+    assert response.status_code == 413
+    assert "Worker artifact cache exceeds 1 MB" in response.text
+    assert not any(job["type"] == "cache_artifact" for job in client.get("/api/jobs").json()["jobs"])
+
+
 def test_worker_artifact_cache_upload_registers_downloadable_artifact(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
