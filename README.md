@@ -41,13 +41,15 @@ Open:
 http://127.0.0.1:7861
 ```
 
-Set real credentials in local `config.yaml` or `.env`; never commit them. The WebUI supports uploads, task history, project metadata, common tuning parameters, logs, quota checks, local worker health/metrics, failed-job retry, and soft-deleting job records.
+Set real credentials in local `config.yaml` or `.env`; never commit them. The WebUI supports uploads, task history, project/folder metadata, project quotas, common tuning parameters, logs, quota checks, local worker health/metrics, failed-job retry, and soft-deleting job records.
 
 Per-job language, quality, and style settings are written to generated job config files under `runs/`. The base `config.yaml` stays local and is not mutated by submitted jobs.
 
 The WebUI also has a `产物` page for generated artifacts. It can list reports, subtitles, WAV/MP4 outputs, show local preview links for media, create short-lived signed download URLs, delete managed output files, and run cleanup dry-runs. Deletion is restricted to managed output, run, and upload directories; it refuses to touch the original video root.
 
 Job states are normalized to `queued`, `claimed`, `running`, `paused`, `retrying`, `done`, `failed`, `cancelled`, and `deleted`. Older `passed` records remain readable and are treated as successful.
+
+Project quota is tracked as generated managed artifact usage per project. Original course videos stay outside project cleanup and remain protected.
 
 ## Remote + Local Architecture
 

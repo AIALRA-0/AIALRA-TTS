@@ -124,6 +124,8 @@ function bindEvents() {
   $("jobForm").addEventListener("submit", startJob);
   $("uploadForm").addEventListener("submit", uploadFiles);
   $("projectForm").addEventListener("submit", createProject);
+  $("folderForm").addEventListener("submit", createFolder);
+  $("jobProject").addEventListener("change", renderFolderOptions);
   $("userForm").addEventListener("submit", createUser);
   $("refreshArtifactsBtn").addEventListener("click", loadArtifacts);
   $("cleanupDryRunBtn").addEventListener("click", cleanupDryRun);
@@ -175,6 +177,7 @@ async function loadDashboard() {
   $("metricDisk").textContent = data.metrics?.disk ? `${Math.round(data.metrics.disk.used_percent)}%` : "-";
   state.projects = data.projects || [];
   renderProjectOptions();
+  renderFolderOptions();
   renderProjects();
   state.reports = data.latest_reports || [];
   renderReports();
@@ -221,6 +224,7 @@ async function loadProjects() {
     const data = await api("/api/projects");
     state.projects = data.projects || [];
     renderProjectOptions();
+    renderFolderOptions();
     renderProjects();
   } catch (error) {
     console.warn("Project load failed:", error);
@@ -228,13 +232,27 @@ async function loadProjects() {
 }
 
 function renderProjectOptions() {
-  const select = $("jobProject");
-  if (!select) return;
-  select.innerHTML = "";
+  const selects = [$("jobProject"), $("folderProject")].filter(Boolean);
+  for (const select of selects) select.innerHTML = "";
   for (const project of state.projects) {
+    for (const select of selects) {
+      const option = document.createElement("option");
+      option.value = project.id;
+      option.textContent = `${project.owner ? `${project.owner} / ` : ""}${project.name}`;
+      select.appendChild(option);
+    }
+  }
+}
+
+function renderFolderOptions() {
+  const select = $("jobFolder");
+  if (!select) return;
+  const project = state.projects.find((item) => item.id === $("jobProject").value) || state.projects[0];
+  select.innerHTML = "";
+  for (const folder of project?.folders || [{ id: "root", name: "Root" }]) {
     const option = document.createElement("option");
-    option.value = project.id;
-    option.textContent = `${project.owner ? `${project.owner} / ` : ""}${project.name}`;
+    option.value = folder.id;
+    option.textContent = folder.name || folder.id;
     select.appendChild(option);
   }
 }
@@ -256,6 +274,8 @@ function renderProjects() {
         <span class="status ok">${escapeHtml(project.owner || "")}</span>
       </div>
       <div class="job-meta">${escapeHtml(project.id)} · ${escapeHtml(project.description || "")}</div>
+      <div class="job-meta">project quota ${formatBytes(project.project_used_bytes || 0)} / ${formatBytes(project.quota_project_bytes || 0)}</div>
+      <div class="job-meta">folders ${(project.folders || []).map((folder) => escapeHtml(folder.name || folder.id)).join(" · ")}</div>
     `;
     list.appendChild(item);
   }
@@ -267,6 +287,7 @@ async function createProject(event) {
     const payload = {
       name: $("projectName").value,
       description: $("projectDescription").value,
+      quota_project_gb: Number($("projectQuota").value || 500),
     };
     await api("/api/projects", { method: "POST", body: JSON.stringify(payload) });
     $("projectName").value = "";
@@ -275,6 +296,23 @@ async function createProject(event) {
     await loadProjects();
   } catch (error) {
     toast(`创建项目失败：${error.message}`);
+  }
+}
+
+async function createFolder(event) {
+  event.preventDefault();
+  try {
+    const projectId = $("folderProject").value;
+    const payload = { name: $("folderName").value };
+    const result = await api(`/api/projects/${encodeURIComponent(projectId)}/folders`, { method: "POST", body: JSON.stringify(payload) });
+    state.projects = result.projects || state.projects;
+    $("folderName").value = "";
+    toast("文件夹已创建");
+    renderProjectOptions();
+    renderFolderOptions();
+    renderProjects();
+  } catch (error) {
+    toast(`创建文件夹失败：${error.message}`);
   }
 }
 
@@ -509,6 +547,7 @@ async function startJob(event) {
     tag: $("jobTag").value || "webui",
     force: $("jobForce").checked,
     project_id: $("jobProject").value,
+    folder_id: $("jobFolder").value || "root",
     source_language: $("jobSourceLanguage").value || "auto",
     target_subtitle_language: $("jobSubtitleLanguage").value || "zh-CN",
     target_tts_language: $("jobTtsLanguage").value || "zh-CN",

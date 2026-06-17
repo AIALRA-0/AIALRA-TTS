@@ -311,16 +311,36 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
 
     @app.get("/api/projects")
     def projects(user: str = Depends(require_user)) -> dict[str, Any]:
-        return {"projects": state.store.list_projects(user, admin=is_admin(state, user))}
+        return {"projects": projects_with_usage(state, user)}
 
     @app.post("/api/projects")
     async def create_project(request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
         body = await request.json()
         try:
-            project = state.store.create_project(user, str(body.get("name", "")), description=str(body.get("description", "")))
+            project = state.store.create_project(
+                user,
+                str(body.get("name", "")),
+                description=str(body.get("description", "")),
+                quota_project_gb=float(body.get("quota_project_gb", state.store.default_project_quota_gb()) or state.store.default_project_quota_gb()),
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"ok": True, "project": project}
+
+    @app.post("/api/projects/{project_id}/folders")
+    async def create_folder(project_id: str, request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
+        body = await request.json()
+        try:
+            folder = state.store.create_folder(
+                user,
+                project_id,
+                str(body.get("name", "")),
+                parent_id=str(body.get("parent_id") or "root"),
+                admin=is_admin(state, user),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "folder": folder, "projects": projects_with_usage(state, user)}
 
     @app.get("/api/quota")
     def quota(user: str = Depends(require_user)) -> dict[str, Any]:
@@ -417,6 +437,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         worker_queue = execution_mode == "worker_queue" or bool(body.get("queue_for_worker"))
         command, title = build_job_command(job_type, body, state, validate_paths=not worker_queue)
         metadata = job_metadata_from_body(body)
+        validate_job_project(state, user, metadata)
         if worker_queue:
             metadata["worker_args"] = worker_args_from_command(command)
         record = create_job_record(
@@ -638,6 +659,53 @@ def job_metadata_from_body(body: dict[str, Any]) -> dict[str, Any]:
         "quality_mode": str(body.get("quality_mode") or "best_quality"),
         "style": str(body.get("style") or ""),
     }
+
+
+def validate_job_project(state: WebState, user: str, metadata: dict[str, Any]) -> None:
+    try:
+        state.store.validate_project_folder(
+            user,
+            str(metadata.get("project_id") or ""),
+            str(metadata.get("folder_id") or "root"),
+            admin=is_admin(state, user),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def projects_with_usage(state: WebState, user: str) -> list[dict[str, Any]]:
+    admin = is_admin(state, user)
+    projects = state.store.list_projects(user, admin=admin)
+    usage = project_artifact_usage(state, user, admin=admin)
+    rows = []
+    for project in projects:
+        row = dict(project)
+        used = int(usage.get(str(project.get("id")), 0))
+        quota = int(project.get("quota_project_bytes") or 0)
+        row["project_used_bytes"] = used
+        row["project_remaining_bytes"] = max(0, quota - used) if quota else 0
+        row["project_percent"] = round((used / quota) * 100, 2) if quota else 0
+        rows.append(row)
+    return rows
+
+
+def project_artifact_usage(state: WebState, user: str, *, admin: bool) -> dict[str, int]:
+    rows = filter_artifacts_for_user(artifact_catalog(state.config, list_jobs(state, None)), user, admin=admin)
+    usage: dict[str, int] = {}
+    seen_paths: set[str] = set()
+    for row in rows:
+        if row.get("kind") == "report_bundle":
+            continue
+        project_id = str(row.get("project_id") or "")
+        path = str(row.get("path") or "")
+        if not project_id or not path:
+            continue
+        key = str(Path(path).resolve()).lower()
+        if key in seen_paths:
+            continue
+        seen_paths.add(key)
+        usage[project_id] = usage.get(project_id, 0) + int(row.get("size", 0) or 0)
+    return usage
 
 
 def worker_args_from_command(command: list[str]) -> list[str]:

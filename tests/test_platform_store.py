@@ -13,6 +13,7 @@ def make_config(tmp_path: Path) -> dict:
             "upload_dir": str(tmp_path / "uploads"),
             "default_local_quota_gb": 1,
             "default_remote_quota_gb": 1,
+            "default_project_quota_gb": 3,
         },
     }
 
@@ -34,6 +35,9 @@ def test_bootstrap_user_project_and_quota(tmp_path):
     assert quota["local_quota_bytes"] > 0
     assert quota["local_used_bytes"] == 0
     assert store.can_store("admin", 1024)
+    project = store.list_projects("admin")[0]
+    assert project["quota_project_bytes"] == 3 * 1024 * 1024 * 1024
+    assert project["folders"][0]["id"] == "root"
 
 
 def test_create_invited_user(tmp_path):
@@ -45,3 +49,17 @@ def test_create_invited_user(tmp_path):
     assert "password_hash" not in user
     assert store.verify_user("student.one", "long-enough-password")
     assert store.list_projects("student.one")[0]["name"] == "Default"
+
+
+def test_project_folder_create_and_validation(tmp_path):
+    store = PlatformStore(make_config(tmp_path))
+    store.bootstrap()
+    project = store.create_project("admin", "Course", quota_project_gb=2)
+    folder = store.create_folder("admin", project["id"], "Week 1")
+
+    assert folder["name"] == "Week 1"
+    store.validate_project_folder("admin", project["id"], folder["id"])
+    projects = store.list_projects("admin")
+    saved = next(item for item in projects if item["id"] == project["id"])
+    assert saved["quota_project_bytes"] == 2 * 1024 * 1024 * 1024
+    assert any(item["id"] == folder["id"] for item in saved["folders"])

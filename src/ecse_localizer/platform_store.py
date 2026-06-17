@@ -109,11 +109,16 @@ class PlatformStore:
     def list_projects(self, username: str, *, admin: bool = False) -> list[dict[str, Any]]:
         data = self._load(self.projects_path, {"projects": []})
         rows = data.get("projects", [])
+        changed = False
+        for row in rows:
+            changed = self._normalize_project(row) or changed
+        if changed:
+            self._save(self.projects_path, data)
         if admin:
-            return rows
-        return [p for p in rows if p.get("owner") == username]
+            return [dict(row) for row in rows]
+        return [dict(p) for p in rows if p.get("owner") == username]
 
-    def create_project(self, username: str, name: str, *, description: str = "") -> dict[str, Any]:
+    def create_project(self, username: str, name: str, *, description: str = "", quota_project_gb: float | None = None) -> dict[str, Any]:
         clean = clean_name(name, default="Untitled Project")
         data = self._load(self.projects_path, {"projects": []})
         row = {
@@ -122,12 +127,55 @@ class PlatformStore:
             "name": clean,
             "description": description[:500],
             "folders": [{"id": "root", "name": "Root"}],
+            "quota_project_bytes": gb_to_bytes(self.default_project_quota_gb() if quota_project_gb is None else quota_project_gb),
             "created_at": iso_now(),
             "updated_at": iso_now(),
         }
         data.setdefault("projects", []).append(row)
         self._save(self.projects_path, data)
         return row
+
+    def create_folder(self, username: str, project_id: str, name: str, *, parent_id: str = "root", admin: bool = False) -> dict[str, Any]:
+        clean = clean_name(name, default="Untitled Folder")
+        data = self._load(self.projects_path, {"projects": []})
+        for project in data.get("projects", []):
+            self._normalize_project(project)
+            if project.get("id") != project_id:
+                continue
+            if not admin and project.get("owner") != username:
+                raise ValueError("Project not found")
+            folders = project.setdefault("folders", [{"id": "root", "name": "Root"}])
+            if not any(folder.get("id") == parent_id for folder in folders):
+                raise ValueError(f"Parent folder not found: {parent_id}")
+            if any(folder.get("parent_id", "root") == parent_id and str(folder.get("name", "")).lower() == clean.lower() for folder in folders):
+                raise ValueError(f"Folder already exists: {clean}")
+            row = {
+                "id": f"fld_{uuid.uuid4().hex[:12]}",
+                "name": clean,
+                "parent_id": parent_id,
+                "created_at": iso_now(),
+            }
+            folders.append(row)
+            project["updated_at"] = iso_now()
+            self._save(self.projects_path, data)
+            return row
+        raise ValueError("Project not found")
+
+    def get_project(self, username: str, project_id: str, *, admin: bool = False) -> dict[str, Any] | None:
+        for project in self.list_projects(username, admin=admin):
+            if project.get("id") == project_id:
+                return project
+        return None
+
+    def validate_project_folder(self, username: str, project_id: str, folder_id: str, *, admin: bool = False) -> None:
+        if not project_id:
+            return
+        project = self.get_project(username, project_id, admin=admin)
+        if not project:
+            raise ValueError("Project not found")
+        folder = folder_id or "root"
+        if not any(item.get("id") == folder for item in project.get("folders", [])):
+            raise ValueError("Folder not found")
 
     def ensure_default_project(self, username: str) -> dict[str, Any] | None:
         if not username:
@@ -158,6 +206,10 @@ class PlatformStore:
     def can_store(self, username: str, incoming_bytes: int) -> bool:
         quota = self.quota_status(username)
         return int(quota["local_used_bytes"]) + incoming_bytes <= int(quota["local_quota_bytes"])
+
+    def default_project_quota_gb(self) -> float:
+        web = self.config.get("webui", {})
+        return float(web.get("default_project_quota_gb", web.get("default_local_quota_gb", 500)) or 500)
 
     def record_worker_heartbeat(self, payload: dict[str, Any]) -> dict[str, Any]:
         row = {
@@ -196,6 +248,23 @@ class PlatformStore:
     def _save(self, path: Path, data: Any) -> None:
         ensure_dir(path.parent)
         write_json(path, data)
+
+    def _normalize_project(self, project: dict[str, Any]) -> bool:
+        changed = False
+        if not isinstance(project.get("folders"), list):
+            project["folders"] = []
+            changed = True
+        if not any(folder.get("id") == "root" for folder in project["folders"]):
+            project["folders"].insert(0, {"id": "root", "name": "Root"})
+            changed = True
+        for folder in project["folders"]:
+            if folder.get("id") == "root" and not folder.get("name"):
+                folder["name"] = "Root"
+                changed = True
+        if not project.get("quota_project_bytes"):
+            project["quota_project_bytes"] = gb_to_bytes(self.default_project_quota_gb())
+            changed = True
+        return changed
 
 
 def hash_password(password: str) -> str:

@@ -35,6 +35,7 @@ def write_config(tmp_path: Path) -> Path:
             "max_upload_mb": 1,
             "default_local_quota_gb": 1,
             "default_remote_quota_gb": 1,
+            "default_project_quota_gb": 2,
         },
     }
     Path(config["input_dir"]).mkdir()
@@ -57,9 +58,30 @@ def test_webui_login_project_and_quota(tmp_path):
     assert response.status_code == 200
     assert response.json()["projects"]
 
-    response = client.post("/api/projects", json={"name": "Course Project", "description": "test"})
+    response = client.post("/api/projects", json={"name": "Course Project", "description": "test", "quota_project_gb": 4})
     assert response.status_code == 200
-    assert response.json()["project"]["name"] == "Course Project"
+    project = response.json()["project"]
+    assert project["name"] == "Course Project"
+    assert project["quota_project_bytes"] == 4 * 1024 * 1024 * 1024
+
+    response = client.post(f"/api/projects/{project['id']}/folders", json={"name": "Week 1"})
+    assert response.status_code == 200
+    folder = response.json()["folder"]
+    assert folder["name"] == "Week 1"
+
+    response = client.post(
+        "/api/jobs",
+        json={
+            "type": "audit",
+            "project_id": project["id"],
+            "folder_id": folder["id"],
+            "source_language": "auto",
+            "target_subtitle_language": "zh-CN",
+            "target_tts_language": "zh-CN",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["job"]["metadata"]["folder_id"] == folder["id"]
 
     response = client.get("/api/quota")
     assert response.status_code == 200

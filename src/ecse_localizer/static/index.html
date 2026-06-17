@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-store" />
     <meta http-equiv="Pragma" content="no-cache" />
     <title>AIALRA Localizer</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260617-platform2" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260617-platform3" />
   </head>
   <body>
     <main id="loginView" class="login-view" hidden>
@@ -73,6 +73,10 @@
             <label>
               项目
               <select id="jobProject"></select>
+            </label>
+            <label>
+              文件夹
+              <select id="jobFolder"></select>
             </label>
             <label>
               任务类型
@@ -161,7 +165,22 @@
                 描述
                 <input id="projectDescription" placeholder="可选" />
               </label>
+              <label>
+                项目额度 GB
+                <input id="projectQuota" type="number" min="1" value="500" />
+              </label>
               <button type="submit">创建项目</button>
+            </form>
+            <form id="folderForm" class="stack">
+              <label>
+                所属项目
+                <select id="folderProject"></select>
+              </label>
+              <label>
+                新文件夹名称
+                <input id="folderName" placeholder="例如：Week 1" />
+              </label>
+              <button type="submit" class="secondary">创建文件夹</button>
             </form>
             <div id="projectsList" class="job-list"></div>
           </div>
@@ -273,6 +292,6 @@
     </div>
 
     <div id="toast" class="toast" hidden></div>
-    <script src="/assets/app.js?v=20260617-platform2"></script>
+    <script src="/assets/app.js?v=20260617-platform3"></script>
   </body>
 </html>

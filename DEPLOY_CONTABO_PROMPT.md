@@ -30,6 +30,7 @@ Deployment steps:
    - Set `privacy.allow_cloud_api=false`.
    - Set `privacy.allow_upload_media=false`.
    - Set small Contabo remote quota defaults.
+   - Set `webui.default_project_quota_gb` to the per-project generated-artifact budget.
    - Keep full media storage on the Windows worker.
    - Set `webui.execution_mode=worker_queue` on Contabo.
    - Do not copy local `config.yaml`; use template values and environment variables only.
@@ -64,7 +65,9 @@ Deployment steps:
 9. Validate:
    - login works
    - project creation works
+   - project folders can be created and selected for jobs
    - user quota is enforced
+   - project quota usage is visible for generated managed artifacts
    - worker heartbeat appears online
    - GPU/CPU metrics update
    - worker offline status appears when the tunnel is stopped
