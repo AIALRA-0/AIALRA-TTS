@@ -20,6 +20,7 @@ REQUIRED_FILES = [
     "deploy/Caddyfile.example",
     "deploy/nginx.conf.example",
     "deploy/bootstrap_contabo.py",
+    "deploy/systemd/aialra-worker-tunnel.service",
     ".env.example",
     "licenses_report.md",
     "tools/secret_scan.ps1",

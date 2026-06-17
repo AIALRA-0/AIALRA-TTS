@@ -90,3 +90,22 @@ def test_bootstrap_real_template_generates_deploy_check_passing_config(tmp_path)
     result = check_deploy_config(config)
     assert result["pass"] is True
     assert result["errors"] == 0
+
+
+def test_worker_tunnel_systemd_unit_is_template_only_and_secret_free():
+    path = Path(__file__).resolve().parents[1] / "deploy" / "systemd" / "aialra-worker-tunnel.service"
+    text = path.read_text(encoding="utf-8")
+
+    assert "cloudflared tunnel" in text
+    assert "EnvironmentFile=-/etc/aialra/worker-tunnel.env" in text
+    assert "Restart=always" in text
+    for forbidden in [
+        "WORKER_SHARED_TOKEN",
+        "WEBUI_ADMIN_PASSWORD",
+        "http://",
+        "https://",
+        "localizer.example",
+        "10.0.",
+        "192.168.",
+    ]:
+        assert forbidden not in text

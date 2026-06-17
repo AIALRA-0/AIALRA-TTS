@@ -35,6 +35,21 @@ Use this when Contabo should receive public HTTPS traffic without opening extra 
 3. Do not route traffic to the Windows worker.
 4. Windows still calls the public WebUI URL outbound and signs worker requests.
 
+The repository includes a systemd unit template for the Contabo tunnel agent:
+
+```bash
+sudo install -m 0644 deploy/systemd/aialra-worker-tunnel.service /etc/systemd/system/aialra-worker-tunnel.service
+sudo install -d -m 0750 /etc/aialra
+sudo tee /etc/aialra/worker-tunnel.env >/dev/null <<'EOF'
+CLOUDFLARED_CONFIG=/etc/cloudflared/aialra-localizer.yml
+CLOUDFLARED_TUNNEL_NAME=aialra-localizer
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now aialra-worker-tunnel.service
+```
+
+Keep tunnel credentials in the cloudflared config directory on the server. Do not put worker tokens, public hostnames, private IPs, or cloudflared credentials in the unit file or in Git.
+
 ### WireGuard
 
 Use this when you want explicit self-managed VPN routing.

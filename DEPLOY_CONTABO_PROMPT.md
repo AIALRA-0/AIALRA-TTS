@@ -163,7 +163,7 @@ Do not push `.env`, production config, logs, media, model weights, IP addresses,
 
 Suggested service model:
 - `aialra-web.service`: Contabo web app.
-- `aialra-worker-tunnel.service`: reverse tunnel endpoint/client as appropriate.
+- `aialra-worker-tunnel.service`: reverse tunnel endpoint/client as appropriate; keep tunnel credentials in server-local config, not in Git.
 - `aialra-cleanup.timer`: TTL cleanup for previews and deleted artifacts.
 
 The repository includes:
@@ -174,6 +174,7 @@ The repository includes:
 - `deploy/config.remote.example.yaml`
 - `deploy/bootstrap_contabo.py`
 - `deploy/systemd/aialra-web.service`
+- `deploy/systemd/aialra-worker-tunnel.service`
 - `deploy/systemd/aialra-cleanup.service`
 - `deploy/systemd/aialra-cleanup.timer`
 - `RELEASE.md`

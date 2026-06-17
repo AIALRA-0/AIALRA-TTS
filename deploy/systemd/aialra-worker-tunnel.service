@@ -1,0 +1,23 @@
+[Unit]
+Description=AIALRA Localizer reverse tunnel agent
+After=network-online.target aialra-web.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Override these values in /etc/aialra/worker-tunnel.env on the server.
+# Do not place tunnel credentials, worker tokens, hostnames, or IPs in this unit file.
+Environment=CLOUDFLARED_CONFIG=/etc/cloudflared/aialra-localizer.yml
+Environment=CLOUDFLARED_TUNNEL_NAME=aialra-localizer
+EnvironmentFile=-/etc/aialra/worker-tunnel.env
+ExecStart=/usr/bin/cloudflared tunnel --config ${CLOUDFLARED_CONFIG} run ${CLOUDFLARED_TUNNEL_NAME}
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/cloudflared /var/log/cloudflared
+
+[Install]
+WantedBy=multi-user.target
