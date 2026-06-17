@@ -562,6 +562,39 @@ def test_upload_enforces_global_remote_quota(tmp_path):
     assert "Global remote quota exceeded" in response.text
 
 
+def test_upload_response_uses_video_refs_for_non_admin(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    app = create_app(config_path)
+    state = app.state.web
+    state.store.create_user("student.one", "long-enough-password")
+    raw_upload_dir = str(state.store.user_upload_dir("student.one"))
+
+    client = TestClient(app)
+    response = client.post("/api/login", json={"username": "student.one", "password": "long-enough-password"})
+    assert response.status_code == 200
+
+    response = client.post("/api/upload", files=[("files", ("private.mp4", BytesIO(b"mp4"), "video/mp4"))])
+    assert response.status_code == 200
+    payload = response.json()
+    rendered = json.dumps(payload, ensure_ascii=False)
+    assert raw_upload_dir not in rendered
+    saved = payload["saved"][0]
+    assert saved["path"].startswith("video-ref:")
+    assert saved["local_video_ref"] is True
+    assert saved["display_path"] == "uploaded media: private.mp4"
+    assert Path(resolve_video_reference(state, "student.one", saved["path"])).exists()
+
+    project = client.get("/api/projects").json()["projects"][0]
+    response = client.post(
+        "/api/jobs",
+        json={"type": "process_one", "video": saved["path"], "project_id": project["id"], "folder_id": "root"},
+    )
+    assert response.status_code == 200
+    assert raw_upload_dir not in json.dumps(response.json(), ensure_ascii=False)
+
+
 def test_upload_disabled_by_default_for_worker_queue(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

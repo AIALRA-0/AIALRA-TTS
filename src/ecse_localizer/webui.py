@@ -388,7 +388,27 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 target.unlink(missing_ok=True)
                 raise
             await item.close()
-            saved.append({"name": target.name, "path": str(target), "size": size})
+            if is_admin(state, user):
+                saved.append(
+                    {
+                        "name": target.name,
+                        "path": str(target),
+                        "size": size,
+                        "uploaded": True,
+                        "display_path": str(target),
+                    }
+                )
+            else:
+                saved.append(
+                    {
+                        "name": target.name,
+                        "path": video_ref_for_path(state, user, str(target)),
+                        "size": size,
+                        "uploaded": True,
+                        "local_video_ref": True,
+                        "display_path": f"uploaded media: {target.name}",
+                    }
+                )
             reserved_bytes += size
         return {"ok": True, "saved": saved, "quota": state.store.quota_status(user)}
 
