@@ -31,6 +31,7 @@ from .artifacts import (
     with_signed_urls,
 )
 from .config import load_config, privacy_guard, save_config
+from .job_config import write_job_config
 from .llm_local import LocalLLMClient
 from .metrics import collect_system_metrics
 from .platform_store import PlatformStore
@@ -429,6 +430,12 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             update_job(state, record["id"], {"status": "queued", "queued_for_worker": True})
             record = read_job(state, record["id"]) or record
         else:
+            job_config_path = write_job_config(state.config, metadata, job_id=record["id"])
+            command = command_with_config(command, job_config_path)
+            metadata = dict(record.get("metadata") or {})
+            metadata["job_config"] = str(job_config_path)
+            update_job(state, record["id"], {"command": command, "metadata": metadata, "job_config": str(job_config_path)})
+            record = read_job(state, record["id"]) or record
             thread = threading.Thread(target=run_job, args=(state, record["id"]), daemon=True)
             thread.start()
         return {"ok": True, "job": record}
@@ -615,6 +622,20 @@ def worker_args_from_command(command: list[str]) -> list[str]:
     if len(args) >= 2 and args[0] == "--config":
         args = args[2:]
     return args
+
+
+def command_with_config(command: list[str], config_path: str | Path) -> list[str]:
+    out = list(command)
+    try:
+        idx = out.index("--config")
+    except ValueError:
+        if len(out) >= 3 and out[1:3] == ["-m", "ecse_localizer"]:
+            return [*out[:3], "--config", str(config_path), *out[3:]]
+        return [sys.executable, "-m", "ecse_localizer", "--config", str(config_path), *out]
+    if idx + 1 >= len(out):
+        return out + [str(config_path)]
+    out[idx + 1] = str(config_path)
+    return out
 
 
 def safe_upload_name(name: str) -> str:

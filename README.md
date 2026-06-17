@@ -43,6 +43,8 @@ http://127.0.0.1:7861
 
 Set real credentials in local `config.yaml` or `.env`; never commit them. The WebUI supports uploads, task history, project metadata, common tuning parameters, logs, quota checks, and local worker health/metrics.
 
+Per-job language, quality, and style settings are written to generated job config files under `runs/`. The base `config.yaml` stays local and is not mutated by submitted jobs.
+
 The WebUI also has a `产物` page for generated artifacts. It can list reports, subtitles, WAV/MP4 outputs, show local preview links for media, create short-lived signed download URLs, delete managed output files, and run cleanup dry-runs. Deletion is restricted to managed output, run, and upload directories; it refuses to touch the original video root.
 
 ## Remote + Local Architecture
@@ -71,6 +73,8 @@ Windows worker queue polling:
 ```
 
 For Contabo production, set `webui.execution_mode: "worker_queue"` in the remote config. In this mode the web server only queues jobs; the Windows worker claims them and runs local GPU/CPU processing.
+
+Queued jobs carry only portable worker arguments plus non-secret job metadata such as source language, target subtitle language, TTS language, quality mode, and style. The Windows worker applies those values to a local generated job config before running the CLI.
 
 Optional Windows Scheduled Tasks:
 

@@ -32,6 +32,7 @@ Deployment steps:
    - Set small Contabo remote quota defaults.
    - Keep full media storage on the Windows worker.
    - Set `webui.execution_mode=worker_queue` on Contabo.
+   - Do not copy local `config.yaml`; use template values and environment variables only.
 4. Run the web service behind Caddy or Nginx with HTTPS.
 5. Restrict upload size at reverse proxy and application level.
 6. Configure persistent volumes only for:
@@ -54,6 +55,7 @@ Deployment steps:
      ```powershell
      .\07_worker_poll.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
      ```
+   - queued job metadata for source language, target subtitle language, TTS language, quality mode, and style is applied on the Windows worker through a generated local job config under `runs/worker_job_configs`.
    - or install the scheduled task:
      ```powershell
      .\install_worker_heartbeat_task.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"

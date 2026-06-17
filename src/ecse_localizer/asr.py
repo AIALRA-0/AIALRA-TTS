@@ -46,7 +46,7 @@ def transcribe_faster_whisper(audio_path: str | Path, config: dict, logger: logg
         model = WhisperModel("medium", device=device, compute_type=asr_cfg.get("fallback_compute_type", "int8_float16"))
     segments, _info = model.transcribe(
         str(audio_path),
-        language=asr_cfg.get("language", "en"),
+        language=asr_language(config),
         vad_filter=bool(asr_cfg.get("vad", True)),
         word_timestamps=bool(asr_cfg.get("word_timestamps", True)),
     )
@@ -58,3 +58,13 @@ def transcribe_faster_whisper(audio_path: str | Path, config: dict, logger: logg
     if logger:
         logger.info("ASR produced %d segments", len(out))
     return out
+
+
+def asr_language(config: dict) -> str | None:
+    value = config.get("asr", {}).get("language", "en")
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() == "auto":
+        return None
+    return text

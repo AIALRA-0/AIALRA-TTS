@@ -6,6 +6,7 @@ from ecse_localizer.webui import (
     WebState,
     build_job_command,
     claim_worker_job,
+    command_with_config,
     create_job_record,
     worker_args_from_command,
     worker_status_changes,
@@ -51,6 +52,14 @@ def test_worker_args_are_portable(tmp_path):
     )
     args = worker_args_from_command(command)
     assert args == ["process-one", "--video", r"C:\worker-local\lecture.mp4"]
+
+
+def test_command_with_config_replaces_only_config_path(tmp_path):
+    state = WebState(write_config(tmp_path))
+    command, _ = build_job_command("audit", {}, state)
+    updated = command_with_config(command, tmp_path / "job.yaml")
+    assert updated[updated.index("--config") + 1] == str(tmp_path / "job.yaml")
+    assert worker_args_from_command(updated) == ["audit", "--input", str(tmp_path / "input")]
 
 
 def test_claim_worker_job_marks_job_claimed(tmp_path):

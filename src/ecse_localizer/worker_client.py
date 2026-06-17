@@ -11,6 +11,8 @@ from typing import Any
 import requests
 
 from . import __version__
+from .config import load_config
+from .job_config import write_job_config
 from .metrics import collect_system_metrics
 from .utils import PROJECT_ROOT, ensure_dir
 
@@ -85,7 +87,10 @@ def run_worker_job(
     args = worker_args(job)
     if not args:
         raise RuntimeError(f"Worker job {job_id} has no worker_args")
-    command = [sys.executable, "-m", "ecse_localizer", "--config", str(config_path), *args]
+    base_config = load_config(config_path)
+    metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
+    job_config_path = write_job_config(base_config, metadata, job_id=job_id, root=PROJECT_ROOT / "runs" / "worker_job_configs")
+    command = [sys.executable, "-m", "ecse_localizer", "--config", str(job_config_path), *args]
     log_dir = ensure_dir(PROJECT_ROOT / "runs" / "worker_jobs")
     log_path = log_dir / f"{safe_name(job_id)}.log"
     post_status(remote_base_url, worker_token, job_id, {"status": "running", "worker_id": worker_id, "command": redacted_command(command)})
