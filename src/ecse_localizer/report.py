@@ -56,6 +56,30 @@ def write_video_report(path_md: str | Path, path_json: str | Path, data: dict[st
     else:
         for issue in issues:
             lines.append(f"- [{issue.get('severity')}] {issue.get('type')}: `{issue}`")
+
+    trace_flags = data.get("qa", {}).get("trace_flags", {})
+    actionable_flags = data.get("qa", {}).get("actionable_trace_flags", {})
+    lines.extend(["", "## Translation Quality Flags", ""])
+    if not trace_flags:
+        lines.append("- None")
+    else:
+        lines.extend(["| Flag | Count | Actionable |", "|---|---:|---|"])
+        for flag, count in sorted(trace_flags.items(), key=lambda item: (-int(item[1]), str(item[0]))):
+            lines.append(f"| `{flag}` | {count} | {'yes' if flag in actionable_flags else 'no'} |")
+    samples = data.get("qa", {}).get("translation_flag_samples", [])
+    if samples:
+        lines.extend(["", "### Flagged Segment Samples", ""])
+        for row in samples[:10]:
+            flags = ", ".join(f"`{flag}`" for flag in row.get("flags", []))
+            paragraph = row.get("paragraph_id")
+            paragraph_note = f", paragraph {paragraph}" if paragraph else ""
+            lines.append(f"- Segment {row.get('segment_id')}{paragraph_note}: {flags}")
+            if row.get("original_text"):
+                lines.append(f"  - Source: {markdown_inline(row.get('original_text', ''))}")
+            if row.get("zh_literal"):
+                lines.append(f"  - Literal: {markdown_inline(row.get('zh_literal', ''))}")
+            if row.get("zh_lecture"):
+                lines.append(f"  - Lecture: {markdown_inline(row.get('zh_lecture', ''))}")
     lines.extend(["", "## First 10 Subtitles", ""])
     for row in data.get("qa", {}).get("first_10_subtitles", []):
         lines.append(f"{row['id']}. {row['start']:.2f}-{row['end']:.2f}")
@@ -65,6 +89,13 @@ def write_video_report(path_md: str | Path, path_json: str | Path, data: dict[st
     for term in data.get("qa", {}).get("glossary_sample", []):
         lines.append(f"- {term['source_term']} -> {term['zh_term']} ({term['type']}, {term['confidence']})")
     Path(path_md).write_text("\n".join(lines), encoding="utf-8")
+
+
+def markdown_inline(value: Any, limit: int = 260) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) > limit:
+        text = text[: max(0, limit - 1)].rstrip() + "..."
+    return "`" + text.replace("`", "'") + "`"
 
 
 def write_index_report(output_dir: str | Path) -> Path:

@@ -75,6 +75,35 @@ def test_qa_reports_translation_quality_heuristics():
     assert issues[0]["severity"] == "high"
 
 
+def test_qa_summarizes_actionable_trace_flags_and_samples():
+    en = [Segment(7, 0.0, 4.0, "Use 3.3V before running sensor_readout.py.")]
+    zh = [Segment(7, 0.0, 4.0, "先运行脚本。")]
+    traces = [
+        TranslationTrace(
+            7,
+            en[0].text,
+            "先使用 3.3V，再运行 sensor_readout.py。",
+            "先运行脚本。",
+            4.0,
+            20,
+            ["MISSING_NUMBER:3.3", "MISSING_PROTECTED_TERM:sensor_readout.py", "COHERENCE_PASS"],
+            paragraph_id=2,
+        )
+    ]
+
+    qa = run_qa({}, en, zh, {}, traces, {"duration": 4.0, "flags": []}, 4.0, {"qa": {}})
+
+    assert qa["trace_flags"]["COHERENCE_PASS"] == 1
+    assert qa["actionable_trace_flags"]["MISSING_NUMBER:3.3"] == 1
+    assert "COHERENCE_PASS" not in qa["actionable_trace_flags"]
+    issue = next(item for item in qa["issues"] if item["type"] == "translation_trace_flags")
+    assert issue["severity"] == "medium"
+    sample = qa["translation_flag_samples"][0]
+    assert sample["segment_id"] == 7
+    assert sample["paragraph_id"] == 2
+    assert sample["flags"] == ["MISSING_NUMBER:3.3", "MISSING_PROTECTED_TERM:sensor_readout.py"]
+
+
 def test_qa_reports_tts_alignment_metadata():
     en = [Segment(1, 0.0, 2.0, "First sentence.")]
     zh = [Segment(1, 0.0, 2.0, "第一句。")]

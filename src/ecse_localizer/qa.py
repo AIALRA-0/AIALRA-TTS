@@ -110,6 +110,9 @@ def run_qa(
         for t in list(sorted(glossary.values(), key=lambda x: (-x.confidence, x.source_term.lower())))[:10]
     ]
     trace_flags = collect_trace_flags(traces)
+    actionable_trace_flags = {flag: count for flag, count in trace_flags.items() if is_actionable_trace_flag(flag)}
+    if actionable_trace_flags:
+        issues.append({"type": "translation_trace_flags", "severity": "medium", "flags": actionable_trace_flags})
     if config.get("qa", {}).get("fail_on_rule_fallback_translation", True):
         fallback_flags = [
             "LOCAL_RULE_FALLBACK_REVIEW_REQUIRED",
@@ -128,17 +131,77 @@ def run_qa(
         "tts": tts_info,
         "video_duration": video_duration,
         "trace_flags": trace_flags,
+        "actionable_trace_flags": actionable_trace_flags,
+        "translation_flag_samples": collect_trace_flag_samples(traces),
     }
 
 
 def collect_trace_flags(traces: list[Any]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for trace in traces:
-        for flag in getattr(trace, "flags", []) or []:
+        for flag in trace_value(trace, "flags", []) or []:
             if str(flag).startswith("KEEP_") or "'type': 'KEEP'" in str(flag):
                 continue
             counts[flag] = counts.get(flag, 0) + 1
     return counts
+
+
+def collect_trace_flag_samples(traces: list[Any], limit: int = 12) -> list[dict[str, Any]]:
+    samples: list[dict[str, Any]] = []
+    for trace in traces:
+        flags = [
+            str(flag)
+            for flag in trace_value(trace, "flags", []) or []
+            if not str(flag).startswith("KEEP_") and "'type': 'KEEP'" not in str(flag)
+        ]
+        actionable = [flag for flag in flags if is_actionable_trace_flag(flag)]
+        if not actionable:
+            continue
+        samples.append(
+            {
+                "segment_id": trace_value(trace, "segment_id", None),
+                "flags": actionable,
+                "original_text": trace_value(trace, "original_text", ""),
+                "zh_literal": trace_value(trace, "zh_literal", ""),
+                "zh_lecture": trace_value(trace, "zh_lecture", ""),
+                "paragraph_id": trace_value(trace, "paragraph_id", None),
+            }
+        )
+        if len(samples) >= limit:
+            break
+    return samples
+
+
+def trace_value(trace: Any, key: str, default: Any = None) -> Any:
+    if isinstance(trace, dict):
+        return trace.get(key, default)
+    return getattr(trace, key, default)
+
+
+def is_actionable_trace_flag(flag: str) -> bool:
+    text = str(flag or "")
+    if not text:
+        return False
+    prefixes = (
+        "MISSING_NUMBER",
+        "MISSING_PROTECTED_TERM",
+        "ZH_OVER_TARGET_LENGTH",
+        "HIGH_ASCII_RATIO_TRANSLATION",
+        "POSSIBLY_OVERCOMPRESSED_TRANSLATION",
+        "LECTURE_REWRITE_UNCHANGED_REVIEW_REQUIRED",
+        "SUMMARY_STYLE_TRANSLATION",
+        "REVIEW_COMMENTARY_LEAK",
+        "REPEATED_PHRASE_REVIEW_REQUIRED",
+        "AWKWARD_TECHNICAL_CALQUE",
+        "VAGUE_OBJECT_REFERENCE",
+        "ENGLISH_WORD_ORDER_CALQUE",
+        "DUPLICATED_CALQUE",
+        "LOW_CAPACITY_LLM_REVIEW_REQUIRED",
+        "LOW_CAPACITY_LLM_BYPASSED_FOR_LONG_VIDEO",
+        "LOCAL_RULE_FALLBACK_REVIEW_REQUIRED",
+        "LLM_CHUNK_FAILED_FALLBACK",
+    )
+    return text.startswith(prefixes)
 
 
 def has_usable_chinese(text: str) -> bool:
