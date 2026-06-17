@@ -52,6 +52,10 @@ translation:
   quality_mode: "best_quality"
   context_window_segments: 3
   style_sample_segments: 80
+  paragraph_max_gap_seconds: 1.2
+  paragraph_max_source_chars: 900
+  paragraph_max_duration_seconds: 45.0
+  paragraph_min_segments_before_sentence_break: 2
   preserve_code_formula_names: true
   build_course_glossary_first: true
   bilingual: true

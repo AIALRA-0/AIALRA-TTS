@@ -18,6 +18,8 @@ Rules:
 - Preserve source coverage: every content-bearing technical term, example, comparison, qualifier, number, unit, company/person name, and causal relation in the English segment must be represented in Chinese unless it is pure disfluency.
 - Keep every segment aligned to its own `id`; do not merge or omit segments.
 - If a segment is an incomplete sentence fragment, translate only that fragment. Use previous/next text only to understand references; do not complete the sentence with words that are not in the current segment.
+- `paragraph_text` is reconstructed discourse context for understanding sentence flow. Use it to resolve pronouns, connectors, and fragmented speech, but do not move facts from neighboring segment ids into the current segment.
+- `paragraph_segment_ids` shows which subtitle fragments belong to that reconstructed paragraph; output must still contain one faithful translation per requested segment id.
 - Keep protected placeholders such as <KEEP_001> unchanged.
 - Use glossary translations exactly when supplied.
 - Preserve formulas, code, variables, file names, URLs, paper titles, person names, and acronyms.

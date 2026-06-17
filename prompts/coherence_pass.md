@@ -4,6 +4,7 @@ Return strict JSON only.
 Task:
 - Improve the current Chinese subtitle segments for continuity, clarity, and natural classroom speech.
 - Keep every segment aligned with its own English source. Do not move facts to another segment.
+- Use reconstructed `paragraph_text` only to repair broken sentence flow, connector choice, and pronoun reference. Do not copy neighboring facts into a segment that did not contain them.
 - Do not omit technical information, numbers, formulas, variables, names, acronyms, file paths, URLs, or protected placeholders.
 - Remove machine-translation word order and awkward literal phrasing.
 - Use natural transitions only when they do not add new facts.

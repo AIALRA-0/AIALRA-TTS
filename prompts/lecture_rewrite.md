@@ -17,6 +17,7 @@ Rules:
 - Do not add new facts, do not replace a sentence with a topic summary, and never write "这一段...", "这里主要...", "本段...", "该片段..." or "请结合英文字幕复核".
 - Keep source coverage: all technical terms, named entities, examples, contrasts, numbers, units, hedging words, and causal relations from the English segment must remain represented.
 - Use `previous_original` and `next_original` only to keep discourse continuity, pronoun reference, and natural classroom flow. Do not add facts that are not present in the current segment.
+- Use `paragraph_text` and `paragraph_segment_ids` as reconstructed spoken-paragraph context, so fragments connect smoothly. Still keep each output aligned to its own source segment and never transfer facts across segment ids.
 - Rewrite across the local discourse, not as isolated dictionary sentences. The current segment must connect naturally with the previous and next segment when read aloud.
 - If the original segment is a sentence fragment, keep the same meaning but make it speakable in Chinese. Prefer short connective wording such as "也就是说", "接下来", "所以这里", "换句话说", "你可以看到", or "我们再看" only when it is already implied by the surrounding context.
 - Keep it concise enough for dubbing, but do not drop technical content just to become shorter.

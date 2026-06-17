@@ -21,6 +21,18 @@ class TranslationTrace:
     duration: float
     target_char_limit: int
     flags: list[str]
+    paragraph_id: int | None = None
+    paragraph_segment_ids: list[int] | None = None
+    paragraph_text: str = ""
+
+
+@dataclass
+class TranslationParagraph:
+    id: int
+    segment_ids: list[int]
+    start: float
+    end: float
+    text: str
 
 
 FALLBACK_PHRASES = [
@@ -143,6 +155,8 @@ def translate_with_llm(
         style_guide = build_style_guide(segments, glossary_text, config, client, style_prompt, logger)
         style_path = Path(trace_path).with_name(Path(trace_path).stem.replace("_translation_trace", "") + "_style_guide.md")
         style_path.write_text(style_guide, encoding="utf-8")
+    paragraphs = build_translation_paragraphs(segments, config) if use_best_quality(config) else []
+    paragraph_by_segment = paragraph_lookup(paragraphs)
     chunk_size = int(config.get("llm", {}).get("translation_chunk_size", 8))
     for chunk_start in range(0, len(segments), max(1, chunk_size)):
         chunk = segments[chunk_start : chunk_start + max(1, chunk_size)]
@@ -165,11 +179,26 @@ def translate_with_llm(
             rewrite_prompt,
             style_guide,
             coherence_prompt if use_best_quality(config) else "",
+            paragraph_by_segment,
             logger,
         )
         for seg, lit, zh, flags, limit in chunk_results:
+            paragraph = paragraph_by_segment.get(seg.id)
             zh_segments.append(Segment(seg.id, seg.start, seg.end, zh))
-            traces.append(TranslationTrace(seg.id, seg.text, lit, zh, seg.duration, limit, flags))
+            traces.append(
+                TranslationTrace(
+                    seg.id,
+                    seg.text,
+                    lit,
+                    zh,
+                    seg.duration,
+                    limit,
+                    flags,
+                    paragraph_id=paragraph.id if paragraph else None,
+                    paragraph_segment_ids=list(paragraph.segment_ids) if paragraph else None,
+                    paragraph_text=paragraph.text if paragraph else "",
+                )
+            )
         Path(trace_path).write_text(json.dumps([asdict(t) for t in traces], ensure_ascii=False, indent=2), encoding="utf-8")
     Path(trace_path).write_text(json.dumps([asdict(t) for t in traces], ensure_ascii=False, indent=2), encoding="utf-8")
     return zh_segments, traces
@@ -187,6 +216,7 @@ def translate_chunk_with_retries(
     rewrite_prompt: str,
     style_guide: str,
     coherence_prompt: str,
+    paragraph_by_segment: dict[int, TranslationParagraph] | None = None,
     logger: logging.Logger | None = None,
 ) -> list[tuple[Segment, str, str, list[str], int]]:
     try:
@@ -201,6 +231,7 @@ def translate_chunk_with_retries(
             rewrite_prompt,
             style_guide,
             coherence_prompt,
+            paragraph_by_segment or {},
             logger,
         )
     except Exception as exc:
@@ -222,6 +253,7 @@ def translate_chunk_with_retries(
                         rewrite_prompt,
                         style_guide,
                         coherence_prompt,
+                        paragraph_by_segment or {},
                         logger,
                     )
                 )
@@ -308,6 +340,7 @@ def request_llm_chunk(
     rewrite_prompt: str,
     style_guide: str,
     coherence_prompt: str,
+    paragraph_by_segment: dict[int, TranslationParagraph],
     logger: logging.Logger | None = None,
 ) -> list[tuple[Segment, str, str, list[str], int]]:
     protected = []
@@ -315,6 +348,7 @@ def request_llm_chunk(
     for i, seg in enumerate(chunk):
         result = protect_text(seg.text)
         absolute = chunk_start + i
+        paragraph = paragraph_by_segment.get(seg.id)
         protected.append(
             {
                 "id": seg.id,
@@ -325,6 +359,9 @@ def request_llm_chunk(
                 "next_original": all_segments[absolute + 1].text if absolute + 1 < len(all_segments) else "",
                 "context_before": context_window(all_segments, absolute, -int(config.get("translation", {}).get("context_window_segments", 3))),
                 "context_after": context_window(all_segments, absolute, int(config.get("translation", {}).get("context_window_segments", 3))),
+                "paragraph_id": paragraph.id if paragraph else None,
+                "paragraph_segment_ids": list(paragraph.segment_ids) if paragraph else [],
+                "paragraph_text": protect_text(paragraph.text).text if paragraph else "",
             }
         )
         maps.append(result.mapping)
@@ -454,6 +491,79 @@ def build_style_guide(
         if logger:
             logger.warning("Style guide generation failed; using default guide: %s", exc)
         return default_style_guide(config)
+
+
+def build_translation_paragraphs(segments: list[Segment], config: dict) -> list[TranslationParagraph]:
+    """Reconstruct spoken discourse blocks while keeping original subtitle ids.
+
+    The blocks are context for translation quality only; output subtitles still
+    use the original segment timestamps and ids.
+    """
+    if not segments:
+        return []
+    translation_cfg = config.get("translation", {})
+    max_gap = float(translation_cfg.get("paragraph_max_gap_seconds", 1.2))
+    max_chars = int(translation_cfg.get("paragraph_max_source_chars", 900))
+    max_duration = float(translation_cfg.get("paragraph_max_duration_seconds", 45.0))
+    min_segments_before_sentence_break = int(translation_cfg.get("paragraph_min_segments_before_sentence_break", 2))
+
+    paragraphs: list[TranslationParagraph] = []
+    current: list[Segment] = []
+    current_chars = 0
+
+    def flush() -> None:
+        nonlocal current, current_chars
+        if not current:
+            return
+        paragraphs.append(
+            TranslationParagraph(
+                id=len(paragraphs) + 1,
+                segment_ids=[seg.id for seg in current],
+                start=current[0].start,
+                end=current[-1].end,
+                text=join_paragraph_text(current),
+            )
+        )
+        current = []
+        current_chars = 0
+
+    previous: Segment | None = None
+    for seg in segments:
+        text = (seg.text or "").strip()
+        if not text:
+            continue
+        gap = seg.start - previous.end if previous else 0.0
+        projected_chars = current_chars + len(text) + (1 if current else 0)
+        projected_duration = seg.end - current[0].start if current else seg.duration
+        if current and (gap > max_gap or projected_chars > max_chars or projected_duration > max_duration):
+            flush()
+        current.append(seg)
+        current_chars += len(text) + (1 if len(current) > 1 else 0)
+        if len(current) >= min_segments_before_sentence_break and ends_discourse_sentence(text):
+            flush()
+        previous = seg
+    flush()
+    return paragraphs
+
+
+def paragraph_lookup(paragraphs: list[TranslationParagraph]) -> dict[int, TranslationParagraph]:
+    lookup: dict[int, TranslationParagraph] = {}
+    for paragraph in paragraphs:
+        for segment_id in paragraph.segment_ids:
+            lookup[segment_id] = paragraph
+    return lookup
+
+
+def join_paragraph_text(segments: list[Segment]) -> str:
+    text = " ".join((seg.text or "").strip() for seg in segments if (seg.text or "").strip())
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def ends_discourse_sentence(text: str) -> bool:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return False
+    return bool(re.search(r'[.!?。？！]["\')\]}”’]*$', cleaned))
 
 
 def context_window(all_segments: list[Segment], absolute_index: int, count: int) -> list[dict[str, object]]:
