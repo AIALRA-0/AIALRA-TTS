@@ -36,6 +36,7 @@ webui:
   job_dir: "/srv/aialra/runs/webui_jobs"
   platform_dir: "/srv/aialra/platform"
   max_upload_mb: 1024
+  worker_preview_max_upload_mb: 256
   default_local_quota_gb: 500
   default_remote_quota_gb: 10
   default_project_quota_gb: 500
@@ -51,3 +52,10 @@ webui:
 worker:
   status_interval_seconds: 15
   log_tail_lines: 160
+  upload_previews: true
+  preview_source_output_key: "zh_dub_mp4"
+  preview_max_width: 854
+  preview_video_bitrate: "700k"
+  preview_audio_bitrate: "96k"
+  preview_max_seconds: 0
+  thumbnail_at_seconds: 1.0

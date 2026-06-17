@@ -12,7 +12,10 @@ except RuntimeError as exc:  # Starlette may require optional httpx2.
 else:
     TESTCLIENT_IMPORT_ERROR = None
 
+from ecse_localizer.artifacts import artifact_catalog
+from ecse_localizer.utils import read_json
 from ecse_localizer.webui import create_app, create_job_record, update_job
+from ecse_localizer.worker_client import worker_headers
 
 
 def write_config(tmp_path: Path) -> Path:
@@ -288,3 +291,121 @@ def test_worker_status_update_refreshes_heartbeat_and_job_progress(tmp_path):
     assert worker["status"] == "online"
     assert worker["worker_id"] == "worker-1"
     assert worker["heartbeat_online"] is True
+
+
+def test_worker_preview_upload_registers_manifest_and_artifact(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["worker_auth_mode"] = "hmac"
+    config["webui"]["worker_preview_max_upload_mb"] = 1
+    config["webui"]["preview_dir"] = str(tmp_path / "previews")
+    config["webui"]["preview_manifest"] = str(tmp_path / "previews" / "preview_manifest.json")
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    project = client.get("/api/projects").json()["projects"][0]
+    record = create_job_record(
+        state,
+        "process_one",
+        "Remote process",
+        ["python", "-m", "ecse_localizer", "process-one", "--video", r"C:\private\lecture.mp4"],
+        user="admin",
+        metadata={"project_id": project["id"], "folder_id": "root"},
+        dispatch_target="worker",
+    )
+    update_job(state, record["id"], {"status": "claimed", "claimed_by": "worker-1"})
+
+    path = f"/api/worker/jobs/{record['id']}/preview"
+    body = b"small mp4 preview"
+    headers = worker_headers("worker-token", path=path, body=body)
+    headers.update(
+        {
+            "Content-Type": "video/mp4",
+            "X-Worker-Preview-Variant": "preview",
+            "X-Worker-Preview-Id": "preview-1",
+            "X-Worker-Preview-Name": "lecture_zh_dub.mp4",
+            "X-Worker-Preview-File-Name": "lecture_preview.mp4",
+            "X-Worker-Preview-Source-Key": "zh_dub_mp4",
+            "X-Worker-Id": "worker-1",
+        }
+    )
+    response = client.post(path, data=body, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["preview"]["preview_path"].endswith("lecture_preview.mp4")
+
+    thumb_body = b"jpg"
+    thumb_headers = worker_headers("worker-token", path=path, body=thumb_body)
+    thumb_headers.update(
+        {
+            "Content-Type": "image/jpeg",
+            "X-Worker-Preview-Variant": "thumbnail",
+            "X-Worker-Preview-Id": "preview-1",
+            "X-Worker-Preview-Name": "lecture_zh_dub.mp4",
+            "X-Worker-Preview-File-Name": "lecture_thumb.jpg",
+            "X-Worker-Preview-Source-Key": "zh_dub_mp4",
+            "X-Worker-Id": "worker-1",
+        }
+    )
+    response = client.post(path, data=thumb_body, headers=thumb_headers)
+    assert response.status_code == 200
+
+    manifest = read_json(tmp_path / "previews" / "preview_manifest.json")
+    row = manifest["previews"][0]
+    assert row["id"] == "preview-1"
+    assert row["owner"] == "admin"
+    assert row["project_id"] == project["id"]
+    assert row["source_output_key"] == "zh_dub_mp4"
+    assert row["preview_path"].endswith("lecture_preview.mp4")
+    assert row["thumbnail_path"].endswith("lecture_thumb.jpg")
+    assert "source_path" not in row
+    assert "private" not in str(row)
+
+    artifact = next(item for item in artifact_catalog(state.config, [read_json(state.job_dir / f"{record['id']}.json")]) if item.get("remote_preview"))
+    assert artifact["name"] == "lecture_zh_dub.mp4"
+    assert artifact["thumbnail_path"].endswith("lecture_thumb.jpg")
+    quota = client.get("/api/quota").json()
+    assert quota["remote_used_bytes"] >= len(body) + len(thumb_body)
+
+
+def test_worker_preview_upload_respects_remote_quota(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["worker_auth_mode"] = "hmac"
+    config["webui"]["default_remote_quota_gb"] = 0.00000001
+    config["webui"]["preview_dir"] = str(tmp_path / "previews")
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+    record = create_job_record(
+        state,
+        "process_one",
+        "Remote process",
+        ["python", "-m", "ecse_localizer", "process-one", "--video", r"C:\private\lecture.mp4"],
+        user="admin",
+        metadata={},
+        dispatch_target="worker",
+    )
+
+    path = f"/api/worker/jobs/{record['id']}/preview"
+    body = b"x" * 100
+    headers = worker_headers("worker-token", path=path, body=body)
+    headers.update(
+        {
+            "Content-Type": "video/mp4",
+            "X-Worker-Preview-Variant": "preview",
+            "X-Worker-Preview-File-Name": "too_big_preview.mp4",
+            "X-Worker-Id": "worker-1",
+        }
+    )
+    response = client.post(path, data=body, headers=headers)
+    assert response.status_code == 413
+    assert "Remote quota exceeded" in response.text

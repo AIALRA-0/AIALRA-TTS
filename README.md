@@ -53,6 +53,8 @@ The WebUI also has a `产物` page for generated artifacts. It can list reports,
 
 For Contabo mode, low-bitrate previews and thumbnails can be registered through `webui.preview_manifest` without exposing Windows source paths. The manifest can be a list or `{ "previews": [...] }`; each row may include `name`, `preview_path`, `thumbnail_path`, `owner`, `project_id`, `job_id`, and `source_output_key`. The API serves only the preview-cache files through signed URLs.
 
+When a queued Windows worker job finishes successfully, the worker can generate a low-bitrate MP4 plus JPG thumbnail with ffmpeg and upload them to `/api/worker/jobs/{job_id}/preview`. These uploads use the same HMAC worker signature as heartbeat/status requests, are capped by `webui.worker_preview_max_upload_mb`, and count against `remote_quota_bytes`. Preview upload failure is non-fatal: the full local output remains on the Windows worker and the job status still reflects the actual processing result.
+
 Quota fields are split by storage responsibility. `remote_quota_bytes` limits Contabo-side uploads plus preview-cache files; `local_quota_bytes` is kept as the Windows worker storage budget for original media and full outputs. Upload requests reserve bytes against the remote quota across all files in the same request.
 
 Job records are JSON files with `schema_version`. WebUI normalizes older records on read/claim/update by filling missing metadata, log path, dispatch target, timestamps, retry count, and worker args when possible. Job states are normalized to `queued`, `claimed`, `running`, `paused`, `retrying`, `done`, `failed`, `cancelled`, and `deleted`; older `passed` records are migrated to `done` with `legacy_status: passed`.
@@ -91,6 +93,8 @@ Worker API authentication supports signed requests. Production remote config sho
 Queued jobs carry only portable worker arguments plus non-secret job metadata such as source language, target subtitle language, TTS language, quality mode, style, and the worker availability state at submit time. The Windows worker applies those values to a local generated job config before running the CLI.
 
 While a worker job is running, the Windows worker periodically reports a remote-safe status payload: `running`, `worker_id`, `pid`, best-effort `progress`, system metrics, and a log tail. Contabo stores only that summary; full logs stay on the Windows worker.
+
+After a successful worker job, set `worker.upload_previews: true` to have the worker create and upload a preview cache item. The default preview is 854px wide at about 700k video bitrate and 96k AAC audio; adjust `worker.preview_max_width`, `worker.preview_video_bitrate`, `worker.preview_audio_bitrate`, and `worker.preview_max_seconds` to fit the remote storage quota.
 
 Optional Windows Scheduled Tasks:
 

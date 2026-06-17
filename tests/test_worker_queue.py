@@ -19,6 +19,7 @@ from ecse_localizer.webui import (
     require_worker_token,
     read_job,
     retry_job_record,
+    save_worker_preview_upload,
     soft_delete_job,
     update_job,
     upload_fits_quota,
@@ -27,6 +28,7 @@ from ecse_localizer.webui import (
     worker_status_changes,
 )
 from ecse_localizer.worker_client import canonical_json, extract_progress_from_text, redacted_command, summarize_result, worker_args, worker_headers, worker_signature
+from ecse_localizer.worker_client import preview_source_path, upload_worker_preview
 
 
 def write_config(tmp_path: Path) -> Path:
@@ -380,3 +382,130 @@ def test_worker_client_helpers_redact_local_config():
         "audit",
     ]
     assert summarize_result({"pass": True, "report": r"C:\secret\demo_report.json"}) == {"pass": True, "report": "demo_report.json"}
+
+
+def test_preview_source_prefers_video_output(tmp_path):
+    source = tmp_path / "demo_zh_dub.mp4"
+    assert preview_source_path({"video": str(source), "report": "demo_report.json"}) == source
+    assert preview_source_path({"hard_sub": str(tmp_path / "demo_hardsub.mp4")}).name == "demo_hardsub.mp4"
+    assert preview_source_path({"video": str(tmp_path / "demo_report.json")}) is None
+
+
+def test_upload_worker_preview_sends_signed_binary_without_plaintext_token(monkeypatch, tmp_path):
+    preview = tmp_path / "demo_preview.mp4"
+    preview.write_bytes(b"small preview mp4")
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"ok": True, "preview": {"id": "job_1_zh_dub_mp4"}}
+
+    def fake_post(url, data, headers, timeout):
+        captured.update({"url": url, "data": data, "headers": headers, "timeout": timeout})
+        return Response()
+
+    monkeypatch.setattr("ecse_localizer.worker_client.requests.post", fake_post)
+    result = upload_worker_preview(
+        "https://remote.example",
+        "worker-token",
+        "job_1",
+        preview,
+        variant="preview",
+        preview_id="job_1_zh_dub_mp4",
+        display_name="demo_zh_dub.mp4",
+        source_output_key="zh_dub_mp4",
+        worker_id="worker-1",
+    )
+
+    assert result["ok"] is True
+    assert captured["url"] == "https://remote.example/api/worker/jobs/job_1/preview"
+    assert captured["data"] == b"small preview mp4"
+    assert captured["headers"]["Content-Type"] == "video/mp4"
+    assert captured["headers"]["X-Worker-Preview-Variant"] == "preview"
+    assert captured["headers"]["X-Worker-Id"] == "worker-1"
+    assert "X-Worker-Signature" in captured["headers"]
+    assert "X-Worker-Token" not in captured["headers"]
+
+
+def test_save_worker_preview_upload_writes_manifest_without_source_path(tmp_path):
+    state = WebState(write_config(tmp_path))
+    record = create_job_record(
+        state,
+        "process_one",
+        "Remote process",
+        ["python", "-m", "ecse_localizer", "process-one", "--video", r"C:\private\lecture.mp4"],
+        user="admin",
+        metadata={"project_id": "course", "folder_id": "week_1"},
+        dispatch_target="worker",
+    )
+    update_job(state, record["id"], {"status": "claimed", "claimed_by": "worker-1"})
+    record = read_job(state, record["id"])
+    body = b"small preview mp4"
+
+    row = save_worker_preview_upload(
+        state,
+        record,
+        fake_worker_request(
+            state,
+            {
+                "x-worker-id": "worker-1",
+                "x-worker-preview-variant": "preview",
+                "x-worker-preview-id": "preview-1",
+                "x-worker-preview-name": "lecture_zh_dub.mp4",
+                "x-worker-preview-file-name": "lecture_preview.mp4",
+                "x-worker-preview-source-key": "zh_dub_mp4",
+            },
+        ),
+        body,
+    )
+
+    assert row["id"] == "preview-1"
+    assert row["owner"] == "admin"
+    assert row["project_id"] == "course"
+    assert row["folder_id"] == "week_1"
+    assert row["preview_path"].endswith("lecture_preview.mp4")
+    assert Path(row["preview_path"]).read_bytes() == body
+    manifest = json.loads((Path(state.config["output_dir"]) / "previews" / "preview_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["previews"][0]["display_path"] == "preview cache: lecture_preview.mp4"
+    assert "source_path" not in manifest["previews"][0]
+    assert "private" not in json.dumps(manifest, ensure_ascii=False)
+    assert state.store.quota_status("admin")["remote_used_bytes"] >= len(body)
+
+
+def test_save_worker_preview_upload_enforces_quota_without_testclient(tmp_path):
+    config_path = write_config(tmp_path)
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    data["webui"]["default_remote_quota_gb"] = 0.00000001
+    config_path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    state = WebState(config_path)
+    record = create_job_record(
+        state,
+        "process_one",
+        "Remote process",
+        ["python", "-m", "ecse_localizer", "process-one", "--video", r"C:\private\lecture.mp4"],
+        user="admin",
+        metadata={},
+        dispatch_target="worker",
+    )
+
+    try:
+        save_worker_preview_upload(
+            state,
+            record,
+            fake_worker_request(
+                state,
+                {
+                    "x-worker-id": "worker-1",
+                    "x-worker-preview-variant": "preview",
+                    "x-worker-preview-file-name": "too_big_preview.mp4",
+                },
+            ),
+            b"x" * 100,
+        )
+    except Exception as exc:
+        assert "Remote quota exceeded" in str(exc)
+    else:
+        raise AssertionError("expected worker preview upload to enforce remote quota")

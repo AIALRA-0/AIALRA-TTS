@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import hmac
+import mimetypes
 import os
 import re
 import subprocess
@@ -17,7 +18,7 @@ from . import __version__
 from .config import load_config
 from .job_config import write_job_config
 from .metrics import collect_system_metrics
-from .utils import PROJECT_ROOT, ensure_dir
+from .utils import PROJECT_ROOT, ensure_dir, run_cmd
 
 
 def poll_once(
@@ -140,6 +141,9 @@ def run_worker_job(
         log.flush()
     result = extract_json_result(log_path)
     status = "done" if returncode == 0 else "failed"
+    preview_summary: dict[str, Any] = {}
+    if status == "done":
+        preview_summary = try_create_and_upload_preview(result, job, remote_base_url, worker_token, base_config, worker_id=worker_id)
     log_tail = tail_text(log_path, log_tail_lines)
     final_progress = 100 if returncode == 0 else extract_progress_from_text(log_tail)
     payload = {
@@ -150,10 +154,184 @@ def run_worker_job(
         "result": summarize_result(result),
         "metrics": collect_system_metrics(base_config),
     }
+    if preview_summary:
+        payload["preview"] = preview_summary
     if final_progress is not None:
         payload["progress"] = final_progress
     post_status(remote_base_url, worker_token, job_id, payload)
-    return {"status": status, "returncode": returncode, "log": str(log_path), "result": summarize_result(result)}
+    return {"status": status, "returncode": returncode, "log": str(log_path), "result": summarize_result(result), "preview": preview_summary}
+
+
+def try_create_and_upload_preview(
+    result: dict[str, Any] | None,
+    job: dict[str, Any],
+    remote_base_url: str,
+    worker_token: str,
+    config: dict[str, Any],
+    *,
+    worker_id: str,
+) -> dict[str, Any]:
+    try:
+        return create_and_upload_preview(result, job, remote_base_url, worker_token, config, worker_id=worker_id)
+    except Exception as exc:
+        print(f"worker preview upload warning for {job.get('id')}: {exc}", file=sys.stderr)
+        return {}
+
+
+def create_and_upload_preview(
+    result: dict[str, Any] | None,
+    job: dict[str, Any],
+    remote_base_url: str,
+    worker_token: str,
+    config: dict[str, Any],
+    *,
+    worker_id: str,
+) -> dict[str, Any]:
+    worker_cfg = config.get("worker", {}) if isinstance(config.get("worker"), dict) else {}
+    if not bool(worker_cfg.get("upload_previews", True)):
+        return {}
+    source = preview_source_path(result)
+    if not source or not source.exists():
+        return {}
+    job_id = str(job.get("id") or "worker_job")
+    preview_root = ensure_dir(PROJECT_ROOT / "runs" / "worker_previews" / safe_name(job_id))
+    stem = safe_name(source.stem) or "preview"
+    preview_path = preview_root / f"{stem}_preview.mp4"
+    thumbnail_path = preview_root / f"{stem}_thumb.jpg"
+    generate_preview_files(source, preview_path, thumbnail_path, config)
+    source_key = str(worker_cfg.get("preview_source_output_key") or "zh_dub_mp4")
+    preview_id = f"{safe_name(job_id)}_{source_key}"
+    preview_row = upload_worker_preview(
+        remote_base_url,
+        worker_token,
+        job_id,
+        preview_path,
+        variant="preview",
+        preview_id=preview_id,
+        display_name=source.name,
+        source_output_key=source_key,
+        worker_id=worker_id,
+    )
+    thumbnail_row = {}
+    if thumbnail_path.exists():
+        thumbnail_row = upload_worker_preview(
+            remote_base_url,
+            worker_token,
+            job_id,
+            thumbnail_path,
+            variant="thumbnail",
+            preview_id=preview_id,
+            display_name=source.name,
+            source_output_key=source_key,
+            worker_id=worker_id,
+        )
+    return {
+        "uploaded": True,
+        "preview": preview_row.get("preview", preview_row),
+        "thumbnail": thumbnail_row.get("preview", thumbnail_row) if thumbnail_row else {},
+    }
+
+
+def preview_source_path(result: dict[str, Any] | None) -> Path | None:
+    if not result:
+        return None
+    for key in ("video", "hard_sub"):
+        value = result.get(key)
+        if value:
+            path = Path(str(value))
+            if path.suffix.lower() in {".mp4", ".mkv", ".mov", ".webm", ".m4v"}:
+                return path
+    return None
+
+
+def generate_preview_files(source: Path, preview_path: Path, thumbnail_path: Path, config: dict[str, Any]) -> None:
+    worker_cfg = config.get("worker", {}) if isinstance(config.get("worker"), dict) else {}
+    max_width = int(worker_cfg.get("preview_max_width", 854) or 854)
+    video_bitrate = str(worker_cfg.get("preview_video_bitrate", "700k") or "700k")
+    audio_bitrate = str(worker_cfg.get("preview_audio_bitrate", "96k") or "96k")
+    max_seconds = float(worker_cfg.get("preview_max_seconds", 0) or 0)
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-nostdin",
+        "-nostats",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(source),
+    ]
+    if max_seconds > 0:
+        cmd += ["-t", f"{max_seconds:.3f}"]
+    cmd += [
+        "-vf",
+        f"scale='min({max_width},iw)':-2",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-b:v",
+        video_bitrate,
+        "-c:a",
+        "aac",
+        "-b:a",
+        audio_bitrate,
+        "-movflags",
+        "+faststart",
+        str(preview_path),
+    ]
+    run_cmd(cmd)
+    run_cmd(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-nostdin",
+            "-nostats",
+            "-loglevel",
+            "error",
+            "-y",
+            "-ss",
+            str(worker_cfg.get("thumbnail_at_seconds", 1.0) or 1.0),
+            "-i",
+            str(source),
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale=320:-1",
+            str(thumbnail_path),
+        ]
+    )
+
+
+def upload_worker_preview(
+    remote_base_url: str,
+    worker_token: str,
+    job_id: str,
+    file_path: Path,
+    *,
+    variant: str,
+    preview_id: str,
+    display_name: str,
+    source_output_key: str,
+    worker_id: str,
+) -> dict[str, Any]:
+    path = f"/api/worker/jobs/{job_id}/preview"
+    body = file_path.read_bytes()
+    headers = worker_headers(worker_token, path=path, body=body)
+    headers["Content-Type"] = media_type_for(file_path)
+    headers["X-Worker-Preview-Variant"] = variant
+    headers["X-Worker-Preview-Id"] = preview_id
+    headers["X-Worker-Preview-Name"] = display_name
+    headers["X-Worker-Preview-File-Name"] = file_path.name
+    headers["X-Worker-Preview-Source-Key"] = source_output_key
+    headers["X-Worker-Id"] = worker_id
+    response = requests.post(endpoint(remote_base_url, path), data=body, headers=headers, timeout=120)
+    response.raise_for_status()
+    return response.json()
+
+
+def media_type_for(file_path: Path) -> str:
+    return mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
 
 
 def post_status(remote_base_url: str, worker_token: str, job_id: str, payload: dict[str, Any]) -> None:

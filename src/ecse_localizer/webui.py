@@ -27,6 +27,8 @@ from .artifacts import (
     cleanup_expired_files,
     filter_artifacts_for_user,
     find_artifact,
+    preview_cache_dir,
+    preview_manifest_path,
     safe_delete_artifact_record,
     verify_artifact_token,
     with_signed_urls,
@@ -502,6 +504,32 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         updated = read_job(state, job_id)
         return {"ok": True, "job": updated}
 
+    @app.post("/api/worker/jobs/{job_id}/preview")
+    async def worker_upload_preview(job_id: str, request: Request) -> dict[str, Any]:
+        body = await request.body()
+        require_worker_token(request, state, body)
+        record = read_job(state, job_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Job not found")
+        row = save_worker_preview_upload(state, record, request, body)
+        update_job(
+            state,
+            job_id,
+            {
+                "preview_id": row["id"],
+                "preview_uploaded_at": iso_now(),
+                "preview_name": row.get("name", ""),
+            },
+        )
+        state.store.record_worker_heartbeat(
+            {
+                "status": "online",
+                "worker_id": str(request.headers.get("x-worker-id") or record.get("claimed_by") or "local-windows-worker"),
+                "message": f"job {job_id} preview uploaded",
+            }
+        )
+        return {"ok": True, "preview": row, "bytes": len(body), "quota": state.store.quota_status(str(record.get("user") or ""))}
+
     @app.get("/api/jobs")
     def jobs(user: str = Depends(require_user)) -> dict[str, Any]:
         return {"jobs": list_jobs(state, user)}
@@ -715,6 +743,108 @@ def upload_fits_quota(base_used_bytes: int, reserved_bytes: int, current_file_by
     if quota_bytes <= 0:
         return True
     return base_used_bytes + reserved_bytes + current_file_bytes <= quota_bytes
+
+
+def save_worker_preview_upload(state: WebState, record: dict[str, Any], request: Request, body: bytes) -> dict[str, Any]:
+    if not body:
+        raise HTTPException(status_code=400, detail="Preview body is empty")
+    worker_id = str(request.headers.get("x-worker-id") or "")
+    claimed_by = str(record.get("claimed_by") or "")
+    if claimed_by and worker_id and worker_id != claimed_by:
+        raise HTTPException(status_code=403, detail="Worker does not own this job")
+    variant = str(request.headers.get("x-worker-preview-variant") or "preview").lower()
+    if variant not in {"preview", "thumbnail"}:
+        raise HTTPException(status_code=400, detail="Unsupported preview variant")
+    max_bytes = int(state.webui.get("worker_preview_max_upload_mb", 256) or 256) * 1024 * 1024
+    if len(body) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"Worker preview exceeds {state.webui.get('worker_preview_max_upload_mb', 256)} MB")
+
+    job_id = safe_job_id(str(record.get("id") or ""))
+    filename = safe_upload_name(str(request.headers.get("x-worker-preview-file-name") or f"{variant}.bin"))
+    validate_worker_preview_suffix(filename, variant)
+    target_dir = ensure_dir(preview_cache_dir(state.config) / safe_preview_id(job_id))
+    target = (target_dir / filename).resolve()
+    if target.parent != target_dir.resolve():
+        raise HTTPException(status_code=400, detail="Invalid preview file name")
+
+    owner = str(record.get("user") or "")
+    existing_size = target.stat().st_size if target.exists() else 0
+    quota = state.store.quota_status(owner)
+    base_used = max(0, int(quota["remote_used_bytes"]) - existing_size)
+    quota_bytes = int(quota["remote_quota_bytes"])
+    if not upload_fits_quota(base_used, 0, len(body), quota_bytes):
+        remaining = max(0, quota_bytes - base_used)
+        raise HTTPException(status_code=413, detail=f"Remote quota exceeded. Remaining bytes: {remaining}")
+
+    target.write_bytes(body)
+    row = upsert_worker_preview_manifest(state, record, request, target, variant)
+    return row
+
+
+def upsert_worker_preview_manifest(
+    state: WebState,
+    record: dict[str, Any],
+    request: Request,
+    target: Path,
+    variant: str,
+) -> dict[str, Any]:
+    manifest_path = preview_manifest_path(state.config)
+    ensure_dir(manifest_path.parent)
+    preview_id = safe_preview_id(str(request.headers.get("x-worker-preview-id") or f"{record.get('id')}_{variant}"))
+    metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    rows: list[dict[str, Any]]
+    with state.lock:
+        if manifest_path.exists():
+            try:
+                data = read_json(manifest_path)
+                raw_rows = data.get("previews", data) if isinstance(data, dict) else data
+            except Exception:
+                raw_rows = []
+        else:
+            raw_rows = []
+        rows = [row for row in raw_rows if isinstance(row, dict)] if isinstance(raw_rows, list) else []
+        row = next((item for item in rows if str(item.get("id") or "") == preview_id), None)
+        if row is None:
+            row = {"id": preview_id}
+            rows.append(row)
+        row.update(
+            {
+                "id": preview_id,
+                "kind": "remote_preview",
+                "name": safe_preview_display_name(str(request.headers.get("x-worker-preview-name") or target.name)),
+                "owner": str(record.get("user") or ""),
+                "project_id": str(metadata.get("project_id") or ""),
+                "folder_id": str(metadata.get("folder_id") or "root"),
+                "job_id": str(record.get("id") or ""),
+                "source_output_key": str(request.headers.get("x-worker-preview-source-key") or "zh_dub_mp4"),
+                "updated_at": iso_now(),
+            }
+        )
+        row.pop("source_path", None)
+        if variant == "preview":
+            row["preview_path"] = str(target)
+            row["path"] = str(target)
+            row["display_path"] = f"preview cache: {target.name}"
+        else:
+            row["thumbnail_path"] = str(target)
+        write_json(manifest_path, {"previews": rows})
+        return dict(row)
+
+
+def validate_worker_preview_suffix(filename: str, variant: str) -> None:
+    suffix = Path(filename).suffix.lower()
+    allowed = {".jpg", ".jpeg", ".png", ".webp"} if variant == "thumbnail" else {".mp4", ".webm", ".mov", ".m4v", ".mkv"}
+    if suffix not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unsupported worker preview file type: {suffix}")
+
+
+def safe_preview_id(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", value or "").strip("._-")
+    return cleaned[:120] or uuid.uuid4().hex[:12]
+
+
+def safe_preview_display_name(name: str) -> str:
+    return safe_upload_name(name)[:180]
 
 
 def active_job_counts(state: WebState, user: str) -> dict[str, int]:

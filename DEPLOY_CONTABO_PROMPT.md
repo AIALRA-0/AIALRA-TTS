@@ -63,6 +63,7 @@ Deployment steps:
    - queued job metadata for source language, target subtitle language, TTS language, quality mode, and style is applied on the Windows worker through a generated local job config under `runs/worker_job_configs`.
    - if the Windows worker heartbeat is missing or stale, new jobs must stay `queued` and the UI must show that they are waiting for the local worker, not that GPU processing has already started.
    - during long jobs, the worker posts `running` status updates with best-effort progress, GPU/CPU/disk metrics, and a short log tail; do not require Contabo to read Windows log files directly.
+   - after successful jobs, the worker may upload a low-bitrate MP4 preview and JPG thumbnail to `/api/worker/jobs/{job_id}/preview`; this endpoint must require HMAC signatures, enforce `webui.worker_preview_max_upload_mb`, count files against `remote_quota_bytes`, and never store Windows source paths in the manifest.
    - or install the scheduled task:
      ```powershell
      .\install_worker_heartbeat_task.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
@@ -98,6 +99,7 @@ Deployment steps:
    - signed artifact download URLs expire and do not expose filesystem paths
    - preview manifest rows expose only preview-cache paths/display names, never Windows `source_path`
    - preview thumbnails use signed `variant=thumbnail` URLs
+   - worker preview uploads reject unsigned bodies, reject disallowed suffixes, and return HTTP 413 when the remote quota would be exceeded
    - artifact deletion refuses paths outside managed output/run/upload/preview roots
 
 Do not push `.env`, production config, logs, media, model weights, IP addresses, server hostnames, or credentials back to GitHub.
