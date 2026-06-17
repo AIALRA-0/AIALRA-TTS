@@ -176,13 +176,34 @@ def test_static_ui_has_sidebar_and_status_rail_layout():
     assert 'class="content-shell"' in html
     assert 'class="status-rail"' in html
     assert "layout-rail" in html
-    for element_id in ["statusWorker", "statusQueue", "statusGpu", "statusCpu", "statusMemory", "statusDisk", "statusQuota", "statusLlm", "statusTts"]:
+    for element_id in [
+        "statusWorker",
+        "statusQueue",
+        "statusGpu",
+        "statusCpu",
+        "statusMemory",
+        "statusDisk",
+        "statusQuota",
+        "statusLlm",
+        "statusTts",
+        "statusJobTitle",
+        "statusJobState",
+        "statusJobMeta",
+        "statusJobProgressBar",
+        "statusJobProgress",
+        "statusJobLog",
+    ]:
         assert f'id="{element_id}"' in html
     assert "grid-template-columns: 248px minmax(0, 1fr) 304px;" in css
     assert ".status-rail" in css
+    assert ".rail-progress" in css
+    assert ".job-item.selected" in css
     assert "function renderConnectionStatus()" in js
+    assert "function renderStatusJob(" in js
+    assert "function railJobCandidate()" in js
     assert 'setText("statusWorker", workerText)' in js
     assert 'setText("statusQuota", quotaText)' in js
+    assert 'progressBar.style.width = `${progress == null ? 0 : progress}%`' in js
 
 
 def test_static_artifact_history_has_scope_filters():

@@ -285,6 +285,7 @@ function applyLiveEvent(data) {
   state.jobs = data.jobs || state.jobs;
   state.jobsLoadError = "";
   renderJobs();
+  renderStatusJob();
   renderRuntimeMetrics({
     metrics: data.metrics || {},
     quota: data.quota || null,
@@ -1482,10 +1483,12 @@ async function refreshJobs() {
     state.jobs = data.jobs || [];
     state.jobsLoadError = "";
     renderJobs();
+    renderStatusJob();
     if (state.selectedJob) await loadJobLog(state.selectedJob, false);
   } catch (error) {
     state.jobsLoadError = error.message || String(error);
     renderJobs();
+    renderStatusJob();
   }
 }
 
@@ -1521,11 +1524,13 @@ function renderJobs() {
   }
   if (!state.jobs.length) {
     list.textContent = "暂无任务";
+    renderStatusJob();
     return;
   }
   for (const job of state.jobs) {
     const item = document.createElement("div");
     item.className = "job-item";
+    if (job.id === state.selectedJob) item.classList.add("selected");
     const workerLine = workerJobLine(job);
     const progressLine = jobProgressLine(job);
     item.innerHTML = `
@@ -1616,10 +1621,71 @@ function renderJobs() {
     }
     item.addEventListener("click", () => {
       state.selectedJob = job.id;
+      renderJobs();
+      renderStatusJob(job);
       loadJobLog(job.id);
     });
     list.appendChild(item);
   }
+  renderStatusJob();
+}
+
+function renderStatusJob(explicitJob = null) {
+  const job = explicitJob || railJobCandidate();
+  const title = $("statusJobTitle");
+  const meta = $("statusJobMeta");
+  const statePill = $("statusJobState");
+  const progressText = $("statusJobProgress");
+  const progressBar = $("statusJobProgressBar");
+  const log = $("statusJobLog");
+  if (!title || !meta || !statePill || !progressText || !progressBar || !log) return;
+  if (!job) {
+    title.textContent = "暂无活动任务";
+    meta.textContent = "等待提交或选择任务";
+    statePill.textContent = "无";
+    statePill.classList.remove("ok", "warn");
+    progressText.textContent = "进度：-";
+    progressBar.style.width = "0%";
+    log.textContent = state.jobsLoadError ? `任务状态刷新失败：${state.jobsLoadError}` : "暂无日志摘要";
+    return;
+  }
+  const progress = normalizedJobProgress(job);
+  title.textContent = job.title || job.type || job.id || "任务";
+  meta.textContent = [job.id, job.claimed_by ? `worker ${job.claimed_by}` : "", job.metadata?.quality_mode || ""].filter(Boolean).join(" · ");
+  statePill.textContent = jobStatusLabel(job);
+  statePill.classList.toggle("ok", ["done", "passed"].includes(job.status));
+  statePill.classList.toggle("warn", ["queued", "claimed", "running", "retrying", "paused"].includes(job.status));
+  progressText.textContent = progress == null ? "进度：-" : `进度：${progress}%`;
+  progressBar.style.width = `${progress == null ? 0 : progress}%`;
+  log.textContent = jobRailLog(job);
+}
+
+function railJobCandidate() {
+  if (state.selectedJob) {
+    const selected = state.jobs.find((job) => job.id === state.selectedJob);
+    if (selected) return selected;
+  }
+  return (
+    state.jobs.find((job) => ["running", "claimed"].includes(job.status)) ||
+    state.jobs.find((job) => ["retrying", "queued", "paused"].includes(job.status)) ||
+    state.jobs[0] ||
+    null
+  );
+}
+
+function normalizedJobProgress(job) {
+  const progress = Number(job?.progress);
+  if (!Number.isFinite(progress)) return null;
+  return Math.max(0, Math.min(100, Math.round(progress)));
+}
+
+function jobRailLog(job) {
+  const tail = String(job?.log_tail || "").trim().split(/\r?\n/).filter(Boolean);
+  if (tail.length) return tail.slice(-3).join("\n");
+  const progressLine = jobProgressLine(job);
+  if (progressLine) return progressLine;
+  const workerLine = workerJobLine(job);
+  return workerLine || "暂无日志摘要";
 }
 
 function jobProgressLine(job) {

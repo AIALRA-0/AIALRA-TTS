@@ -357,6 +357,58 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.rail-job {
+  display: grid;
+  gap: 8px;
+}
+
+.rail-job-title {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.rail-job-meta {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.rail-progress {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e7edf5;
+}
+
+.rail-progress span {
+  display: block;
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 180ms ease;
+}
+
+.rail-log {
+  min-height: 56px;
+  max-height: 120px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px;
+  background: #f8fafc;
+  color: #344054;
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .panel-head {
   display: flex;
   align-items: baseline;
@@ -579,6 +631,11 @@ h2 {
 
 .job-item:hover {
   background: #f8fafc;
+}
+
+.job-item.selected {
+  border-left: 3px solid var(--accent);
+  background: #f6f9ff;
 }
 
 .muted-item {
