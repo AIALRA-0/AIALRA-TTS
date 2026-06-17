@@ -667,6 +667,7 @@ function renderVideos() {
     btn.textContent = "选中";
     btn.addEventListener("click", () => {
       $("jobVideo").value = video.path;
+      $("jobWorkerVideoPath").value = "";
       showTab("dashboard");
     });
     table.append(row([video.uploaded ? "上传" : "课程", name, formatBytes(video.size), btn]));
@@ -837,9 +838,10 @@ async function uploadFiles(event) {
 async function startJob(event) {
   event.preventDefault();
   const type = $("jobType").value;
+  const workerVideoPath = $("jobWorkerVideoPath").value.trim();
   const payload = {
     type,
-    video: $("jobVideo").value,
+    video: workerVideoPath || $("jobVideo").value,
     seconds: Number($("jobSeconds").value || 90),
     report: $("jobReport").value,
     tag: $("jobTag").value || "webui",

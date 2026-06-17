@@ -238,6 +238,33 @@ def test_worker_queue_submit_reports_waiting_worker(tmp_path):
     assert payload["job"]["metadata"]["worker_args"][0] == "audit"
 
 
+def test_worker_queue_process_one_accepts_worker_visible_path(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    project = client.get("/api/projects").json()["projects"][0]
+    worker_path = r"D:\worker-media\lecture.mp4"
+
+    response = client.post(
+        "/api/jobs",
+        json={"type": "process_one", "video": worker_path, "project_id": project["id"], "folder_id": "root"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dispatch"]["target"] == "worker"
+    assert payload["job"]["metadata"]["worker_args"] == ["process-one", "--video", worker_path]
+    assert payload["job"]["title"] == "Process one: lecture.mp4"
+
+
 def test_worker_log_endpoint_returns_remote_log_tail_when_file_missing(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

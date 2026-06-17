@@ -86,6 +86,7 @@ Deployment steps:
    - new job submission returns HTTP 413 when the Windows worker local quota or selected project quota is already exhausted
    - upload quota is enforced across multi-file requests and active-job concurrency limits return HTTP 429 with a readable message
    - browser media upload is disabled in `worker_queue` mode unless explicitly enabled, so original videos do not land on the Contabo disk by default
+   - the task form can queue `process_one` with a Windows worker-visible local video path without requiring that file to exist on Contabo
    - admins can disable users and update local/remote user quotas without disabling the last active admin
    - project quota usage is visible for generated managed artifacts
    - worker heartbeat appears online
