@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import json
+import shutil
 from pathlib import Path
 from typing import Any, Callable
 
@@ -134,8 +136,10 @@ def webui_api_smoke_gate(config: dict[str, Any], output_dir: Path | None) -> dic
         }
 
     from .webui import create_app
+    from .worker_client import worker_headers
 
-    root = ensure_dir((output_dir or Path(config.get("work_dir") or PROJECT_ROOT / "runs") / "platform_check") / "webui_api_smoke")
+    smoke_parent = output_dir or Path(config.get("work_dir") or PROJECT_ROOT / "runs") / "platform_check"
+    root = reset_webui_smoke_root(smoke_parent)
     smoke_config = isolated_webui_smoke_config(config, root)
     config_path = root / "config.yaml"
     config_path.write_text(yaml.safe_dump(smoke_config, allow_unicode=True, sort_keys=False), encoding="utf-8")
@@ -190,6 +194,138 @@ def webui_api_smoke_gate(config: dict[str, Any], output_dir: Path | None) -> dic
         artifacts_ok = artifacts.status_code == 200 and isinstance(artifacts_json.get("artifacts"), list)
         add_step("artifacts", artifacts.status_code, artifacts_ok)
 
+        users = client.get("/api/users")
+        add_step("admin_users", users.status_code, users.status_code == 200 and isinstance(response_json(users).get("users"), list))
+
+        created_user = client.post(
+            "/api/users",
+            json={
+                "username": "student.smoke",
+                "password": "student-smoke-password",
+                "role": "user",
+                "quota_local_gb": 1,
+                "quota_remote_gb": 1,
+            },
+        )
+        add_step("create_user", created_user.status_code, created_user.status_code == 200 and response_json(created_user).get("ok") is True)
+
+        project_response = client.post(
+            "/api/projects",
+            json={"name": "Smoke Course", "description": "isolated platform-check project", "quota_project_gb": 1},
+        )
+        project_json = response_json(project_response)
+        project = project_json.get("project") if isinstance(project_json.get("project"), dict) else {}
+        add_step("create_project", project_response.status_code, project_response.status_code == 200 and bool(project.get("id")))
+
+        folder_response = client.post(f"/api/projects/{project.get('id', '')}/folders", json={"name": "Week 1"})
+        folder_json = response_json(folder_response)
+        folder = folder_json.get("folder") if isinstance(folder_json.get("folder"), dict) else {}
+        add_step("create_folder", folder_response.status_code, folder_response.status_code == 200 and bool(folder.get("id")))
+
+        template_response = client.post(
+            "/api/templates",
+            json={
+                "name": "Smoke Best Quality",
+                "params": {
+                    "source_language": "auto",
+                    "target_subtitle_language": "zh-CN",
+                    "target_tts_language": "zh-CN",
+                    "quality_mode": "best_quality",
+                    "tts_speed": 1.08,
+                    "tts_end_gap_seconds": 0.25,
+                    "mux_hard_subtitle": True,
+                },
+            },
+        )
+        template_json = response_json(template_response)
+        template = template_json.get("template") if isinstance(template_json.get("template"), dict) else {}
+        template_ok = (
+            template_response.status_code == 200
+            and template.get("params", {}).get("quality_mode") == "best_quality"
+            and "unknown_secret" not in template.get("params", {})
+        )
+        add_step("create_template", template_response.status_code, template_ok)
+
+        heartbeat_payload = {
+            "status": "online",
+            "worker_id": "windows-smoke-worker",
+            "version": "platform-check",
+            "metrics": {
+                "cpu": {"load_percent": 18},
+                "memory": {"used_percent": 32},
+                "gpu": [{"available": True, "util_percent": 21, "memory_used_percent": 28}],
+                "disk": {"free_bytes": 20 * 1024 * 1024 * 1024, "used_percent": 40},
+            },
+            "capabilities": {
+                "asr": {"available": True, "supported_languages": ["auto", "en", "zh"]},
+                "translation": {"available": True, "supported_target_languages": ["zh-CN", "ja", "es"]},
+                "tts": {"available": True, "supported_languages": ["zh-CN"]},
+            },
+            "media_refs": [
+                {
+                    "ref_id": "smoke_media_1",
+                    "name": r"D:\worker_secret_area\lecture.mp4",
+                    "path": r"D:\worker_secret_area\lecture.mp4",
+                    "size": 1024,
+                    "media_type": "video/mp4",
+                }
+            ],
+        }
+        heartbeat_body = json.dumps(heartbeat_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        heartbeat = client.post(
+            "/api/worker/heartbeat",
+            content=heartbeat_body,
+            headers=worker_headers(
+                smoke_config["webui"]["worker_token"],
+                path="/api/worker/heartbeat",
+                body=heartbeat_body,
+            ),
+        )
+        heartbeat_json = response_json(heartbeat)
+        heartbeat_text = json.dumps(heartbeat_json, ensure_ascii=False)
+        heartbeat_ok = heartbeat.status_code == 200 and "worker_secret_area" not in heartbeat_text.lower()
+        add_step("signed_worker_heartbeat", heartbeat.status_code, heartbeat_ok)
+
+        videos_response = client.get("/api/videos")
+        videos_json = response_json(videos_response)
+        videos_text = json.dumps(videos_json, ensure_ascii=False)
+        videos_ok = (
+            videos_response.status_code == 200
+            and "worker-ref:smoke_media_1" in videos_text
+            and "worker_secret_area" not in videos_text.lower()
+        )
+        add_step("worker_media_refs", videos_response.status_code, videos_ok)
+
+        job_response = client.post(
+            "/api/jobs",
+            json={
+                "type": "process_one",
+                "video": "worker-ref:smoke_media_1",
+                "video_name": "lecture.mp4",
+                "project_id": project.get("id", ""),
+                "folder_id": folder.get("id", "root"),
+                "template_id": template.get("id", ""),
+            },
+        )
+        job_json = response_json(job_response)
+        job = job_json.get("job") if isinstance(job_json.get("job"), dict) else {}
+        job_text = json.dumps(job_json, ensure_ascii=False)
+        job_ok = (
+            job_response.status_code == 200
+            and job_json.get("dispatch", {}).get("target") == "worker"
+            and job.get("status") == "queued"
+            and job.get("metadata", {}).get("worker_args") == ["process-one", "--video", "worker-ref:smoke_media_1"]
+            and job.get("metadata", {}).get("quality_mode") == "best_quality"
+            and "worker_secret_area" not in job_text.lower()
+        )
+        add_step("queue_worker_ref_job", job_response.status_code, job_ok)
+
+        jobs_response = client.get(f"/api/jobs?project_id={project.get('id', '')}&folder_id={folder.get('id', '')}")
+        jobs_json = response_json(jobs_response)
+        job_list = jobs_json.get("jobs") if isinstance(jobs_json.get("jobs"), list) else []
+        jobs_ok = jobs_response.status_code == 200 and any(item.get("id") == job.get("id") for item in job_list)
+        add_step("job_history_filter", jobs_response.status_code, jobs_ok)
+
         healthz = client.get("/healthz")
         healthz_json = response_json(healthz)
         health_ok = healthz.status_code == 200 and "ok" in healthz_json and "worker_token" not in str(healthz_json).lower()
@@ -215,16 +351,34 @@ def isolated_webui_smoke_config(config: dict[str, Any], root: Path) -> dict[str,
     webui["password"] = "platform-smoke-password"
     webui["session_secret"] = "platform-smoke-session-secret"
     webui["download_secret"] = "platform-smoke-download-secret"
-    webui.setdefault("worker_token", "platform-smoke-worker-token")
+    webui["worker_token"] = "platform-smoke-worker-token"
+    webui["execution_mode"] = "worker_queue"
+    webui["allow_worker_path_submission"] = False
     webui["platform_dir"] = str(root / "platform")
     webui["job_dir"] = str(root / "jobs")
     webui["upload_dir"] = str(root / "uploads")
     webui["preview_dir"] = str(root / "previews")
     webui["preview_manifest"] = str(root / "previews" / "preview_manifest.json")
-    webui.setdefault("worker_auth_mode", "hmac")
-    webui.setdefault("worker_require_nonce", True)
+    webui["worker_auth_mode"] = "hmac"
+    webui["worker_require_nonce"] = True
     webui.setdefault("signed_url_ttl_seconds", 900)
+    webui.setdefault("default_local_quota_gb", 1)
+    webui.setdefault("default_remote_quota_gb", 1)
+    webui.setdefault("default_project_quota_gb", 1)
+    webui.setdefault("worker_disk_min_free_gb", 1)
     return smoke
+
+
+def reset_webui_smoke_root(parent: Path) -> Path:
+    parent = ensure_dir(parent)
+    root = parent / "webui_api_smoke"
+    resolved_parent = parent.resolve()
+    resolved_root = root.resolve() if root.exists() else root
+    if root.exists():
+        if root.name != "webui_api_smoke" or not resolved_root.is_relative_to(resolved_parent):
+            raise RuntimeError(f"Refusing to reset unsafe WebUI smoke directory: {root}")
+        shutil.rmtree(root)
+    return ensure_dir(root)
 
 
 def response_json(response: Any) -> dict[str, Any]:

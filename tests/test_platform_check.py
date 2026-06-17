@@ -114,3 +114,14 @@ def test_webui_api_smoke_gate_uses_isolated_state_and_checks_core_apis(tmp_path)
     assert steps["dashboard"]["pass"] is True
     assert steps["quota"]["pass"] is True
     assert steps["capabilities"]["pass"] is True
+    assert steps["create_user"]["pass"] is True
+    assert steps["create_project"]["pass"] is True
+    assert steps["create_folder"]["pass"] is True
+    assert steps["create_template"]["pass"] is True
+    assert steps["signed_worker_heartbeat"]["pass"] is True
+    assert steps["worker_media_refs"]["pass"] is True
+    assert steps["queue_worker_ref_job"]["pass"] is True
+    assert steps["job_history_filter"]["pass"] is True
+
+    repeated = webui_api_smoke_gate(config(tmp_path), out)
+    assert repeated["pass"] is True
