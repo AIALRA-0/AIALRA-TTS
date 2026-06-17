@@ -465,6 +465,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"ok": True, "project": project}
 
+    @app.delete("/api/projects/{project_id}")
+    def archive_project(project_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
+        try:
+            archived = state.store.archive_project(user, project_id, admin=is_admin(state, user))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "archived": archived, "projects": projects_with_usage(state, user)}
+
     @app.post("/api/projects/{project_id}/folders")
     async def create_folder(project_id: str, request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
         body = await request.json()
@@ -479,6 +487,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"ok": True, "folder": folder, "projects": projects_with_usage(state, user)}
+
+    @app.delete("/api/projects/{project_id}/folders/{folder_id}")
+    def archive_folder(project_id: str, folder_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
+        try:
+            folder = state.store.archive_folder(user, project_id, folder_id, admin=is_admin(state, user))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "archived": folder, "projects": projects_with_usage(state, user)}
 
     @app.get("/api/quota")
     def quota(user: str = Depends(require_user)) -> dict[str, Any]:

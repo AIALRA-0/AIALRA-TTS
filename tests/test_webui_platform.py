@@ -151,6 +151,45 @@ def test_webui_login_project_and_quota(tmp_path):
     assert "tts" in caps
 
 
+def test_project_and_folder_archive_api_hides_targets(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    app = create_app(write_config(tmp_path))
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    default_project = client.get("/api/projects").json()["projects"][0]
+
+    response = client.post("/api/projects", json={"name": "Archive Me", "quota_project_gb": 4})
+    assert response.status_code == 200
+    project = response.json()["project"]
+    response = client.post(f"/api/projects/{project['id']}/folders", json={"name": "Week 1"})
+    assert response.status_code == 200
+    folder = response.json()["folder"]
+
+    response = client.delete(f"/api/projects/{project['id']}/folders/{folder['id']}")
+
+    assert response.status_code == 200
+    active_project = next(item for item in response.json()["projects"] if item["id"] == project["id"])
+    assert all(item["id"] != folder["id"] for item in active_project["folders"])
+    response = client.post("/api/jobs", json={"type": "audit", "project_id": project["id"], "folder_id": folder["id"]})
+    assert response.status_code == 400
+    assert "Folder not found" in response.text
+
+    response = client.delete(f"/api/projects/{project['id']}")
+
+    assert response.status_code == 200
+    assert all(item["id"] != project["id"] for item in response.json()["projects"])
+    response = client.post("/api/jobs", json={"type": "audit", "project_id": project["id"], "folder_id": "root"})
+    assert response.status_code == 400
+    assert "Project not found" in response.text
+
+    response = client.delete(f"/api/projects/{default_project['id']}")
+    assert response.status_code == 400
+    assert "active project" in response.text
+
+
 def test_webui_secure_session_cookie_when_configured(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

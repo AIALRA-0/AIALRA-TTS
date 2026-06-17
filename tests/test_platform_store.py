@@ -137,6 +137,47 @@ def test_project_folder_create_and_validation(tmp_path):
     assert any(item["id"] == folder["id"] for item in saved["folders"])
 
 
+def test_project_and_folder_archive_are_soft_hidden(tmp_path):
+    store = PlatformStore(make_config(tmp_path))
+    store.bootstrap()
+    default_project = store.list_projects("admin")[0]
+    course = store.create_project("admin", "Course", quota_project_gb=2)
+    folder = store.create_folder("admin", course["id"], "Week 1")
+
+    archived_folder = store.archive_folder("admin", course["id"], folder["id"])
+
+    assert archived_folder["archived_at"]
+    visible_course = next(item for item in store.list_projects("admin") if item["id"] == course["id"])
+    assert all(item["id"] != folder["id"] for item in visible_course["folders"])
+    archived_view = next(item for item in store.list_projects("admin", include_archived=True) if item["id"] == course["id"])
+    assert any(item["id"] == folder["id"] and item["archived_at"] for item in archived_view["folders"])
+    try:
+        store.validate_project_folder("admin", course["id"], folder["id"])
+    except ValueError as exc:
+        assert "Folder not found" in str(exc)
+    else:
+        raise AssertionError("archived folder should not validate for new jobs")
+
+    archived_project = store.archive_project("admin", course["id"])
+
+    assert archived_project["archived_at"]
+    assert all(item["id"] != course["id"] for item in store.list_projects("admin"))
+    assert any(item["id"] == course["id"] for item in store.list_projects("admin", include_archived=True))
+    try:
+        store.validate_project_folder("admin", course["id"], "root")
+    except ValueError as exc:
+        assert "Project not found" in str(exc)
+    else:
+        raise AssertionError("archived project should not validate for new jobs")
+
+    try:
+        store.archive_project("admin", default_project["id"])
+    except ValueError as exc:
+        assert "active project" in str(exc)
+    else:
+        raise AssertionError("last active project should not be archived")
+
+
 def test_parameter_templates_are_user_scoped_and_sanitized(tmp_path):
     store = PlatformStore(make_config(tmp_path))
     store.bootstrap()

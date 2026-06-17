@@ -646,6 +646,23 @@ function renderProjects() {
       <div class="job-meta">project quota ${formatBytes(project.project_used_bytes || 0)} / ${formatBytes(project.quota_project_bytes || 0)}</div>
       <div class="job-meta">folders ${(project.folders || []).map((folder) => escapeHtml(folder.name || folder.id)).join(" · ")}</div>
     `;
+    const actions = document.createElement("div");
+    actions.className = "artifact-actions";
+    const archiveProjectButton = document.createElement("button");
+    archiveProjectButton.type = "button";
+    archiveProjectButton.className = "secondary";
+    archiveProjectButton.textContent = "归档项目";
+    archiveProjectButton.addEventListener("click", () => archiveProject(project));
+    actions.appendChild(archiveProjectButton);
+    for (const folder of (project.folders || []).filter((item) => item.id !== "root")) {
+      const folderButton = document.createElement("button");
+      folderButton.type = "button";
+      folderButton.className = "secondary";
+      folderButton.textContent = `归档 ${folder.name || folder.id}`;
+      folderButton.addEventListener("click", () => archiveFolder(project, folder));
+      actions.appendChild(folderButton);
+    }
+    item.appendChild(actions);
     list.appendChild(item);
   }
 }
@@ -683,6 +700,38 @@ async function createFolder(event) {
     renderProjects();
   } catch (error) {
     toast(`创建文件夹失败：${error.message}`);
+  }
+}
+
+async function archiveProject(project) {
+  const ok = window.confirm(`归档项目？\n${project.name}`);
+  if (!ok) return;
+  try {
+    const result = await api(`/api/projects/${encodeURIComponent(project.id)}`, { method: "DELETE" });
+    state.projects = result.projects || state.projects;
+    toast("项目已归档");
+    renderProjectOptions();
+    renderFolderOptions();
+    renderJobFilterOptions();
+    renderProjects();
+  } catch (error) {
+    toast(`归档项目失败：${error.message}`);
+  }
+}
+
+async function archiveFolder(project, folder) {
+  const ok = window.confirm(`归档文件夹？\n${project.name} / ${folder.name || folder.id}`);
+  if (!ok) return;
+  try {
+    const result = await api(`/api/projects/${encodeURIComponent(project.id)}/folders/${encodeURIComponent(folder.id)}`, { method: "DELETE" });
+    state.projects = result.projects || state.projects;
+    toast("文件夹已归档");
+    renderProjectOptions();
+    renderFolderOptions();
+    renderJobFilterOptions();
+    renderProjects();
+  } catch (error) {
+    toast(`归档文件夹失败：${error.message}`);
   }
 }
 

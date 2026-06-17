@@ -393,6 +393,9 @@ h2 {
 .artifact-actions .button-link {
   min-height: 32px;
   padding: 0 10px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .artifact-name {
