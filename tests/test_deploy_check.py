@@ -155,6 +155,32 @@ def test_deploy_check_rejects_unsafe_remote_public_base_url():
         assert codes & {"remote_public_base_url_invalid", "remote_public_base_url_not_public"}
 
 
+def test_deploy_check_rejects_cloud_or_nonlocal_inference_endpoints():
+    private_ip = ".".join(["192", "168", "1", "55"])
+    config = valid_remote_config()
+    config["llm"] = {"endpoint": "https://api.openai.com/v1"}
+    config["tts"] = {"supported_languages": ["zh-CN"], "server_url": "https://api.elevenlabs.io/v1"}
+    config["asr"] = {"supported_languages": ["auto", "en"], "endpoint": f"http://{private_ip}:9000/asr"}
+
+    result = check_deploy_config(config)
+
+    codes = {item["code"] for item in result["findings"]}
+    assert result["pass"] is False
+    assert "cloud_inference_endpoint" in codes
+    assert "non_local_inference_endpoint" in codes
+
+
+def test_deploy_check_warns_for_loopback_inference_endpoint_without_failing():
+    config = valid_remote_config()
+    config["llm"] = {"endpoint": "http://127.0.0.1:11434/v1"}
+
+    result = check_deploy_config(config)
+
+    findings = {(item["path"], item["code"]) for item in result["findings"]}
+    assert result["pass"] is True
+    assert ("llm.endpoint", "local_inference_endpoint_in_remote_config") in findings
+
+
 def test_deploy_check_cli_returns_nonzero_for_unsafe_config(tmp_path, capsys):
     path = tmp_path / "config.yaml"
     path.write_text(

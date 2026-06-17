@@ -40,6 +40,7 @@ Deployment steps:
    - Set `webui.worker_disk_min_free_gb` to the minimum free-space safety margin that must remain on the Windows worker output volume.
    - Set `webui.max_active_jobs_per_user` and `webui.max_active_jobs_global` conservatively for the first public test.
    - Set `asr.supported_languages`, `translation.supported_target_languages`, and `tts.supported_languages` as fallback hints; when the Windows worker is online, its heartbeat/claim `capabilities` payload should be treated as the authoritative local model capability view.
+   - Do not set ASR/LLM/TTS inference endpoints such as `llm.endpoint`, `tts.server_url`, or `translation.endpoint` to public cloud services. Contabo should read capabilities from the Windows worker heartbeat; inference runs on Windows.
    - Keep full media storage on the Windows worker.
    - Set `webui.execution_mode=worker_queue` on Contabo.
    - Keep `webui.allow_remote_media_uploads=false` on Contabo unless a deliberate short-lived cache policy is approved.
@@ -51,7 +52,7 @@ Deployment steps:
    ```bash
    python -m ecse_localizer --config deploy/config.remote.yaml deploy-check
    ```
-   Treat any `ERROR` as a hard stop. The check validates placeholder secrets, worker HMAC/nonce enforcement, remote media upload policy, privacy flags, signed URL TTL, remote quota bounds, private IPs, and Windows path leakage without printing secret values.
+   Treat any `ERROR` as a hard stop. The check validates placeholder secrets, worker HMAC/nonce enforcement, remote media upload policy, privacy flags, signed URL TTL, remote quota bounds, public/private inference endpoints, private IPs, and Windows path leakage without printing secret values.
 6. Run the web service behind Caddy or Nginx with HTTPS.
    - Use `deploy/Caddyfile.example` for Caddy; it reads `REMOTE_PUBLIC_HOST` from `.env`.
    - Use `deploy/nginx.conf.example` for Nginx; replace `localizer.example.invalid` on the server only.

@@ -176,7 +176,7 @@ Before putting the remote WebUI behind a public domain, run the deployment guard
 python -m ecse_localizer --config deploy/config.remote.yaml deploy-check
 ```
 
-It fails closed when production safety settings are missing: placeholder secrets, weak worker auth, missing nonce enforcement, remote media upload enabled, unsafe privacy flags, unresolved environment variables, private IPs, Windows paths, or unreasonable preview/cache quota values. If `REMOTE_PUBLIC_BASE_URL` is set in the environment, it must be an HTTPS public origin, not `localhost`, a private IP, or plain HTTP. The check reports field paths and issue codes only; it does not echo secret values.
+It fails closed when production safety settings are missing: placeholder secrets, weak worker auth, missing nonce enforcement, remote media upload enabled, unsafe privacy flags, unresolved environment variables, public/private inference endpoints in ASR/LLM/TTS settings, private IPs, Windows paths, or unreasonable preview/cache quota values. If `REMOTE_PUBLIC_BASE_URL` is set in the environment, it must be an HTTPS public origin, not `localhost`, a private IP, or plain HTTP. The check reports field paths and issue codes only; it does not echo secret values.
 
 ## Backends
 

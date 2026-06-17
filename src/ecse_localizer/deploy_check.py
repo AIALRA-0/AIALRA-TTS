@@ -25,6 +25,37 @@ SECRET_MIN_LENGTHS = {
     "webui.worker_token": 32,
     "webui.password": 12,
 }
+INFERENCE_ENDPOINT_PATHS = {
+    "llm.endpoint",
+    "llm.base_url",
+    "llm.api_url",
+    "asr.endpoint",
+    "asr.base_url",
+    "asr.api_url",
+    "translation.endpoint",
+    "translation.base_url",
+    "translation.api_url",
+    "tts.endpoint",
+    "tts.base_url",
+    "tts.api_url",
+    "tts.server_url",
+}
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+CLOUD_INFERENCE_HOST_MARKERS = (
+    "openai.com",
+    "openai.azure.com",
+    "cognitiveservices.azure.com",
+    "googleapis.com",
+    "elevenlabs.io",
+    "deepl.com",
+    "baidu.com",
+    "tencentcloudapi.com",
+    "aliyuncs.com",
+    "dashscope.aliyuncs.com",
+    "volcengineapi.com",
+    "volces.com",
+    "api-inference.huggingface.co",
+)
 
 
 def check_deploy_config(config: dict[str, Any], *, mode: str = "remote", env: dict[str, str] | None = None) -> dict[str, Any]:
@@ -79,6 +110,7 @@ def check_deploy_config(config: dict[str, Any], *, mode: str = "remote", env: di
     check_numeric_range(findings, webui, "max_active_jobs_global", "webui.max_active_jobs_global", min_value=1, max_value=100, level="warn")
 
     check_remote_paths(findings, config)
+    check_inference_endpoints(findings, config)
     check_remote_environment(findings, env or {})
     check_capability_hints(findings, config)
     return build_result(findings)
@@ -177,7 +209,7 @@ def check_remote_paths(findings: list[Finding], config: dict[str, Any]) -> None:
         text = value.strip()
         if looks_like_windows_path(text):
             add(findings, "error", "windows_path_in_remote_config", path, "Remote config must not contain local Windows paths.")
-        if has_private_ip(text):
+        if path not in INFERENCE_ENDPOINT_PATHS and has_private_ip(text):
             add(findings, "error", "private_ip_in_remote_config", path, "Do not commit or deploy templates with private IP addresses.")
     for path in ["input_dir", "output_dir", "work_dir", "webui.upload_dir", "webui.preview_dir", "webui.job_dir", "webui.platform_dir"]:
         value = nested(config, path)
@@ -192,6 +224,42 @@ def check_remote_paths(findings: list[Finding], config: dict[str, Any]) -> None:
             add(findings, "warn", "relative_remote_path", path, "Use absolute POSIX paths on Contabo.")
     if nested(config, "input_dir") == nested(config, "output_dir"):
         add(findings, "error", "input_output_same_path", "input_dir", "Remote input and output directories must be separate.")
+
+
+def check_inference_endpoints(findings: list[Finding], config: dict[str, Any]) -> None:
+    for path in sorted(INFERENCE_ENDPOINT_PATHS):
+        value = nested(config, path)
+        if not value:
+            continue
+        text = str(value).strip()
+        if not text:
+            continue
+        parsed = urlparse(text)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme not in {"http", "https"} or not host:
+            add(findings, "error", "invalid_inference_endpoint", path, "Inference endpoint must be an http(s) URL when configured.")
+            continue
+        if host in LOOPBACK_HOSTS:
+            add(
+                findings,
+                "warn",
+                "local_inference_endpoint_in_remote_config",
+                path,
+                "Contabo should normally omit inference endpoints and rely on the Windows worker heartbeat for local model capability status.",
+            )
+            continue
+        code = "cloud_inference_endpoint" if known_cloud_inference_host(host) else "non_local_inference_endpoint"
+        add(
+            findings,
+            "error",
+            code,
+            path,
+            "Remote deployment config must not point inference backends at public or private network services; all ASR/LLM/TTS inference runs on the Windows worker.",
+        )
+
+
+def known_cloud_inference_host(host: str) -> bool:
+    return any(host == marker or host.endswith("." + marker) for marker in CLOUD_INFERENCE_HOST_MARKERS)
 
 
 def check_remote_environment(findings: list[Finding], env: dict[str, str]) -> None:
