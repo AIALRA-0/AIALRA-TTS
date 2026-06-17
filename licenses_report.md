@@ -9,6 +9,14 @@ Generated baseline for the localizer project. The CLI refreshes a copy in `_loca
 | PyYAML | Config parsing | MIT | Low |
 | pysubs2 | Subtitle parsing/writing | MIT | Low |
 | requests | Local endpoint probing | Apache-2.0 | Low |
+| jsonschema | Local structured output/schema validation | MIT | Low |
+| tqdm | Local progress reporting | MPL-2.0 AND MIT | Low; verify MPL notice obligations before redistribution |
+| FastAPI | Local WebUI/API server | MIT | Low |
+| Uvicorn | Local WebUI ASGI server | BSD-3-Clause | Low |
+| python-multipart | Local WebUI upload parsing | Apache-2.0 | Low |
+| httpx2 | Local WebUI/TestClient HTTP client | BSD-3-Clause | Low |
+| httpcore2 | httpx2 transport dependency | BSD-3-Clause | Low |
+| truststore | Local TLS certificate verification for HTTP client stack | MIT | Low |
 | pytest | Tests | MIT | Low |
 | FFmpeg/ffprobe gyan build | Audio/video processing | FFmpeg is LGPL/GPL depending on build flags | Check exact binary build before commercial redistribution |
 | NVIDIA driver/CUDA runtime | GPU acceleration | NVIDIA proprietary EULA | Runtime redistribution restrictions may apply |

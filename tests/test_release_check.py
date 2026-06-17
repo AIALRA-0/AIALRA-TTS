@@ -25,6 +25,7 @@ version = "{pyproject_version}"
         "deploy/Dockerfile.web",
         "deploy/Caddyfile.example",
         ".env.example",
+        "licenses_report.md",
         "tools/secret_scan.ps1",
         "config.example.yaml",
         "08_deploy_check.ps1",
