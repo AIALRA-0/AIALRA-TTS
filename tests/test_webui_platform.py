@@ -786,7 +786,17 @@ def test_deleted_job_artifacts_hide_from_normal_page_but_remain_job_scoped(tmp_p
         metadata={"project_id": "course", "folder_id": "root"},
         dispatch_target="worker",
     )
-    update_job(state, record["id"], {"status": "done", "returncode": 0, "result_report": str(report), "result_video": str(video)})
+    update_job(
+        state,
+        record["id"],
+        {
+            "status": "done",
+            "returncode": 0,
+            "result_report": str(report),
+            "result_video": str(video),
+            "worker_artifacts": [{"ref_id": "ref_deleted", "source_output_key": "zh_dub_mp4", "name": "lecture_zh_dub.mp4", "size": 100}],
+        },
+    )
 
     response = client.get("/api/artifacts")
     assert response.status_code == 200
@@ -810,6 +820,11 @@ def test_deleted_job_artifacts_hide_from_normal_page_but_remain_job_scoped(tmp_p
     deleted_video = next(item for item in deleted_artifacts if item["name"] == "lecture_zh_dub.mp4")
     assert "download_url" not in deleted_video
     assert deleted_video["download_disabled_reason"] == "source_job_deleted"
+    deleted_worker_ref = next(item for item in deleted_artifacts if item["id"] == "worker_artifact_ref_deleted")
+    assert "request_cache_url" not in deleted_worker_ref
+    response = client.post("/api/artifacts/worker_artifact_ref_deleted/request-cache", json={})
+    assert response.status_code == 404
+    assert not any(job["type"] == "cache_artifact" for job in client.get("/api/jobs?include_deleted=true").json()["jobs"])
 
 
 def test_delete_job_can_delete_files_and_release_remote_quota(tmp_path):
