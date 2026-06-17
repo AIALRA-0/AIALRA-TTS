@@ -824,6 +824,55 @@ def test_ownerless_legacy_jobs_are_admin_only(tmp_path):
         assert "legacy private log" in response.text
 
 
+def test_non_admin_job_log_redacts_local_paths_and_secrets(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    app = create_app(config_path)
+    state = app.state.web
+    state.store.create_user("student.one", "long-enough-password")
+    win_root = "C:" + "\\Users\\Alice\\Desktop\\ECSE 4961"
+    log_path = state.job_dir / "student_job.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                f"processing {win_root}\\lecture.mp4",
+                "worker_token=supersecret",
+                "Authorization: " + "Bearer " + "secretbearertoken",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    record = create_job_record(
+        state,
+        "process_one",
+        "Student job",
+        ["python", "-m", "ecse_localizer", "process-one"],
+        user="student.one",
+        metadata={},
+        dispatch_target="local",
+    )
+    update_job(state, record["id"], {"status": "running", "log": str(log_path)})
+
+    with TestClient(app) as student:
+        response = student.post("/api/login", json={"username": "student.one", "password": "long-enough-password"})
+        assert response.status_code == 200
+        response = student.get(f"/api/jobs/{record['id']}/log")
+        assert response.status_code == 200
+        assert "<local-path>" in response.text
+        assert "supersecret" not in response.text
+        assert "secretbearertoken" not in response.text
+        assert "Alice" not in response.text
+
+    with TestClient(app) as admin:
+        response = admin.post("/api/login", json={"username": "admin", "password": "local-password"})
+        assert response.status_code == 200
+        response = admin.get(f"/api/jobs/{record['id']}/log")
+        assert response.status_code == 200
+        assert f"{win_root}\\lecture.mp4" in response.text
+        assert "supersecret" in response.text
+
+
 def test_reports_and_dashboard_are_user_scoped(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

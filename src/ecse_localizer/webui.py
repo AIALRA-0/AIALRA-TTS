@@ -842,10 +842,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         log_path = Path(record.get("log", ""))
         if not log_path.exists():
             if record.get("log_tail"):
-                return PlainTextResponse(str(record.get("log_tail") or ""), media_type="text/plain; charset=utf-8")
+                text = str(record.get("log_tail") or "")
+                if record.get("dispatch_target") == "worker" or not is_admin(state, user):
+                    text = sanitize_remote_text(text)
+                return PlainTextResponse(text, media_type="text/plain; charset=utf-8")
             return PlainTextResponse("")
         text = tail_text(log_path, max(20, min(2000, lines)))
-        if record.get("dispatch_target") == "worker":
+        if record.get("dispatch_target") == "worker" or not is_admin(state, user):
             text = sanitize_remote_text(text)
         return PlainTextResponse(text, media_type="text/plain; charset=utf-8")
 
