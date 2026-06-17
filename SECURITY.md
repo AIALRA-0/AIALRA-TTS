@@ -36,6 +36,8 @@ In multi-user WebUI mode, generated artifacts, previews, and temporary remote ca
 
 Historical WebUI job records without an owner are also admin-only. Non-admin users can view and act only on jobs explicitly owned by their account.
 
+Report lists and dashboard report summaries follow the same owner rule; ownerless legacy reports are admin-only.
+
 Artifact deletion is restricted to managed directories:
 
 - configured output directory

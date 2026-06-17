@@ -429,6 +429,48 @@ def test_ownerless_legacy_jobs_are_admin_only(tmp_path):
         assert "legacy private log" in response.text
 
 
+def test_reports_and_dashboard_are_user_scoped(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    app = create_app(config_path)
+    state = app.state.web
+    state.store.create_user("student.one", "long-enough-password")
+    state.store.create_user("student.two", "another-long-password")
+    output = Path(state.config["output_dir"])
+    (output / "one_report.json").write_text(
+        json.dumps({"name": "one", "user": "student.one", "qa": {"pass": True, "issues": []}}),
+        encoding="utf-8",
+    )
+    (output / "two_report.json").write_text(
+        json.dumps({"name": "two", "user": "student.two", "qa": {"pass": True, "issues": []}}),
+        encoding="utf-8",
+    )
+    (output / "legacy_report.json").write_text(
+        json.dumps({"name": "legacy", "qa": {"pass": False, "issues": ["ownerless"]}}),
+        encoding="utf-8",
+    )
+
+    with TestClient(app) as student_one:
+        response = student_one.post("/api/login", json={"username": "student.one", "password": "long-enough-password"})
+        assert response.status_code == 200
+        response = student_one.get("/api/reports")
+        assert response.status_code == 200
+        assert {report["name"] for report in response.json()["reports"]} == {"one"}
+        response = student_one.get("/api/dashboard")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["report_count"] == 1
+        assert {report["name"] for report in payload["latest_reports"]} == {"one"}
+
+    with TestClient(app) as admin:
+        response = admin.post("/api/login", json={"username": "admin", "password": "local-password"})
+        assert response.status_code == 200
+        response = admin.get("/api/reports")
+        assert response.status_code == 200
+        assert {report["name"] for report in response.json()["reports"]} == {"one", "two", "legacy"}
+
+
 def test_artifact_download_urls_are_user_scoped(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

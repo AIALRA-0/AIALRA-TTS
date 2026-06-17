@@ -195,7 +195,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     @app.get("/api/dashboard")
     def dashboard(user: str = Depends(require_user)) -> dict[str, Any]:
         state.reload_config()
-        reports = list_reports(state.config, limit=12)
+        reports = list_visible_reports(state, user, limit=12)
         videos = list_all_video_records(state, user)
         llm = LocalLLMClient(state.config).status()
         tts = tts_health(state.config)
@@ -208,7 +208,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             "upload_dir": str(state.store.user_upload_dir(user)),
             "upload_policy": browser_upload_policy(state),
             "video_count": len(videos),
-            "report_count": len(list_reports(state.config, limit=10000)),
+            "report_count": len(list_visible_reports(state, user, limit=10000)),
             "latest_reports": reports,
             "latest_jobs": [public_job_record(job) for job in jobs[:8]],
             "tts": tts,
@@ -227,9 +227,9 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return {"videos": list_all_video_records(state, user), "upload_policy": browser_upload_policy(state)}
 
     @app.get("/api/reports")
-    def reports(_: str = Depends(require_user)) -> dict[str, Any]:
+    def reports(user: str = Depends(require_user)) -> dict[str, Any]:
         state.reload_config()
-        return {"reports": list_reports(state.config, limit=200)}
+        return {"reports": list_visible_reports(state, user, limit=200)}
 
     @app.get("/api/capabilities")
     def capabilities(_: str = Depends(require_user)) -> dict[str, Any]:
@@ -1895,6 +1895,28 @@ def list_reports(config: dict[str, Any], limit: int = 50) -> list[dict[str, Any]
     return [report_summary(p) for p in reports[:limit]]
 
 
+def list_visible_reports(state: WebState, user: str, limit: int = 50) -> list[dict[str, Any]]:
+    admin = is_admin(state, user)
+    reports = list_reports(state.config, limit=10000)
+    jobs_by_report: dict[str, dict[str, Any]] = {}
+    for job in list_jobs(state, None):
+        report = str(job.get("result_report") or "")
+        if report:
+            jobs_by_report[str(Path(report).resolve()).lower()] = job
+    visible: list[dict[str, Any]] = []
+    for report in reports:
+        report_path = str(report.get("path") or "")
+        job = jobs_by_report.get(str(Path(report_path).resolve()).lower()) if report_path else None
+        owner = str((job or {}).get("user") or report.get("owner") or "")
+        if admin or owner == user:
+            row = dict(report)
+            row["owner"] = owner
+            visible.append(row)
+        if len(visible) >= limit:
+            break
+    return visible
+
+
 def report_summary(path: Path) -> dict[str, Any]:
     try:
         data = read_json(path)
@@ -1905,6 +1927,8 @@ def report_summary(path: Path) -> dict[str, Any]:
     return {
         "name": data.get("name") or path.stem,
         "path": str(path),
+        "owner": data.get("user") or "",
+        "project_id": data.get("project_id") or "",
         "mtime": path.stat().st_mtime,
         "pass": bool(qa.get("pass")),
         "issues": len(qa.get("issues", []) or []),
