@@ -63,6 +63,35 @@ def test_quality_checks_do_not_apply_chinese_script_rules_to_latin_targets():
     assert "POSSIBLY_OVERCOMPRESSED_TRANSLATION" not in flags
 
 
+def test_qa_translation_text_validation_is_target_language_aware():
+    source = "The comparator threshold changes with temperature."
+    spanish = "El umbral del comparador cambia con la temperatura."
+    en = [Segment(1, 0.0, 3.0, source)]
+    zh = [Segment(1, 0.0, 3.0, spanish)]
+    traces = [TranslationTrace(1, source, spanish, spanish, 3.0, 60, [])]
+
+    qa = run_qa({}, en, zh, {}, traces, {"duration": 3.0, "flags": []}, 3.0, {"translation": {"target_language": "es"}, "qa": {}})
+
+    issue_types = {issue["type"] for issue in qa["issues"]}
+    assert "invalid_translation_text" not in issue_types
+    assert "possibly_untranslated" not in issue_types
+    assert qa["pass"] is True
+
+
+def test_qa_still_rejects_ascii_only_text_for_chinese_target():
+    source = "The comparator threshold changes with temperature."
+    en = [Segment(1, 0.0, 3.0, source)]
+    zh = [Segment(1, 0.0, 3.0, "The comparator threshold changes with temperature.")]
+    traces = [TranslationTrace(1, source, zh[0].text, zh[0].text, 3.0, 60, [])]
+
+    qa = run_qa({}, en, zh, {}, traces, {"duration": 3.0, "flags": []}, 3.0, {"translation": {"target_language": "zh-CN"}, "qa": {}})
+
+    issue_types = {issue["type"] for issue in qa["issues"]}
+    assert "invalid_translation_text" in issue_types
+    assert "possibly_untranslated" in issue_types
+    assert qa["pass"] is False
+
+
 def test_qa_reports_translation_quality_heuristics():
     en = [Segment(1, 0.0, 3.0, "We compare the two algorithms.")]
     zh = [Segment(1, 0.0, 3.0, "这一段主要围绕两个算法展开。")]
