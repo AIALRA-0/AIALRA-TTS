@@ -47,7 +47,7 @@ Per-job language, quality, and style settings are written to generated job confi
 
 Parameter templates store non-secret generation settings such as source language, target subtitle/TTS language, quality mode, teaching style, TTS speed/emotion, pause settings, subtitle length, and hard/soft subtitle preferences. Templates live under `runs/platform/` and are ignored by git.
 
-The WebUI also has a `产物` page for generated artifacts. It can list reports, subtitles, WAV/MP4 outputs, show local preview links for media, create short-lived signed download URLs, delete managed output files, and run cleanup dry-runs. Deletion is restricted to managed output, run, and upload directories; it refuses to touch the original video root.
+The WebUI also has a `产物` page for generated artifacts. It can list reports, subtitles, WAV/MP4 outputs, show local preview links for media, create short-lived signed download URLs, delete managed output files, and run cleanup dry-runs. Deletion is restricted to managed output, run, and upload directories; it refuses to touch the original video root. Uploads enforce suffix, per-file size, user quota, and request-level reserved bytes; job submission enforces per-user and global active-job limits.
 
 Job records are JSON files with `schema_version`. WebUI normalizes older records on read/claim/update by filling missing metadata, log path, dispatch target, timestamps, retry count, and worker args when possible. Job states are normalized to `queued`, `claimed`, `running`, `paused`, `retrying`, `done`, `failed`, `cancelled`, and `deleted`; older `passed` records are migrated to `done` with `legacy_status: passed`.
 

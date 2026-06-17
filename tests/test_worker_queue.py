@@ -5,15 +5,18 @@ import yaml
 
 from ecse_localizer.webui import (
     WebState,
+    active_job_counts,
     build_job_command,
     claim_worker_job,
     command_with_config,
     create_job_record,
+    enforce_active_job_limits,
     list_jobs,
     read_job,
     retry_job_record,
     soft_delete_job,
     update_job,
+    upload_fits_quota,
     worker_args_from_command,
     worker_status_payload,
     worker_status_changes,
@@ -72,6 +75,12 @@ def test_worker_status_payload_marks_missing_worker_unavailable(tmp_path):
     assert "queued jobs will wait" in payload["message"]
 
 
+def test_upload_quota_counts_reserved_bytes_without_double_counting_current_file():
+    assert upload_fits_quota(base_used_bytes=4, reserved_bytes=0, current_file_bytes=6, quota_bytes=10)
+    assert upload_fits_quota(base_used_bytes=4, reserved_bytes=3, current_file_bytes=3, quota_bytes=10)
+    assert not upload_fits_quota(base_used_bytes=4, reserved_bytes=3, current_file_bytes=4, quota_bytes=10)
+
+
 def test_command_with_config_replaces_only_config_path(tmp_path):
     state = WebState(write_config(tmp_path))
     command, _ = build_job_command("audit", {}, state)
@@ -127,6 +136,53 @@ def test_legacy_worker_job_without_dispatch_can_be_claimed(tmp_path):
     assert claimed["dispatch_target"] == "worker"
     assert claimed["status"] == "claimed"
     assert claimed["claimed_by"] == "worker-legacy"
+
+
+def test_active_job_limits_count_user_and_global_records(tmp_path):
+    config_path = write_config(tmp_path)
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    data["webui"]["max_active_jobs_per_user"] = 1
+    data["webui"]["max_active_jobs_global"] = 2
+    config_path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    state = WebState(config_path)
+
+    create_job_record(
+        state,
+        "audit",
+        "Audit 1",
+        ["python", "-m", "ecse_localizer", "audit"],
+        user="admin",
+        metadata={},
+        dispatch_target="worker",
+    )
+    create_job_record(
+        state,
+        "audit",
+        "Audit 2",
+        ["python", "-m", "ecse_localizer", "audit"],
+        user="other",
+        metadata={},
+        dispatch_target="worker",
+    )
+
+    assert active_job_counts(state, "admin") == {"user": 1, "global": 2}
+    try:
+        enforce_active_job_limits(state, "admin")
+    except Exception as exc:
+        assert "Active job limit" in str(exc)
+    else:
+        raise AssertionError("expected user active job limit")
+
+    state.webui["max_active_jobs_per_user"] = 5
+    try:
+        enforce_active_job_limits(state, "new-user")
+    except Exception as exc:
+        assert "Global active job limit" in str(exc)
+    else:
+        raise AssertionError("expected global active job limit")
+
+    update_job(state, list_jobs(state, "admin")[0]["id"], {"status": "done"})
+    enforce_active_job_limits(state, "new-user")
 
 
 def test_claim_worker_job_marks_job_claimed(tmp_path):

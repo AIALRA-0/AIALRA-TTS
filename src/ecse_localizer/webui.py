@@ -83,6 +83,8 @@ TUNABLE_FIELDS: dict[str, dict[str, Any]] = {
     "dialect.enabled": {"label": "方言/轻口音", "type": "bool"},
     "dialect.target": {"label": "方言目标", "type": "choice", "options": ["mandarin", "sichuan", "cantonese", "dongbei", "shanghai", "taiwan"]},
     "mux.hard_subtitle": {"label": "生成硬字幕视频", "type": "bool"},
+    "webui.max_active_jobs_per_user": {"label": "每用户最大活动任务数", "type": "int", "min": 1, "max": 32},
+    "webui.max_active_jobs_global": {"label": "全局最大活动任务数", "type": "int", "min": 1, "max": 128},
 }
 
 
@@ -258,6 +260,10 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     async def upload(files: list[UploadFile] = File(...), user: str = Depends(require_user)) -> dict[str, Any]:
         saved: list[dict[str, Any]] = []
         max_bytes = int(state.webui.get("max_upload_mb", 20480)) * 1024 * 1024
+        quota = state.store.quota_status(user)
+        base_used = int(quota["local_used_bytes"])
+        quota_bytes = int(quota["local_quota_bytes"])
+        reserved_bytes = 0
         for item in files:
             name = safe_upload_name(item.filename or "upload.bin")
             suffix = Path(name).suffix.lower()
@@ -274,12 +280,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                     if size > max_bytes:
                         target.unlink(missing_ok=True)
                         raise HTTPException(status_code=413, detail=f"Upload exceeds {state.webui.get('max_upload_mb')} MB")
-                    if not state.store.can_store(user, size):
+                    if not upload_fits_quota(base_used, reserved_bytes, size, quota_bytes):
                         target.unlink(missing_ok=True)
-                        quota = state.store.quota_status(user)
-                        raise HTTPException(status_code=413, detail=f"User quota exceeded. Remaining bytes: {quota['local_remaining_bytes']}")
+                        remaining = max(0, quota_bytes - base_used - reserved_bytes)
+                        raise HTTPException(status_code=413, detail=f"User quota exceeded. Remaining bytes: {remaining}")
                     fh.write(chunk)
             saved.append({"name": target.name, "path": str(target), "size": size})
+            reserved_bytes += size
         return {"ok": True, "saved": saved, "quota": state.store.quota_status(user)}
 
     @app.get("/api/tuning")
@@ -515,6 +522,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         template_params = template_params_for_job(state, user, body)
         metadata = job_metadata_from_body(body, template_params=template_params)
         validate_job_project(state, user, metadata)
+        enforce_active_job_limits(state, user)
         worker_info: dict[str, Any] | None = None
         if worker_queue:
             worker_info = worker_status_payload(state)
@@ -688,6 +696,34 @@ def is_admin(state: WebState, username: str) -> bool:
 
 def can_access_record(state: WebState, username: str, record: dict[str, Any]) -> bool:
     return is_admin(state, username) or not record.get("user") or record.get("user") == username
+
+
+def upload_fits_quota(base_used_bytes: int, reserved_bytes: int, current_file_bytes: int, quota_bytes: int) -> bool:
+    if quota_bytes <= 0:
+        return True
+    return base_used_bytes + reserved_bytes + current_file_bytes <= quota_bytes
+
+
+def active_job_counts(state: WebState, user: str) -> dict[str, int]:
+    user_active = 0
+    global_active = 0
+    for record in list_jobs(state, None):
+        if record.get("status") not in ACTIVE_JOB_STATUSES:
+            continue
+        global_active += 1
+        if record.get("user") == user:
+            user_active += 1
+    return {"user": user_active, "global": global_active}
+
+
+def enforce_active_job_limits(state: WebState, user: str) -> None:
+    max_user = int(state.webui.get("max_active_jobs_per_user", 2) or 0)
+    max_global = int(state.webui.get("max_active_jobs_global", 8) or 0)
+    counts = active_job_counts(state, user)
+    if max_user > 0 and counts["user"] >= max_user:
+        raise HTTPException(status_code=429, detail=f"Active job limit reached for user: {counts['user']}/{max_user}")
+    if max_global > 0 and counts["global"] >= max_global:
+        raise HTTPException(status_code=429, detail=f"Global active job limit reached: {counts['global']}/{max_global}")
 
 
 def require_worker_token(request: Request, state: WebState) -> None:

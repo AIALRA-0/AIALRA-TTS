@@ -29,6 +29,8 @@ webui:
   default_local_quota_gb: 500
   default_remote_quota_gb: 10
   default_project_quota_gb: 500
+  max_active_jobs_per_user: 2
+  max_active_jobs_global: 8
   worker_token: "${WORKER_SHARED_TOKEN}"
   download_secret: "${WEBUI_DOWNLOAD_SECRET}"
   signed_url_ttl_seconds: 900
