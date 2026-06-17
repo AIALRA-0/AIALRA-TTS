@@ -46,6 +46,7 @@ from .redaction import is_remote_safe_reference, sanitize_remote_command, saniti
 from .scan import VIDEO_SUFFIXES, find_videos
 from .tts import tts_health
 from .utils import PROJECT_ROOT, ensure_dir, now_id, read_json, slugify, write_json
+from .worker_auth import worker_hmac_signature as build_worker_hmac_signature
 
 
 ALLOWED_UPLOAD_SUFFIXES = VIDEO_SUFFIXES | {".srt", ".vtt", ".ass", ".wav", ".mp3", ".m4a"}
@@ -1716,6 +1717,7 @@ def require_worker_hmac(request: Request, expected_token: str, body: bytes) -> N
         path=request.url.path,
         body=body,
         nonce=nonce or None,
+        headers=request.headers,
     )
     if not hmac.compare_digest(signature, expected_signature):
         raise HTTPException(status_code=401, detail="Invalid worker HMAC signature")
@@ -1777,14 +1779,17 @@ def remember_worker_nonce(state: WebState, nonce: str, *, timestamp_int: int, ma
         save_worker_nonce_cache(state.worker_nonce_path, state.worker_nonce_cache)
 
 
-def worker_hmac_signature(worker_token: str, *, timestamp: str, method: str, path: str, body: bytes, nonce: str | None = None) -> str:
-    body_hash = hashlib.sha256(body or b"").hexdigest()
-    parts = [str(timestamp), method.upper(), path]
-    if nonce:
-        parts.append(str(nonce))
-    parts.append(body_hash)
-    message = "\n".join(parts).encode("utf-8")
-    return hmac.new(worker_token.encode("utf-8"), message, hashlib.sha256).hexdigest()
+def worker_hmac_signature(
+    worker_token: str,
+    *,
+    timestamp: str,
+    method: str,
+    path: str,
+    body: bytes,
+    nonce: str | None = None,
+    headers: Mapping[str, Any] | None = None,
+) -> str:
+    return build_worker_hmac_signature(worker_token, timestamp=timestamp, method=method, path=path, body=body, nonce=nonce, headers=headers)
 
 
 def claim_worker_job(state: WebState, worker_id: str) -> dict[str, Any] | None:

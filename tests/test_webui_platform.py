@@ -2147,9 +2147,11 @@ def test_worker_preview_upload_registers_manifest_and_artifact(tmp_path):
 
     path = f"/api/worker/jobs/{record['id']}/preview"
     body = b"small mp4 preview"
-    headers = worker_headers("worker-token", path=path, body=body)
-    headers.update(
-        {
+    headers = worker_headers(
+        "worker-token",
+        path=path,
+        body=body,
+        extra_headers={
             "Content-Type": "video/mp4",
             "X-Worker-Preview-Variant": "preview",
             "X-Worker-Preview-Id": "preview-1",
@@ -2157,16 +2159,18 @@ def test_worker_preview_upload_registers_manifest_and_artifact(tmp_path):
             "X-Worker-Preview-File-Name": "lecture_preview.mp4",
             "X-Worker-Preview-Source-Key": "zh_dub_mp4",
             "X-Worker-Id": "worker-1",
-        }
+        },
     )
     response = client.post(path, data=body, headers=headers)
     assert response.status_code == 200
     assert response.json()["preview"]["preview_path"].endswith("lecture_preview.mp4")
 
     thumb_body = b"jpg"
-    thumb_headers = worker_headers("worker-token", path=path, body=thumb_body)
-    thumb_headers.update(
-        {
+    thumb_headers = worker_headers(
+        "worker-token",
+        path=path,
+        body=thumb_body,
+        extra_headers={
             "Content-Type": "image/jpeg",
             "X-Worker-Preview-Variant": "thumbnail",
             "X-Worker-Preview-Id": "preview-1",
@@ -2174,7 +2178,7 @@ def test_worker_preview_upload_registers_manifest_and_artifact(tmp_path):
             "X-Worker-Preview-File-Name": "lecture_thumb.jpg",
             "X-Worker-Preview-Source-Key": "zh_dub_mp4",
             "X-Worker-Id": "worker-1",
-        }
+        },
     )
     response = client.post(path, data=thumb_body, headers=thumb_headers)
     assert response.status_code == 200
@@ -2195,6 +2199,50 @@ def test_worker_preview_upload_registers_manifest_and_artifact(tmp_path):
     assert artifact["thumbnail_path"].endswith("lecture_thumb.jpg")
     quota = client.get("/api/quota").json()
     assert quota["remote_used_bytes"] >= len(body) + len(thumb_body)
+
+
+def test_worker_preview_upload_rejects_tampered_signed_headers(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["worker_auth_mode"] = "hmac"
+    config["webui"]["preview_dir"] = str(tmp_path / "previews")
+    config["webui"]["preview_manifest"] = str(tmp_path / "previews" / "preview_manifest.json")
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+    record = create_job_record(
+        state,
+        "process_one",
+        "Remote process",
+        ["python", "-m", "ecse_localizer", "process-one", "--video", r"C:\private\lecture.mp4"],
+        user="admin",
+        metadata={},
+        dispatch_target="worker",
+    )
+    update_job(state, record["id"], {"status": "claimed", "claimed_by": "worker-1"})
+
+    path = f"/api/worker/jobs/{record['id']}/preview"
+    body = b"small mp4 preview"
+    headers = worker_headers(
+        "worker-token",
+        path=path,
+        body=body,
+        extra_headers={
+            "Content-Type": "video/mp4",
+            "X-Worker-Preview-Variant": "preview",
+            "X-Worker-Preview-File-Name": "lecture_preview.mp4",
+            "X-Worker-Id": "worker-1",
+        },
+    )
+    headers["X-Worker-Id"] = "worker-2"
+
+    response = client.post(path, data=body, headers=headers)
+
+    assert response.status_code == 401
+    assert "Invalid worker HMAC signature" in response.text
 
 
 def test_request_worker_artifact_cache_creates_worker_job(tmp_path):
@@ -2415,9 +2463,11 @@ def test_worker_artifact_cache_upload_registers_downloadable_artifact(tmp_path):
 
     path = f"/api/worker/jobs/{record['id']}/artifact-cache"
     body = b"full mp4"
-    headers = worker_headers("worker-token", path=path, body=body)
-    headers.update(
-        {
+    headers = worker_headers(
+        "worker-token",
+        path=path,
+        body=body,
+        extra_headers={
             "Content-Type": "video/mp4",
             "X-Worker-Artifact-Id": "worker_artifact_ref1",
             "X-Worker-Artifact-Ref": "ref1",
@@ -2425,7 +2475,7 @@ def test_worker_artifact_cache_upload_registers_downloadable_artifact(tmp_path):
             "X-Worker-Artifact-File-Name": "lecture_zh_dub.mp4",
             "X-Worker-Artifact-Source-Key": "zh_dub_mp4",
             "X-Worker-Id": "worker-1",
-        }
+        },
     )
     response = client.post(path, data=body, headers=headers)
     assert response.status_code == 200
@@ -2462,14 +2512,16 @@ def test_worker_preview_upload_respects_remote_quota(tmp_path):
 
     path = f"/api/worker/jobs/{record['id']}/preview"
     body = b"x" * 100
-    headers = worker_headers("worker-token", path=path, body=body)
-    headers.update(
-        {
+    headers = worker_headers(
+        "worker-token",
+        path=path,
+        body=body,
+        extra_headers={
             "Content-Type": "video/mp4",
             "X-Worker-Preview-Variant": "preview",
             "X-Worker-Preview-File-Name": "too_big_preview.mp4",
             "X-Worker-Id": "worker-1",
-        }
+        },
     )
     response = client.post(path, data=body, headers=headers)
     assert response.status_code == 413
@@ -2502,14 +2554,16 @@ def test_worker_preview_upload_respects_global_remote_quota(tmp_path):
 
     path = f"/api/worker/jobs/{record['id']}/preview"
     body = b"x" * 100
-    headers = worker_headers("worker-token", path=path, body=body)
-    headers.update(
-        {
+    headers = worker_headers(
+        "worker-token",
+        path=path,
+        body=body,
+        extra_headers={
             "Content-Type": "video/mp4",
             "X-Worker-Preview-Variant": "preview",
             "X-Worker-Preview-File-Name": "too_big_preview.mp4",
             "X-Worker-Id": "worker-1",
-        }
+        },
     )
     response = client.post(path, data=body, headers=headers)
     assert response.status_code == 413

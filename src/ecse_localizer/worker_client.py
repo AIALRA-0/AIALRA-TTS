@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import hashlib
-import hmac
 import mimetypes
 import os
 import re
@@ -28,6 +28,7 @@ from .redaction import sanitize_remote_command, sanitize_remote_text
 from .scan import VIDEO_SUFFIXES, should_skip
 from .tts import tts_health
 from .utils import PROJECT_ROOT, ensure_dir, read_json, run_cmd, write_json
+from .worker_auth import worker_hmac_signature as build_worker_hmac_signature
 
 
 def poll_once(
@@ -778,14 +779,20 @@ def upload_worker_preview(
     worker_id = safe_worker_id(worker_id)
     path = f"/api/worker/jobs/{job_id}/preview"
     body = file_path.read_bytes()
-    headers = worker_headers(worker_token, path=path, body=body)
-    headers["Content-Type"] = media_type_for(file_path)
-    headers["X-Worker-Preview-Variant"] = variant
-    headers["X-Worker-Preview-Id"] = preview_id
-    headers["X-Worker-Preview-Name"] = display_name
-    headers["X-Worker-Preview-File-Name"] = file_path.name
-    headers["X-Worker-Preview-Source-Key"] = source_output_key
-    headers["X-Worker-Id"] = worker_id
+    headers = worker_headers(
+        worker_token,
+        path=path,
+        body=body,
+        extra_headers={
+            "Content-Type": media_type_for(file_path),
+            "X-Worker-Preview-Variant": variant,
+            "X-Worker-Preview-Id": preview_id,
+            "X-Worker-Preview-Name": display_name,
+            "X-Worker-Preview-File-Name": file_path.name,
+            "X-Worker-Preview-Source-Key": source_output_key,
+            "X-Worker-Id": worker_id,
+        },
+    )
     response = requests.post(endpoint(remote_base_url, path), data=body, headers=headers, timeout=120)
     response.raise_for_status()
     return response.json()
@@ -806,14 +813,20 @@ def upload_worker_artifact_cache(
     worker_id = safe_worker_id(worker_id)
     path = f"/api/worker/jobs/{job_id}/artifact-cache"
     body = file_path.read_bytes()
-    headers = worker_headers(worker_token, path=path, body=body)
-    headers["Content-Type"] = media_type_for(file_path)
-    headers["X-Worker-Artifact-Id"] = artifact_id
-    headers["X-Worker-Artifact-Ref"] = artifact_ref_id
-    headers["X-Worker-Artifact-Name"] = display_name
-    headers["X-Worker-Artifact-File-Name"] = file_path.name
-    headers["X-Worker-Artifact-Source-Key"] = source_output_key
-    headers["X-Worker-Id"] = worker_id
+    headers = worker_headers(
+        worker_token,
+        path=path,
+        body=body,
+        extra_headers={
+            "Content-Type": media_type_for(file_path),
+            "X-Worker-Artifact-Id": artifact_id,
+            "X-Worker-Artifact-Ref": artifact_ref_id,
+            "X-Worker-Artifact-Name": display_name,
+            "X-Worker-Artifact-File-Name": file_path.name,
+            "X-Worker-Artifact-Source-Key": source_output_key,
+            "X-Worker-Id": worker_id,
+        },
+    )
     response = requests.post(endpoint(remote_base_url, path), data=body, headers=headers, timeout=300)
     response.raise_for_status()
     return response.json()
@@ -1017,8 +1030,10 @@ def worker_headers(
     body: str | bytes = b"",
     method: str = "POST",
     legacy_token: bool = False,
+    extra_headers: Mapping[str, Any] | None = None,
 ) -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
+    headers.update({str(key): str(value) for key, value in (extra_headers or {}).items()})
     if not path:
         if not legacy_token:
             raise ValueError("worker_headers requires a request path for HMAC signing")
@@ -1033,20 +1048,31 @@ def worker_headers(
             "X-Worker-Auth": "hmac-sha256",
             "X-Worker-Timestamp": timestamp,
             "X-Worker-Nonce": nonce,
-            "X-Worker-Signature": worker_signature(worker_token, timestamp=timestamp, method=method, path=path, body=body_bytes, nonce=nonce),
+            "X-Worker-Signature": worker_signature(
+                worker_token,
+                timestamp=timestamp,
+                method=method,
+                path=path,
+                body=body_bytes,
+                nonce=nonce,
+                headers=headers,
+            ),
         }
     )
     return headers
 
 
-def worker_signature(worker_token: str, *, timestamp: str, method: str, path: str, body: bytes, nonce: str | None = None) -> str:
-    body_hash = hashlib.sha256(body or b"").hexdigest()
-    parts = [str(timestamp), method.upper(), path]
-    if nonce:
-        parts.append(str(nonce))
-    parts.append(body_hash)
-    message = "\n".join(parts).encode("utf-8")
-    return hmac.new(worker_token.encode("utf-8"), message, hashlib.sha256).hexdigest()
+def worker_signature(
+    worker_token: str,
+    *,
+    timestamp: str,
+    method: str,
+    path: str,
+    body: bytes,
+    nonce: str | None = None,
+    headers: Mapping[str, Any] | None = None,
+) -> str:
+    return build_worker_hmac_signature(worker_token, timestamp=timestamp, method=method, path=path, body=body, nonce=nonce, headers=headers)
 
 
 def canonical_json(payload: dict[str, Any]) -> str:
