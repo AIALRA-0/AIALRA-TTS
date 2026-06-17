@@ -24,6 +24,7 @@ DOWNLOADABLE_OUTPUTS = {
     "zh_dub_bilingual_hardsub_mp4",
 }
 PREVIEWABLE_SUFFIXES = {".mp4", ".webm", ".wav", ".mp3", ".m4a"}
+ACTIVE_JOB_STATUSES = {"queued", "claimed", "running", "retrying", "paused"}
 
 
 def artifact_id(path: str | Path) -> str:
@@ -38,7 +39,11 @@ def artifact_catalog(config: dict[str, Any], jobs: list[dict[str, Any]] | None =
     job_rows = jobs or []
     deleted_job_ids = {str(job.get("id")) for job in job_rows if job_is_deleted(job) and job.get("id")}
     deleted_report_keys: set[str] = set()
+    active_previous_report_keys: set[str] = set()
     for job in job_rows:
+        previous_report = str(job.get("previous_result_report") or "")
+        if previous_report and job_is_active(job):
+            active_previous_report_keys.add(str(Path(previous_report).resolve()).lower())
         report = str(job.get("result_report") or "")
         if report:
             report_key = str(Path(report).resolve()).lower()
@@ -55,7 +60,9 @@ def artifact_catalog(config: dict[str, Any], jobs: list[dict[str, Any]] | None =
         except Exception:
             continue
         report_key = str(report_path.resolve()).lower()
-        if not include_deleted and (report_key in deleted_report_keys or row_references_deleted_job(report, deleted_job_ids)):
+        if not include_deleted and (
+            report_key in deleted_report_keys or report_key in active_previous_report_keys or row_references_deleted_job(report, deleted_job_ids)
+        ):
             continue
         job = job_by_report.get(report_key)
         source_deleted = bool(job and job_is_deleted(job)) or report_key in deleted_report_keys or row_references_deleted_job(report, deleted_job_ids)
@@ -134,6 +141,10 @@ def artifact_catalog(config: dict[str, Any], jobs: list[dict[str, Any]] | None =
 
 def job_is_deleted(job: dict[str, Any]) -> bool:
     return str(job.get("status") or "").strip().lower() == "deleted"
+
+
+def job_is_active(job: dict[str, Any]) -> bool:
+    return str(job.get("status") or "").strip().lower() in ACTIVE_JOB_STATUSES
 
 
 def row_references_deleted_job(row: dict[str, Any], deleted_job_ids: set[str]) -> bool:

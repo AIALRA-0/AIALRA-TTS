@@ -166,6 +166,31 @@ def test_artifact_records_filter_by_project_folder_job_and_kind(tmp_path):
     assert filter_artifact_records(rows, kind="bilingual_srt") == []
 
 
+def test_artifact_catalog_hides_previous_retry_outputs_by_default(tmp_path):
+    config = make_config(tmp_path)
+    out = Path(config["output_dir"])
+    video = out / "lecture_zh_dub.mp4"
+    video.write_bytes(b"old mp4")
+    report = out / "lecture_report.json"
+    report.write_text(
+        json.dumps({"name": "lecture", "user": "student", "project_id": "course", "outputs": {"zh_dub_mp4": str(video)}}),
+        encoding="utf-8",
+    )
+    jobs = [
+        {
+            "id": "job-1",
+            "status": "retrying",
+            "user": "student",
+            "previous_result_report": str(report),
+            "metadata": {"project_id": "course", "folder_id": "week_1"},
+        }
+    ]
+
+    rows = artifact_catalog(config, jobs)
+
+    assert rows == []
+
+
 def test_artifact_catalog_hides_deleted_job_artifacts_by_default(tmp_path):
     config = make_config(tmp_path)
     out = Path(config["output_dir"])
