@@ -37,19 +37,24 @@ Deployment steps:
    - Set `webui.execution_mode=worker_queue` on Contabo.
    - Keep `webui.allow_remote_media_uploads=false` on Contabo unless a deliberate short-lived cache policy is approved.
    - Do not copy local `config.yaml`; use template values and environment variables only.
-4. Run the web service behind Caddy or Nginx with HTTPS.
-5. Restrict upload size at reverse proxy and application level.
-6. Configure persistent volumes only for:
+4. Run the deployment guard before starting the public service:
+   ```bash
+   python -m ecse_localizer --config deploy/config.remote.yaml deploy-check
+   ```
+   Treat any `ERROR` as a hard stop. The check validates placeholder secrets, worker HMAC/nonce enforcement, remote media upload policy, privacy flags, signed URL TTL, remote quota bounds, private IPs, and Windows path leakage without printing secret values.
+5. Run the web service behind Caddy or Nginx with HTTPS.
+6. Restrict upload size at reverse proxy and application level.
+7. Configure persistent volumes only for:
    - metadata database or JSON store
    - thumbnails/previews cache
    - `webui.preview_dir` and `webui.preview_manifest` for low-bitrate preview rows
    - short-lived logs
-7. Configure a cleanup job:
+8. Configure a cleanup job:
    - remove expired previews
    - remove old soft-deleted job artifacts, logs, preview cache files, and stale preview manifest rows
    - preserve job JSON records, user metadata, project metadata, and template metadata
    - reject new uploads when quota would be exceeded
-8. Configure worker connectivity:
+9. Configure worker connectivity:
    - prefer WireGuard/Tailscale/cloudflared reverse tunnel
    - set `webui.worker_auth_mode: "hmac"` and `webui.worker_require_nonce: true`; require `X-Worker-Timestamp` + `X-Worker-Nonce` + `X-Worker-Signature` for worker heartbeat/API
    - treat `WORKER_SHARED_TOKEN` as an HMAC secret; do not send it as a plaintext production header
@@ -80,7 +85,8 @@ Deployment steps:
      .\install_worker_heartbeat_task.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
      .\install_worker_poll_task.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
      ```
-9. Validate:
+10. Validate:
+   - `python -m ecse_localizer --config deploy/config.remote.yaml deploy-check` returns PASS before the service is exposed
    - login works
    - project creation works
    - project folders can be created and selected for jobs

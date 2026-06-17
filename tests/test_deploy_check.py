@@ -1,0 +1,144 @@
+import json
+
+from ecse_localizer.cli import main
+from ecse_localizer.deploy_check import check_deploy_config
+
+
+def valid_remote_config() -> dict:
+    return {
+        "project_root": r"C:\build\repo",
+        "input_dir": "/srv/aialra/no-local-media",
+        "output_dir": "/srv/aialra/previews",
+        "work_dir": "/srv/aialra/runs",
+        "privacy": {
+            "allow_cloud_api": False,
+            "allow_upload_media": False,
+            "allow_voice_clone_without_consent": False,
+        },
+        "asr": {"supported_languages": ["auto", "en", "zh-CN"]},
+        "translation": {"supported_target_languages": ["zh-CN", "en"], "allow_unlisted_targets": True},
+        "tts": {"supported_languages": ["zh-CN", "yue"]},
+        "webui": {
+            "enabled": True,
+            "host": "0.0.0.0",
+            "execution_mode": "worker_queue",
+            "allow_remote_media_uploads": False,
+            "bind_local_only": False,
+            "upload_dir": "/srv/aialra/previews/uploads",
+            "preview_dir": "/srv/aialra/previews/cache",
+            "job_dir": "/srv/aialra/runs/webui_jobs",
+            "platform_dir": "/srv/aialra/platform",
+            "session_secret": "session-secret-value-000000000000000000",
+            "download_secret": "download-secret-value-00000000000000000",
+            "worker_token": "worker-hmac-secret-value-00000000000000",
+            "password": "strong-admin-password",
+            "worker_auth_mode": "hmac",
+            "worker_require_nonce": True,
+            "signed_url_ttl_seconds": 900,
+            "worker_signature_max_skew_seconds": 300,
+            "cleanup_older_than_days": 7,
+            "default_remote_quota_gb": 10,
+            "worker_preview_max_upload_mb": 256,
+            "worker_artifact_cache_max_upload_mb": 2048,
+            "max_active_jobs_per_user": 2,
+            "max_active_jobs_global": 8,
+        },
+    }
+
+
+def test_deploy_check_accepts_hardened_remote_config():
+    result = check_deploy_config(valid_remote_config())
+
+    assert result["pass"] is True
+    assert result["errors"] == 0
+
+
+def test_deploy_check_rejects_placeholders_and_unsafe_remote_mode():
+    config = valid_remote_config()
+    config["privacy"]["allow_cloud_api"] = True
+    config["webui"]["execution_mode"] = "local_subprocess"
+    config["webui"]["allow_remote_media_uploads"] = True
+    config["webui"]["worker_auth_mode"] = "hmac_or_token"
+    config["webui"]["worker_require_nonce"] = False
+    config["webui"]["session_secret"] = "${WEBUI_SESSION_SECRET}"
+    config["webui"]["worker_token"] = "change-me-token"
+    private_ip = ".".join(["10", "0", "0", "5"])
+    config["worker"] = {"tunnel_endpoint": f"https://{private_ip}"}
+
+    result = check_deploy_config(config)
+
+    codes = {item["code"] for item in result["findings"]}
+    assert result["pass"] is False
+    assert "must_be_false" in codes
+    assert "worker_queue_required" in codes
+    assert "remote_media_uploads_enabled" in codes
+    assert "weak_worker_auth" in codes
+    assert "must_be_true" in codes
+    assert "secret_placeholder" in codes
+    assert "private_ip_in_remote_config" in codes
+
+
+def test_deploy_check_does_not_echo_secret_values():
+    config = valid_remote_config()
+    config["webui"]["download_secret"] = config["webui"]["session_secret"]
+
+    result = check_deploy_config(config)
+
+    rendered = json.dumps(result, ensure_ascii=False)
+    assert "session-secret-value-000000000000000000" not in rendered
+    assert "download-secret-value-00000000000000000" not in rendered
+    assert "worker-hmac-secret-value-00000000000000" not in rendered
+    assert "secret_reused" in {item["code"] for item in result["findings"]}
+
+
+def test_deploy_check_cli_returns_nonzero_for_unsafe_config(tmp_path, capsys):
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        """
+input_dir: "/srv/aialra/no-local-media"
+output_dir: "/srv/aialra/previews"
+work_dir: "/srv/aialra/runs"
+privacy:
+  allow_cloud_api: false
+  allow_upload_media: false
+  allow_voice_clone_without_consent: false
+asr:
+  supported_languages: ["auto", "en"]
+translation:
+  supported_target_languages: ["zh-CN"]
+tts:
+  supported_languages: ["zh-CN"]
+webui:
+  enabled: true
+  host: "0.0.0.0"
+  execution_mode: "worker_queue"
+  allow_remote_media_uploads: false
+  bind_local_only: false
+  upload_dir: "/srv/aialra/previews/uploads"
+  preview_dir: "/srv/aialra/previews/cache"
+  job_dir: "/srv/aialra/runs/webui_jobs"
+  platform_dir: "/srv/aialra/platform"
+  session_secret: "change-me-session-secret"
+  download_secret: "download-secret-value-00000000000000000"
+  worker_token: "worker-hmac-secret-value-00000000000000"
+  password: "strong-admin-password"
+  worker_auth_mode: "hmac"
+  worker_require_nonce: true
+  signed_url_ttl_seconds: 900
+  worker_signature_max_skew_seconds: 300
+  cleanup_older_than_days: 7
+  default_remote_quota_gb: 10
+  worker_preview_max_upload_mb: 256
+  worker_artifact_cache_max_upload_mb: 2048
+  max_active_jobs_per_user: 2
+  max_active_jobs_global: 8
+""",
+        encoding="utf-8",
+    )
+
+    rc = main(["--config", str(path), "deploy-check"])
+
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert "secret_placeholder" in out
+    assert "change-me-session-secret" not in out

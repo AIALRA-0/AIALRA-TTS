@@ -128,6 +128,14 @@ Contabo deployment templates live in `deploy/`:
 - `deploy/systemd/*.service`
 - `deploy/systemd/*.timer`
 
+Before putting the remote WebUI behind a public domain, run the deployment guard on the target config:
+
+```bash
+python -m ecse_localizer --config deploy/config.remote.yaml deploy-check
+```
+
+It fails closed when production safety settings are missing: placeholder secrets, weak worker auth, missing nonce enforcement, remote media upload enabled, unsafe privacy flags, unresolved environment variables, private IPs, Windows paths, or unreasonable preview/cache quota values. The check reports field paths and issue codes only; it does not echo secret values.
+
 ## Backends
 
 - Subtitles: existing `.vtt/.srt/.ass` are preferred and normalized before ASR.
@@ -166,6 +174,7 @@ python -m ecse_localizer repair-fidelity --report "<VIDEO_ROOT>\_localizer_outpu
 python -m ecse_localizer tts-health
 python -m ecse_localizer worker-status
 python -m ecse_localizer worker-poll --remote-base-url "https://example.invalid" --worker-token "<token>" --once --dry-run
+python -m ecse_localizer --config deploy/config.remote.yaml deploy-check
 python -m ecse_localizer cleanup --older-than-days 7
 ```
 

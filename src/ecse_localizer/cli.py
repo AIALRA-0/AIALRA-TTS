@@ -15,6 +15,7 @@ from .audio_enhance import enhance_audio
 from .capabilities import language_capabilities
 from .compact import compact_rerender_from_report
 from .config import load_config, privacy_guard
+from .deploy_check import check_deploy_config
 from .ffmpeg_utils import cut_video, extract_audio, media_duration
 from .fidelity import run_fidelity_audit
 from .glossary import GlossaryTerm, extract_from_title, extract_glossary, write_glossary_json, write_glossary_tsv
@@ -95,14 +96,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--interval-seconds", type=int, default=15)
     p.add_argument("--once", action="store_true")
     p.add_argument("--dry-run", action="store_true")
+    p = sub.add_parser("deploy-check")
+    p.add_argument("--mode", choices=["remote"], default="remote")
+    p.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     config = load_config(args.config)
-    privacy_guard(config)
     try:
+        if args.command != "deploy-check":
+            privacy_guard(config)
         if args.command == "audit":
             return cmd_audit(args, config)
         if args.command == "smoke":
@@ -130,6 +135,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_cleanup(args, config)
         if args.command == "worker-poll":
             return cmd_worker_poll(args, config)
+        if args.command == "deploy-check":
+            return cmd_deploy_check(args, config)
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         traceback.print_exc()
@@ -267,6 +274,19 @@ def cmd_worker_status(config: dict[str, Any]) -> int:
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
+
+
+def cmd_deploy_check(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    result = check_deploy_config(config, mode=args.mode)
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        status = "PASS" if result["pass"] else "FAIL"
+        print(f"{status}: {result['errors']} error(s), {result['warnings']} warning(s)")
+        for finding in result["findings"]:
+            level = finding["level"].upper()
+            print(f"{level} [{finding['code']}] {finding['path']}: {finding['message']}")
+    return 0 if result["pass"] else 2
 
 
 def cmd_cleanup(args: argparse.Namespace, config: dict[str, Any]) -> int:
