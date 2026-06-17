@@ -47,6 +47,7 @@ webui:
   worker_token: "${WORKER_SHARED_TOKEN}"
   worker_auth_mode: "hmac"
   worker_signature_max_skew_seconds: 300
+  worker_require_nonce: true
   worker_requeue_stale_jobs: true
   worker_job_heartbeat_timeout_seconds: 300
   worker_job_max_auto_retries: 2

@@ -94,7 +94,7 @@ Windows worker queue polling:
 
 For Contabo production, set `webui.execution_mode: "worker_queue"` in the remote config. In this mode the web server only queues jobs; the Windows worker claims them and runs local GPU/CPU processing. If the worker heartbeat is missing or stale, the WebUI keeps the job queued and shows `等待 worker` instead of claiming the task has started.
 
-Worker API authentication supports signed requests. Production remote config should set `webui.worker_auth_mode: "hmac"` so worker heartbeat, claim, and status requests must include `X-Worker-Timestamp` and `X-Worker-Signature`; the shared secret stays in `WORKER_SHARED_TOKEN` and is not sent as a plaintext header. Local development can keep `hmac_or_token` for compatibility with older scripts.
+Worker API authentication supports signed requests. Production remote config should set `webui.worker_auth_mode: "hmac"` and `webui.worker_require_nonce: true` so worker heartbeat, claim, and status requests must include `X-Worker-Timestamp`, `X-Worker-Nonce`, and `X-Worker-Signature`; the shared secret stays in `WORKER_SHARED_TOKEN` and is not sent as a plaintext header. The nonce is part of the signature and is remembered for the timestamp window, so replaying a captured signed request is rejected. Local development can keep `hmac_or_token` for compatibility with older scripts.
 
 Queued jobs carry only portable worker arguments plus non-secret job metadata such as source language, target subtitle language, TTS language, quality mode, style, and the worker availability state at submit time. The Windows worker applies those values to a local generated job config before running the CLI.
 

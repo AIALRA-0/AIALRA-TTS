@@ -99,6 +99,7 @@ class WebState:
         self.store = PlatformStore(self.config)
         self.store.bootstrap()
         self.processes: dict[str, subprocess.Popen[str]] = {}
+        self.worker_nonce_cache: dict[str, int] = {}
         self.lock = threading.Lock()
 
     @property
@@ -1147,6 +1148,7 @@ def require_worker_token(request: Request, state: WebState, body: bytes = b"") -
 def require_worker_hmac(request: Request, expected_token: str, body: bytes) -> None:
     timestamp = request.headers.get("x-worker-timestamp", "")
     signature = request.headers.get("x-worker-signature", "")
+    nonce = request.headers.get("x-worker-nonce", "").strip()
     if not timestamp or not signature:
         raise HTTPException(status_code=401, detail="Worker HMAC timestamp and signature are required")
     try:
@@ -1157,20 +1159,53 @@ def require_worker_hmac(request: Request, expected_token: str, body: bytes) -> N
     max_skew = int(state.webui.get("worker_signature_max_skew_seconds", 300) or 300)
     if abs(int(time.time()) - timestamp_int) > max(30, max_skew):
         raise HTTPException(status_code=401, detail="Worker HMAC timestamp is outside the allowed window")
+    mode = str(state.webui.get("worker_auth_mode", "hmac_or_token") or "hmac_or_token").lower()
+    if worker_hmac_requires_nonce(state, mode) and not nonce:
+        raise HTTPException(status_code=401, detail="Worker HMAC nonce is required")
+    if nonce and not re.fullmatch(r"[A-Za-z0-9_.:-]{8,128}", nonce):
+        raise HTTPException(status_code=401, detail="Invalid worker HMAC nonce")
     expected_signature = worker_hmac_signature(
         expected_token,
         timestamp=timestamp,
         method=request.method,
         path=request.url.path,
         body=body,
+        nonce=nonce or None,
     )
     if not hmac.compare_digest(signature, expected_signature):
         raise HTTPException(status_code=401, detail="Invalid worker HMAC signature")
+    if nonce:
+        remember_worker_nonce(state, nonce, timestamp_int=timestamp_int, max_skew_seconds=max_skew)
 
 
-def worker_hmac_signature(worker_token: str, *, timestamp: str, method: str, path: str, body: bytes) -> str:
+def worker_hmac_requires_nonce(state: WebState, mode: str) -> bool:
+    configured = state.webui.get("worker_require_nonce")
+    if configured is not None:
+        if isinstance(configured, str):
+            return configured.strip().lower() in {"1", "true", "yes", "on", "required"}
+        return bool(configured)
+    return mode in {"hmac", "signed", "signature"}
+
+
+def remember_worker_nonce(state: WebState, nonce: str, *, timestamp_int: int, max_skew_seconds: int) -> None:
+    now_epoch = int(time.time())
+    cutoff = now_epoch - max(30, max_skew_seconds)
+    with state.lock:
+        for cached_nonce, cached_timestamp in list(state.worker_nonce_cache.items()):
+            if int(cached_timestamp) < cutoff:
+                state.worker_nonce_cache.pop(cached_nonce, None)
+        if nonce in state.worker_nonce_cache:
+            raise HTTPException(status_code=401, detail="Worker HMAC nonce has already been used")
+        state.worker_nonce_cache[nonce] = timestamp_int
+
+
+def worker_hmac_signature(worker_token: str, *, timestamp: str, method: str, path: str, body: bytes, nonce: str | None = None) -> str:
     body_hash = hashlib.sha256(body or b"").hexdigest()
-    message = "\n".join([str(timestamp), method.upper(), path, body_hash]).encode("utf-8")
+    parts = [str(timestamp), method.upper(), path]
+    if nonce:
+        parts.append(str(nonce))
+    parts.append(body_hash)
+    message = "\n".join(parts).encode("utf-8")
     return hmac.new(worker_token.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 

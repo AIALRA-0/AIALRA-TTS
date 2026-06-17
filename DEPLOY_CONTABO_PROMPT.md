@@ -51,7 +51,7 @@ Deployment steps:
    - reject new uploads when quota would be exceeded
 8. Configure worker connectivity:
    - prefer WireGuard/Tailscale/cloudflared reverse tunnel
-   - set `webui.worker_auth_mode: "hmac"` and require `X-Worker-Timestamp` + `X-Worker-Signature` for worker heartbeat/API
+   - set `webui.worker_auth_mode: "hmac"` and `webui.worker_require_nonce: true`; require `X-Worker-Timestamp` + `X-Worker-Nonce` + `X-Worker-Signature` for worker heartbeat/API
    - treat `WORKER_SHARED_TOKEN` as an HMAC secret; do not send it as a plaintext production header
    - mark worker offline after missed heartbeats
    - enable stale worker-job recovery with `webui.worker_requeue_stale_jobs=true`, choose a conservative `webui.worker_job_heartbeat_timeout_seconds`, and cap retries with `webui.worker_job_max_auto_retries`
@@ -97,6 +97,7 @@ Deployment steps:
    - project quota usage is visible for generated managed artifacts
    - worker heartbeat appears online
    - unsigned worker requests are rejected when `worker_auth_mode=hmac`
+   - replaying the same signed worker request with the same nonce is rejected
    - job submission while the worker is offline shows a queued/waiting state and records the worker status at submit time
    - GPU/CPU metrics update
    - dashboard metrics in `worker_queue` mode come from the Windows worker heartbeat and contain no Windows path fields

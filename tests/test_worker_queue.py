@@ -143,6 +143,91 @@ def test_worker_hmac_signature_is_accepted_without_static_token(tmp_path):
     body_text = canonical_json({"worker_id": "worker-1"})
     body = body_text.encode("utf-8")
     timestamp = str(int(time.time()))
+    nonce = "nonce-" + "1" * 16
+    headers = {
+        "x-worker-timestamp": timestamp,
+        "x-worker-nonce": nonce,
+        "x-worker-signature": worker_signature(
+            "worker-token",
+            timestamp=timestamp,
+            method="POST",
+            path="/api/worker/heartbeat",
+            body=body,
+            nonce=nonce,
+        ),
+    }
+
+    require_worker_token(fake_worker_request(state, headers, path="/api/worker/heartbeat"), state, body)
+
+
+def test_signed_worker_headers_do_not_send_plaintext_token():
+    headers = worker_headers("worker-token", path="/api/worker/jobs/claim", body=b"{}")
+    assert headers["X-Worker-Auth"] == "hmac-sha256"
+    assert "X-Worker-Signature" in headers
+    assert "X-Worker-Timestamp" in headers
+    assert "X-Worker-Nonce" in headers
+    assert "X-Worker-Token" not in headers
+
+
+def test_worker_hmac_rejects_missing_nonce_in_strict_mode(tmp_path):
+    state = WebState(write_config(tmp_path))
+    state.webui["worker_auth_mode"] = "hmac"
+    body = canonical_json({"worker_id": "worker-1"}).encode("utf-8")
+    timestamp = str(int(time.time()))
+    headers = {
+        "x-worker-timestamp": timestamp,
+        "x-worker-signature": worker_signature(
+            "worker-token",
+            timestamp=timestamp,
+            method="POST",
+            path="/api/worker/heartbeat",
+            body=body,
+        ),
+    }
+
+    try:
+        require_worker_token(fake_worker_request(state, headers, path="/api/worker/heartbeat"), state, body)
+    except Exception as exc:
+        assert "nonce is required" in str(exc)
+    else:
+        raise AssertionError("expected strict HMAC mode to require nonce")
+
+
+def test_worker_hmac_rejects_replayed_nonce(tmp_path):
+    state = WebState(write_config(tmp_path))
+    state.webui["worker_auth_mode"] = "hmac"
+    body = canonical_json({"worker_id": "worker-1"}).encode("utf-8")
+    timestamp = str(int(time.time()))
+    nonce = "nonce-" + "2" * 16
+    headers = {
+        "x-worker-timestamp": timestamp,
+        "x-worker-nonce": nonce,
+        "x-worker-signature": worker_signature(
+            "worker-token",
+            timestamp=timestamp,
+            method="POST",
+            path="/api/worker/heartbeat",
+            body=body,
+            nonce=nonce,
+        ),
+    }
+
+    request = fake_worker_request(state, headers, path="/api/worker/heartbeat")
+    require_worker_token(request, state, body)
+    try:
+        require_worker_token(request, state, body)
+    except Exception as exc:
+        assert "nonce has already been used" in str(exc)
+    else:
+        raise AssertionError("expected replayed worker nonce to be rejected")
+
+
+def test_worker_hmac_can_allow_legacy_signature_when_nonce_not_required(tmp_path):
+    state = WebState(write_config(tmp_path))
+    state.webui["worker_auth_mode"] = "hmac"
+    state.webui["worker_require_nonce"] = False
+    body = canonical_json({"worker_id": "worker-1"}).encode("utf-8")
+    timestamp = str(int(time.time()))
     headers = {
         "x-worker-timestamp": timestamp,
         "x-worker-signature": worker_signature(
@@ -155,14 +240,6 @@ def test_worker_hmac_signature_is_accepted_without_static_token(tmp_path):
     }
 
     require_worker_token(fake_worker_request(state, headers, path="/api/worker/heartbeat"), state, body)
-
-
-def test_signed_worker_headers_do_not_send_plaintext_token():
-    headers = worker_headers("worker-token", path="/api/worker/jobs/claim", body=b"{}")
-    assert headers["X-Worker-Auth"] == "hmac-sha256"
-    assert "X-Worker-Signature" in headers
-    assert "X-Worker-Timestamp" in headers
-    assert "X-Worker-Token" not in headers
 
 
 def test_worker_hmac_mode_rejects_legacy_static_token(tmp_path):

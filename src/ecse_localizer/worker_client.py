@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -884,12 +885,14 @@ def worker_headers(worker_token: str, *, path: str | None = None, body: str | by
     headers = {"Content-Type": "application/json"}
     if path:
         timestamp = str(int(time.time()))
+        nonce = uuid.uuid4().hex
         body_bytes = body.encode("utf-8") if isinstance(body, str) else body
         headers.update(
             {
                 "X-Worker-Auth": "hmac-sha256",
                 "X-Worker-Timestamp": timestamp,
-                "X-Worker-Signature": worker_signature(worker_token, timestamp=timestamp, method=method, path=path, body=body_bytes),
+                "X-Worker-Nonce": nonce,
+                "X-Worker-Signature": worker_signature(worker_token, timestamp=timestamp, method=method, path=path, body=body_bytes, nonce=nonce),
             }
         )
     else:
@@ -897,9 +900,13 @@ def worker_headers(worker_token: str, *, path: str | None = None, body: str | by
     return headers
 
 
-def worker_signature(worker_token: str, *, timestamp: str, method: str, path: str, body: bytes) -> str:
+def worker_signature(worker_token: str, *, timestamp: str, method: str, path: str, body: bytes, nonce: str | None = None) -> str:
     body_hash = hashlib.sha256(body or b"").hexdigest()
-    message = "\n".join([str(timestamp), method.upper(), path, body_hash]).encode("utf-8")
+    parts = [str(timestamp), method.upper(), path]
+    if nonce:
+        parts.append(str(nonce))
+    parts.append(body_hash)
+    message = "\n".join(parts).encode("utf-8")
     return hmac.new(worker_token.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
