@@ -144,7 +144,7 @@ Deployment steps:
    - older JSON job records without the current schema are normalized on read and remain visible/retryable when their state allows it
    - running jobs refresh progress/log-tail summaries without exposing local Windows paths or full logs
    - failed jobs can be retried without rewriting the base config
-   - deleted jobs are soft-deleted from normal history before any physical artifact cleanup
+   - deleted jobs are soft-deleted from normal history, visible through the deleted history filter, and restorable before any physical artifact cleanup
    - cleanup dry-runs report old deleted-job artifacts without deleting them; cleanup apply removes only managed output/run/upload/job-log/preview files and preserves metadata JSON
    - a queued job can be claimed through `/api/worker/jobs/claim`
    - a queued `repair_fidelity` job claims portable worker args beginning with `repair-fidelity`

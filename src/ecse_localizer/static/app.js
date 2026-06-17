@@ -1343,6 +1343,7 @@ function jobFilterQuery() {
   if (project) params.set("project_id", project);
   if (folder) params.set("folder_id", folder);
   if (status) params.set("status", status);
+  if (status === "deleted") params.set("include_deleted", "true");
   const query = params.toString();
   return query ? `?${query}` : "";
 }
@@ -1415,7 +1416,17 @@ function renderJobs() {
       });
       actions.appendChild(retry);
     }
-    if (job.status !== "deleted") {
+    if (job.status === "deleted") {
+      const restore = document.createElement("button");
+      restore.type = "button";
+      restore.className = "secondary";
+      restore.textContent = "恢复记录";
+      restore.addEventListener("click", (event) => {
+        event.stopPropagation();
+        restoreJob(job.id);
+      });
+      actions.appendChild(restore);
+    } else {
       const del = document.createElement("button");
       del.type = "button";
       del.className = "danger";
@@ -1526,6 +1537,18 @@ async function retryJob(jobId) {
     await loadJobLog(result.job.id, false);
   } catch (error) {
     toast(`重试失败：${error.message}`);
+  }
+}
+
+async function restoreJob(jobId) {
+  try {
+    const result = await api(`/api/jobs/${encodeURIComponent(jobId)}/restore`, { method: "POST", body: "{}" });
+    state.selectedJob = result.job.id;
+    toast("任务记录已恢复");
+    await refreshJobs();
+    await loadJobLog(result.job.id, false);
+  } catch (error) {
+    toast(`恢复失败：${error.message}`);
   }
 }
 

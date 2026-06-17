@@ -41,7 +41,7 @@ Open:
 http://127.0.0.1:7861
 ```
 
-Set real credentials in local `config.yaml` or `.env`; never commit them. The WebUI supports uploads, task history, project/folder metadata, project and folder editing/archiving/restoring, project quotas, reusable parameter templates, invite-only users, admin-managed user status/quotas, common tuning parameters, logs, quota checks, local worker health/metrics, failed-job retry, and soft-deleting job records.
+Set real credentials in local `config.yaml` or `.env`; never commit them. The WebUI supports uploads, task history, project/folder metadata, project and folder editing/archiving/restoring, project quotas, reusable parameter templates, invite-only users, admin-managed user status/quotas, common tuning parameters, logs, quota checks, local worker health/metrics, failed-job retry, and soft-deleting/restoring job records.
 
 Per-job language, quality, and style settings are written to generated job config files under `runs/`. The base `config.yaml` stays local and is not mutated by submitted jobs.
 
@@ -63,7 +63,7 @@ Job records are JSON files with `schema_version`. WebUI normalizes older records
 
 Project quota is tracked as generated managed artifact usage per project. Original course videos stay outside project cleanup and remain protected. Project and folder deletion in the UI is soft archive: archived targets are hidden from new-job selectors and rejected for new jobs, but old job records keep their original `project_id` and `folder_id` for audit history. The project page can show archived targets and restore them when they need to become selectable again.
 
-Cleanup is intentionally two-stage: deleting a job first hides the record from normal history by marking it `deleted`; the scheduled `cleanup` command later removes that deleted job's report bundle, logs, preview cache files, and stale manifest rows after `webui.cleanup_older_than_days`. The job JSON record remains as audit metadata unless you remove it manually from the managed job store.
+Cleanup is intentionally two-stage: deleting a job first hides the record from normal history by marking it `deleted`; choose the `deleted` status filter in the history UI or call `/api/jobs?status=deleted` to review the recycle-bin view, then restore with `/api/jobs/{job_id}/restore` before cleanup if needed. Restoring a record does not automatically rerun queued/running work; use retry explicitly when you want it to run again. The scheduled `cleanup` command later removes that deleted job's report bundle, logs, preview cache files, and stale manifest rows after `webui.cleanup_older_than_days`. The job JSON record remains as audit metadata unless you remove it manually from the managed job store.
 
 ## Remote + Local Architecture
 

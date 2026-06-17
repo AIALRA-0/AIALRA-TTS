@@ -25,6 +25,7 @@ from ecse_localizer.webui import (
     require_worker_token,
     read_job,
     requeue_stale_worker_jobs,
+    restore_deleted_job,
     resume_job_record,
     retry_job_record,
     save_worker_artifact_cache_upload,
@@ -755,10 +756,36 @@ def test_soft_delete_job_hides_record_from_default_history(tmp_path):
         user="admin",
         metadata={},
     )
+    update_job(state, record["id"], {"status": "done", "returncode": 0})
     deleted = soft_delete_job(state, record["id"], deleted_by="admin")
     assert deleted["status"] == "deleted"
     assert list_jobs(state, "admin") == []
     assert list_jobs(state, "admin", include_deleted=True)[0]["id"] == record["id"]
+    restored = restore_deleted_job(state, record["id"], restored_by="admin")
+    assert restored["status"] == "done"
+    assert list_jobs(state, "admin")[0]["id"] == record["id"]
+
+
+def test_restore_deleted_active_job_does_not_requeue(tmp_path):
+    state = WebState(write_config(tmp_path))
+    record = create_job_record(
+        state,
+        "audit",
+        "Audit input directory",
+        ["python", "-m", "ecse_localizer", "--config", "remote.yaml", "audit", "--input", "x"],
+        user="admin",
+        metadata={"worker_args": ["audit", "--input", "x"]},
+        dispatch_target="worker",
+    )
+    deleted = soft_delete_job(state, record["id"], deleted_by="admin")
+
+    assert deleted["previous_status"] == "queued"
+    restored = restore_deleted_job(state, record["id"], restored_by="admin")
+
+    assert restored["status"] == "failed"
+    assert restored["previous_status"] == "deleted"
+    assert restored["restored_by"] == "admin"
+    assert "Restored from deleted history" in restored["error"]
 
 
 def test_retry_worker_job_requeues_failed_record(tmp_path):

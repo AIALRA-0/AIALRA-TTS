@@ -102,6 +102,18 @@ def test_static_project_controls_have_update_actions():
     assert 'method: "PATCH"' in js
 
 
+def test_static_job_history_has_deleted_filter_and_restore_action():
+    static_root = Path(__file__).parents[1] / "src" / "ecse_localizer" / "static"
+    html = (static_root / "index.html").read_text(encoding="utf-8")
+    js = (static_root / "app.js").read_text(encoding="utf-8")
+
+    assert '<option value="deleted">deleted</option>' in html
+    assert 'params.set("include_deleted", "true")' in js
+    assert "恢复记录" in js
+    assert "async function restoreJob(jobId)" in js
+    assert '`/api/jobs/${encodeURIComponent(jobId)}/restore`' in js
+
+
 def test_webui_login_project_and_quota(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
@@ -616,6 +628,50 @@ def test_jobs_endpoint_filters_by_project_folder_and_status(tmp_path):
     response = client.get("/api/jobs?status=running")
     assert response.status_code == 200
     assert [job["id"] for job in response.json()["jobs"]] == [second["id"]]
+
+
+def test_deleted_job_can_be_filtered_and_restored(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    record = create_job_record(
+        state,
+        "audit",
+        "Audit course",
+        ["python", "-m", "ecse_localizer", "audit"],
+        user="admin",
+        metadata={},
+        dispatch_target="worker",
+    )
+    update_job(state, record["id"], {"status": "done", "returncode": 0})
+
+    response = client.delete(f"/api/jobs/{record['id']}")
+    assert response.status_code == 200
+    assert response.json()["job"]["status"] == "deleted"
+
+    response = client.get("/api/jobs")
+    assert response.status_code == 200
+    assert record["id"] not in {job["id"] for job in response.json()["jobs"]}
+
+    response = client.get("/api/jobs?status=deleted")
+    assert response.status_code == 200
+    assert [job["id"] for job in response.json()["jobs"]] == [record["id"]]
+
+    response = client.post(f"/api/jobs/{record['id']}/restore", json={})
+    assert response.status_code == 200
+    job = response.json()["job"]
+    assert job["status"] == "done"
+    assert job["restored_by"] == "admin"
+
+    response = client.get("/api/jobs")
+    assert response.status_code == 200
+    assert record["id"] in {job["id"] for job in response.json()["jobs"]}
 
 
 def test_ownerless_legacy_jobs_are_admin_only(tmp_path):

@@ -766,9 +766,11 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         project_id: str = "",
         folder_id: str = "",
         status: str = "",
+        include_deleted: bool = False,
         user: str = Depends(require_user),
     ) -> dict[str, Any]:
-        records = filter_job_records(list_jobs(state, user), project_id=project_id, folder_id=folder_id, status=status)
+        show_deleted = include_deleted or normalize_job_status(status) == "deleted"
+        records = filter_job_records(list_jobs(state, user, include_deleted=show_deleted), project_id=project_id, folder_id=folder_id, status=status)
         return {"jobs": [public_job_record(record) for record in records]}
 
     @app.get("/api/jobs/{job_id}")
@@ -907,6 +909,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         thread = threading.Thread(target=run_job, args=(state, record["id"]), daemon=True)
         thread.start()
         return {"ok": True, "job": public_job_record(record)}
+
+    @app.post("/api/jobs/{job_id}/restore")
+    def restore_job(job_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
+        record = read_job(state, job_id)
+        if not record or not can_access_record(state, user, record):
+            raise HTTPException(status_code=404, detail="Job not found")
+        restored = restore_deleted_job(state, job_id, restored_by=user)
+        return {"ok": True, "job": public_job_record(restored)}
 
     @app.delete("/api/jobs/{job_id}")
     def delete_job(job_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
@@ -2582,6 +2592,32 @@ def soft_delete_job(state: WebState, job_id: str, *, deleted_by: str) -> dict[st
             "updated_at": iso_now(),
         },
     )
+    return read_job(state, job_id) or record
+
+
+def restore_deleted_job(state: WebState, job_id: str, *, restored_by: str) -> dict[str, Any]:
+    record = read_job(state, job_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Job not found")
+    status = normalize_job_status(str(record.get("status") or ""))
+    if status != "deleted":
+        raise HTTPException(status_code=409, detail=f"Job is not deleted: {status}")
+    previous_status = normalize_job_status(str(record.get("previous_status") or "failed"))
+    restored_status = previous_status if previous_status in TERMINAL_JOB_STATUSES else "failed"
+    changes: dict[str, Any] = {
+        "status": restored_status,
+        "previous_status": "deleted",
+        "restored_at": iso_now(),
+        "restored_by": restored_by,
+        "updated_at": iso_now(),
+        "cancel_requested": False,
+        "cancel_requested_at": None,
+        "cancel_requested_by": None,
+        "cancel_handled_at": None,
+    }
+    if restored_status == "failed" and not record.get("error"):
+        changes["error"] = "Restored from deleted history; retry manually if this job should run again."
+    update_job(state, job_id, changes)
     return read_job(state, job_id) or record
 
 
