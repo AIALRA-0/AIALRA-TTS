@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .text_protection import protect_text
+
 
 HIGH_SEVERITY_QUALITY_FLAGS = {
     "SUMMARY_STYLE_TRANSLATION",
@@ -52,6 +54,55 @@ def assess_translation_quality(
         flags.append("HIGH_ASCII_RATIO_TRANSLATION")
 
     return sorted(set(flags))
+
+
+def protected_terms_missing(source: str, translated: str) -> list[str]:
+    """Return source technical tokens that should survive translation intact."""
+    terms = protected_source_terms(source)
+    missing: list[str] = []
+    for term in terms:
+        if not protected_term_present(term, translated):
+            missing.append(term)
+    return missing
+
+
+def protected_source_terms(source: str) -> list[str]:
+    protected = protect_text(source or "")
+    terms: list[str] = []
+    seen: set[str] = set()
+    for raw in protected.mapping.values():
+        term = raw.strip()
+        if not term:
+            continue
+        normalized = normalize_protected_term(term)
+        if not normalized or normalized in seen:
+            continue
+        terms.append(term)
+        seen.add(normalized)
+    return terms
+
+
+def protected_term_present(term: str, translated: str) -> bool:
+    text = translated or ""
+    variants = protected_term_variants(term)
+    compact_text_value = compact_protected_value(text)
+    return any(variant in text or compact_protected_value(variant) in compact_text_value for variant in variants)
+
+
+def protected_term_variants(term: str) -> list[str]:
+    stripped = term.strip()
+    variants = [stripped]
+    if len(stripped) >= 2 and stripped[0] == "`" and stripped[-1] == "`":
+        variants.append(stripped[1:-1])
+    return [variant for variant in variants if variant]
+
+
+def normalize_protected_term(term: str) -> str:
+    return compact_protected_value(term).lower()
+
+
+def compact_protected_value(value: str) -> str:
+    return re.sub(r"[\s`]+", "", value or "")
 
 
 def quality_flag_severity(flags: list[str]) -> str:

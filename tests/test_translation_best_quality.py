@@ -106,6 +106,40 @@ def test_llm_chunk_payload_includes_reconstructed_paragraph_context():
     assert [row[0].id for row in results] == [1, 2]
 
 
+def test_llm_chunk_flags_missing_protected_terms():
+    config = {"translation": {"max_zh_chars_per_second": 80, "max_zh_chars_per_subtitle_line": 80}}
+    segments = [
+        Segment(
+            1,
+            0.0,
+            2.0,
+            "Use Vout = Vin * R2 / (R1 + R2), sensor_readout.py, and https://example.com.",
+        )
+    ]
+    fake = FakeLLMClient()
+
+    results = request_llm_chunk(
+        segments,
+        0,
+        segments,
+        "",
+        config,
+        fake,
+        "literal",
+        "rewrite",
+        "style",
+        "",
+        {},
+    )
+
+    flags = results[0][3]
+    missing_flags = [flag for flag in flags if flag.startswith("MISSING_PROTECTED_TERM:")]
+    assert missing_flags
+    assert "Vout = Vin * R2 / (R1 + R2)" in missing_flags[0]
+    assert "sensor_readout.py" in missing_flags[0]
+    assert "https://example.com" in missing_flags[0]
+
+
 class FakeLLMClient:
     model = "qwen2.5:14b-instruct"
 

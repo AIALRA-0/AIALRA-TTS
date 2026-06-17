@@ -59,11 +59,12 @@ def test_qa_reports_translation_quality_heuristics():
 
 
 def test_fidelity_heuristics_include_quality_flags_and_repair_selection():
-    en = [{"id": 4, "text": "We compare the two algorithms."}]
+    en = [{"id": 4, "text": "We derive Vout = Vin * R2 / (R1 + R2) and then use sensor_readout.py."}]
     zh = [{"id": 4, "text": "这一段主要围绕两个算法展开。"}]
 
     issues = heuristic_fidelity_issues(en, zh)
     assert any(issue["type"] == "translation_quality_heuristic" for issue in issues)
+    assert any(issue["type"] == "protected_term_mismatch" for issue in issues)
 
     fidelity = {"reviews": [], "issues": issues}
     assert 4 in select_repair_ids(fidelity, max_score=3, include_high=True)

@@ -10,7 +10,7 @@ from .glossary import GlossaryTerm
 from .llm_local import LocalLLMClient
 from .subtitle_io import Segment
 from .text_protection import protect_text, restore_text
-from .translation_quality import assess_translation_quality
+from .translation_quality import assess_translation_quality, protected_terms_missing
 
 
 @dataclass
@@ -324,6 +324,7 @@ def rescue_translate_single_segment(
                 flags.append("ZH_OVER_TARGET_LENGTH")
                 if config.get("translation", {}).get("hard_truncate_over_limit", False):
                     zh = compress_to_limit(zh, limit)
+            flags.extend(protected_term_flags(seg.text, zh))
             flags.extend(assess_translation_quality(seg.text, zh, lit, config))
             return (seg, normalize_zh(lit), zh, flags, limit)
         except Exception as exc:
@@ -423,6 +424,7 @@ def request_llm_chunk(
             flags.append("ZH_OVER_TARGET_LENGTH")
             if config.get("translation", {}).get("hard_truncate_over_limit", False):
                 zh = compress_to_limit(zh, limit)
+        flags.extend(protected_term_flags(seg.text, zh))
         flags.extend(assess_translation_quality(seg.text, zh, lit, config))
         results.append((seg, normalize_zh(lit), zh, flags, limit))
     return results
@@ -663,6 +665,13 @@ def sanitize_flags(flags: object) -> list[str]:
     return cleaned
 
 
+def protected_term_flags(source: str, zh: str) -> list[str]:
+    missing = protected_terms_missing(source, zh)
+    if not missing:
+        return []
+    return ["MISSING_PROTECTED_TERM:" + ",".join(missing[:6])]
+
+
 def extract_acronyms(text: str) -> list[str]:
     return re.findall(r"(?<![A-Za-z0-9])[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)*(?![A-Za-z0-9])", text or "")
 
@@ -702,6 +711,7 @@ def translate_with_rules(
             lecture = apply_light_dialect(lecture, config.get("dialect", {}).get("target", "mandarin"))
         limit = target_limit(seg, config)
         lecture = compress_to_limit(lecture, limit)
+        flags.extend(protected_term_flags(seg.text, lecture))
         flags.extend(assess_translation_quality(seg.text, lecture, literal, config))
         zh_segments.append(Segment(seg.id, seg.start, seg.end, lecture))
         traces.append(

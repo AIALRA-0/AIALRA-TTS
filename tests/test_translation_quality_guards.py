@@ -1,4 +1,5 @@
 from ecse_localizer.qa import has_usable_chinese, looks_like_non_translation_narration
+from ecse_localizer.translation_quality import protected_terms_missing
 from ecse_localizer.translate import (
     is_forbidden_non_translation,
     is_usable_zh,
@@ -52,6 +53,21 @@ def test_protected_number_repair_appends_missing_number():
         "In a hundred and 25.",
     )
     assert "25" in repaired
+
+
+def test_missing_protected_terms_detects_formula_code_and_url():
+    source = "Use Vout = Vin * R2 / (R1 + R2), sensor_readout.py, and https://example.com."
+    missing = protected_terms_missing(source, "这里使用分压器公式和传感器读出脚本。")
+
+    assert "Vout = Vin * R2 / (R1 + R2)" in missing
+    assert "sensor_readout.py" in missing
+    assert "https://example.com" in missing
+
+
+def test_missing_protected_terms_accepts_compact_spacing():
+    source = "Set ECSE 4961 to 5 kHz."
+
+    assert protected_terms_missing(source, "这里设置 ECSE4961，并使用 5kHz。") == []
 
 
 def test_sanitize_flags_drops_placeholders():

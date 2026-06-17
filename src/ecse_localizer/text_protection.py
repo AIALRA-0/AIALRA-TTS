@@ -6,8 +6,9 @@ from dataclasses import dataclass
 
 PROTECT_PATTERNS = [
     r"`[^`]+`",
-    r"https?://[^\s<>()]+",
+    r"https?://[^\s<>()]+[A-Za-z0-9/#=_-]",
     r"[A-Za-z]:\\(?:[^\s\\/:*?\"<>|\r\n]+\\)*[^\s\\/:*?\"<>|\r\n]+",
+    r"\b[A-Za-z][A-Za-z0-9_]*(?:\s*[=+\-*/^]\s*(?:[A-Za-z][A-Za-z0-9_]*|\d+(?:\.\d+)?|\([A-Za-z0-9_+\-*/^\s.]+\)))+",
     r"\bO\([^)]+\)",
     r"\b[A-Za-z]_[A-Za-z0-9]+\b",
     r"\b(?:ResNet|VGG|BERT|Qwen|GPT|Llama|ECSE|CD-SEM|AMHS|EUV|ALD|CMP|SPC|OPC)(?:[-\s]?\d+(?:\.\d+)*)?\b",
