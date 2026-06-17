@@ -141,6 +141,7 @@ Contabo deployment templates live in `deploy/`:
 - `deploy/nginx.conf.example`
 - `deploy/config.remote.example.yaml`
 - `deploy/bootstrap_contabo.py`
+- `deploy/CONTABO_DEPLOY_PROMPT.md`
 - `deploy/REMOTE_TUNNEL_GUIDE.md`
 - `deploy/systemd/*.service`
 - `deploy/systemd/*.timer`
