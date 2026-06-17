@@ -636,6 +636,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         template_params = template_params_for_job(state, user, body)
         metadata = job_metadata_from_body(body, template_params=template_params)
         validate_job_project(state, user, metadata)
+        enforce_storage_quota_before_job(state, user, metadata)
         enforce_active_job_limits(state, user)
         worker_info: dict[str, Any] | None = None
         if worker_queue:
@@ -1227,7 +1228,7 @@ def worker_status_changes(body: dict[str, Any]) -> dict[str, Any]:
         "command",
     ]:
         if key in body:
-            changes[key] = body[key]
+            changes[key] = sanitize_metrics(body[key]) if key == "metrics" else body[key]
     result = body.get("result")
     if isinstance(result, dict):
         if result.get("report"):
@@ -1291,6 +1292,37 @@ def validate_job_project(state: WebState, user: str, metadata: dict[str, Any]) -
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def enforce_storage_quota_before_job(state: WebState, user: str, metadata: dict[str, Any]) -> None:
+    quota = state.store.quota_status(user)
+    local_quota = int(quota.get("local_quota_bytes") or 0)
+    local_used = int(quota.get("local_used_bytes") or 0)
+    if local_quota > 0 and local_used >= local_quota:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "Local worker quota exceeded. "
+                f"Used bytes: {local_used}; quota bytes: {local_quota}; source: {quota.get('local_usage_source')}"
+            ),
+        )
+
+    project_id = str(metadata.get("project_id") or "")
+    if not project_id:
+        return
+    project = state.store.get_project(user, project_id, admin=is_admin(state, user))
+    if not project:
+        return
+    project_quota = int(project.get("quota_project_bytes") or 0)
+    if project_quota <= 0:
+        return
+    usage = project_artifact_usage(state, user, admin=is_admin(state, user))
+    project_used = int(usage.get(project_id, 0))
+    if project_used >= project_quota:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Project quota exceeded. Used bytes: {project_used}; quota bytes: {project_quota}",
+        )
 
 
 def projects_with_usage(state: WebState, user: str) -> list[dict[str, Any]]:

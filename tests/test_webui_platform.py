@@ -1,3 +1,4 @@
+import json
 from io import BytesIO
 from pathlib import Path
 
@@ -314,6 +315,7 @@ def test_worker_status_update_refreshes_heartbeat_and_job_progress(tmp_path):
     assert job["status"] == "running"
     assert job["progress"] == 33
     assert job["log_tail"] == "overall progress: 33%"
+    assert "path" not in job["metrics"]["disk"]
 
     response = client.get("/api/dashboard")
     assert response.status_code == 200
@@ -325,6 +327,72 @@ def test_worker_status_update_refreshes_heartbeat_and_job_progress(tmp_path):
     assert response.json()["metrics"]["source"] == "worker_heartbeat"
     assert response.json()["metrics"]["gpu"][0]["util_percent"] == 50
     assert response.json()["quota"]["local_used_bytes"] == 12345
+
+
+def test_job_submit_rejects_full_local_worker_quota(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config["webui"]["default_local_quota_gb"] = 0.000000001
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    response = client.post(
+        "/api/worker/heartbeat",
+        headers={"x-worker-token": "worker-token"},
+        json={
+            "worker_id": "worker-1",
+            "metrics": {"local_storage": {"managed_bytes": 2, "total_reported_bytes": 2, "roots": []}},
+        },
+    )
+    assert response.status_code == 200
+
+    project = client.get("/api/projects").json()["projects"][0]
+    response = client.post("/api/jobs", json={"type": "audit", "project_id": project["id"], "folder_id": "root"})
+
+    assert response.status_code == 413
+    assert "Local worker quota exceeded" in response.text
+
+
+def test_job_submit_rejects_full_project_quota(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    response = client.post("/api/projects", json={"name": "Tiny Project", "quota_project_gb": 0.000000001})
+    assert response.status_code == 200
+    project = response.json()["project"]
+
+    output = Path(state.config["output_dir"])
+    generated = output / "existing_zh_dub.mp4"
+    generated.write_bytes(b"existing")
+    report = output / "existing_report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "name": "existing",
+                "user": "admin",
+                "project_id": project["id"],
+                "outputs": {"zh_dub_mp4": str(generated)},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.post("/api/jobs", json={"type": "audit", "project_id": project["id"], "folder_id": "root"})
+
+    assert response.status_code == 413
+    assert "Project quota exceeded" in response.text
 
 
 def test_worker_preview_upload_registers_manifest_and_artifact(tmp_path):
