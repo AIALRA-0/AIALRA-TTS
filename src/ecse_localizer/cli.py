@@ -25,6 +25,7 @@ from .mux import hardsub_video, mux_video
 from .platform_store import PlatformStore
 from .qa import run_qa
 from .repair import repair_from_fidelity
+from .release_check import run_release_check
 from .report import write_audit_report, write_index_report, write_video_report
 from .scan import audit_input, find_videos, select_existing_subtitle
 from .subtitle_io import (
@@ -111,6 +112,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p = sub.add_parser("deploy-check")
     p.add_argument("--mode", choices=["remote"], default="remote")
     p.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    p = sub.add_parser("release-check")
+    p.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     return parser.parse_args(argv)
 
 
@@ -118,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     config = load_config(args.config)
     try:
-        if args.command not in {"deploy-check", "worker-health"}:
+        if args.command not in {"deploy-check", "worker-health", "release-check"}:
             privacy_guard(config)
         if args.command == "audit":
             return cmd_audit(args, config)
@@ -153,6 +156,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_worker_poll(args, config)
         if args.command == "deploy-check":
             return cmd_deploy_check(args, config)
+        if args.command == "release-check":
+            return cmd_release_check(args, config)
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         traceback.print_exc()
@@ -327,6 +332,19 @@ def cmd_worker_health(args: argparse.Namespace, config: dict[str, Any]) -> int:
 
 def cmd_deploy_check(args: argparse.Namespace, config: dict[str, Any]) -> int:
     result = check_deploy_config(config, mode=args.mode)
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        status = "PASS" if result["pass"] else "FAIL"
+        print(f"{status}: {result['errors']} error(s), {result['warnings']} warning(s)")
+        for finding in result["findings"]:
+            level = finding["level"].upper()
+            print(f"{level} [{finding['code']}] {finding['path']}: {finding['message']}")
+    return 0 if result["pass"] else 2
+
+
+def cmd_release_check(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    result = run_release_check(config["project_root"])
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:

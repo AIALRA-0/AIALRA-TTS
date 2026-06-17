@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests and release gate
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+
+      - name: Python tests
+        shell: pwsh
+        run: python -m pytest -q
+
+      - name: Compile Python package
+        shell: pwsh
+        run: python -m compileall .\src\ecse_localizer
+
+      - name: Check WebUI JavaScript
+        shell: pwsh
+        run: node --check .\src\ecse_localizer\static\app.js
+
+      - name: Secret scan
+        shell: pwsh
+        run: .\tools\secret_scan.ps1
+
+      - name: Translation sample gate
+        shell: pwsh
+        run: python -m ecse_localizer translation-sample --output ".\runs\translation_quality_sample"
+
+      - name: Worker health local gate
+        shell: pwsh
+        run: python -m ecse_localizer worker-health --skip-remote
+
+      - name: Release metadata gate
+        shell: pwsh
+        run: python -m ecse_localizer release-check

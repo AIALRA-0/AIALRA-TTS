@@ -152,6 +152,10 @@ The repository includes:
 - `deploy/systemd/aialra-web.service`
 - `deploy/systemd/aialra-cleanup.service`
 - `deploy/systemd/aialra-cleanup.timer`
+- `RELEASE.md`
+- `.github/workflows/ci.yml`
+
+Before tagging a release, run `python -m ecse_localizer release-check` and follow `RELEASE.md`. Do not create releases from a dirty worktree or with generated media/config files tracked by git.
 
 Suggested public description:
 `Self-hosted video localization platform with a remote web UI and a Windows GPU worker for local ASR, translation, subtitles, TTS, and video dubbing.`

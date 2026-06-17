@@ -160,9 +160,10 @@ Before committing:
 
 ```powershell
 .\tools\secret_scan.ps1
+.\10_release_check.ps1
 ```
 
-The public template files are `config.example.yaml` and `.env.example`.
+The public template files are `config.example.yaml` and `.env.example`. Release rules live in `RELEASE.md`; CI runs tests, compile checks, WebUI JS syntax, secret scan, translation sample, worker health, and release metadata gates on GitHub.
 
 ## Useful Commands
 
@@ -180,6 +181,7 @@ python -m ecse_localizer worker-status
 python -m ecse_localizer worker-health --skip-remote
 python -m ecse_localizer worker-poll --remote-base-url "https://example.invalid" --worker-token "<token>" --once --dry-run
 python -m ecse_localizer --config deploy/config.remote.yaml deploy-check
+python -m ecse_localizer release-check
 python -m ecse_localizer cleanup --older-than-days 7
 ```
 
