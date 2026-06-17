@@ -39,7 +39,7 @@ from .subtitle_io import (
 from .translate import translate_segments
 from .tts import build_aligned_dub, tts_health
 from .utils import PROJECT_ROOT, copy_text, ensure_dir, now_id, setup_logger, slugify, write_json
-from .worker_client import poll_loop, poll_once
+from .worker_client import collect_worker_media_refs, poll_loop, poll_once
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -257,6 +257,7 @@ def cmd_worker_status(config: dict[str, Any]) -> int:
         "version": __version__,
         "privacy": config.get("privacy", {}),
         "metrics": collect_system_metrics(config),
+        "media_refs": collect_worker_media_refs(config),
         "tts": tts_health(config),
         "llm": llm.__dict__,
         "worker": store.worker_status(),

@@ -183,7 +183,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     def dashboard(user: str = Depends(require_user)) -> dict[str, Any]:
         state.reload_config()
         reports = list_reports(state.config, limit=12)
-        videos = list_video_records(state.config, state.store.user_upload_dir(user))
+        videos = list_all_video_records(state, user)
         llm = LocalLLMClient(state.config).status()
         tts = tts_health(state.config)
         worker = worker_status_payload(state)
@@ -208,7 +208,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     @app.get("/api/videos")
     def videos(user: str = Depends(require_user)) -> dict[str, Any]:
         state.reload_config()
-        return {"videos": list_video_records(state.config, state.store.user_upload_dir(user)), "upload_policy": browser_upload_policy(state)}
+        return {"videos": list_all_video_records(state, user), "upload_policy": browser_upload_policy(state)}
 
     @app.get("/api/reports")
     def reports(_: str = Depends(require_user)) -> dict[str, Any]:
@@ -1455,6 +1455,37 @@ def unique_path(path: Path) -> Path:
     raise RuntimeError(f"Could not create unique path for {path}")
 
 
+def list_all_video_records(state: WebState, user: str) -> list[dict[str, Any]]:
+    records = list_video_records(state.config, state.store.user_upload_dir(user))
+    if str(state.webui.get("execution_mode", "local_subprocess")) == "worker_queue":
+        records.extend(worker_media_video_records(state))
+    return records
+
+
+def worker_media_video_records(state: WebState) -> list[dict[str, Any]]:
+    worker = worker_status_payload(state)
+    media_refs = worker.get("media_refs") if isinstance(worker, dict) else []
+    if not isinstance(media_refs, list):
+        return []
+    records: list[dict[str, Any]] = []
+    for item in media_refs:
+        if not isinstance(item, dict) or not item.get("ref_id"):
+            continue
+        name = safe_upload_name(str(item.get("name") or "worker-media.mp4"))
+        records.append(
+            {
+                "name": name,
+                "path": f"worker-ref:{item.get('ref_id')}",
+                "size": int(item.get("size", 0) or 0),
+                "uploaded": False,
+                "worker_ref": True,
+                "media_type": str(item.get("media_type") or ""),
+                "display_path": f"Windows worker: {name}",
+            }
+        )
+    return records
+
+
 def list_video_records(config: dict[str, Any], upload_dir: Path) -> list[dict[str, Any]]:
     paths: dict[str, Path] = {}
     for root in [Path(config["input_dir"]), upload_dir]:
@@ -1560,7 +1591,8 @@ def build_job_command(job_type: str, body: dict[str, Any], state: WebState, *, v
         video = str(body.get("video") or "")
         if not video or (validate_paths and not Path(video).exists()):
             raise HTTPException(status_code=400, detail="Video path is required")
-        return base + ["process-one", "--video", video], f"Process one: {file_display_name(video)}"
+        display_name = str(body.get("video_name") or file_display_name(video))
+        return base + ["process-one", "--video", video], f"Process one: {file_display_name(display_name)}"
     if job_type == "process_all":
         cmd = base + ["process-all", "--input", input_dir]
         if bool(body.get("force")):

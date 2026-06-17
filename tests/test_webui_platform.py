@@ -265,6 +265,47 @@ def test_worker_queue_process_one_accepts_worker_visible_path(tmp_path):
     assert payload["job"]["title"] == "Process one: lecture.mp4"
 
 
+def test_worker_media_refs_appear_as_video_options_without_paths(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    response = client.post(
+        "/api/worker/heartbeat",
+        headers={"x-worker-token": "worker-token"},
+        json={
+            "worker_id": "worker-1",
+            "media_refs": [
+                {
+                    "ref_id": "media123",
+                    "name": "lecture.mp4",
+                    "path": r"D:\worker-private\lecture.mp4",
+                    "size": 10,
+                    "media_type": "video/mp4",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    assert "path" not in response.json()["worker"]["media_refs"][0]
+
+    response = client.get("/api/videos")
+
+    assert response.status_code == 200
+    body = response.json()
+    worker_video = next(row for row in body["videos"] if row.get("worker_ref"))
+    assert worker_video["path"] == "worker-ref:media123"
+    assert worker_video["display_path"] == "Windows worker: lecture.mp4"
+    assert "worker-private" not in json.dumps(body)
+
+
 def test_worker_log_endpoint_returns_remote_log_tail_when_file_missing(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

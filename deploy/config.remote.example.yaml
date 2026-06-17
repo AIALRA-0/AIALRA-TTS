@@ -59,6 +59,9 @@ worker:
   log_tail_lines: 160
   report_input_storage_usage: false
   local_storage_scan_max_files: 250000
+  expose_media_refs: true
+  media_roots: []
+  max_media_refs: 500
   upload_previews: true
   preview_source_output_key: "zh_dub_mp4"
   preview_max_width: 854

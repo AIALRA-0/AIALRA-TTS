@@ -66,6 +66,7 @@ Deployment steps:
    - if the Windows worker heartbeat is missing or stale, new jobs must stay `queued` and the UI must show that they are waiting for the local worker, not that GPU processing has already started.
    - during long jobs, the worker posts `running` status updates with best-effort progress, GPU/CPU/disk metrics, local managed-storage byte counts, and a short log tail; do not require Contabo to read Windows log files directly.
    - worker metrics must be sanitized before storage/display; do not expose Windows filesystem paths in dashboard, quota, job, artifact, or heartbeat responses.
+   - worker heartbeat/claim may include opaque media refs from `worker.media_roots`; Contabo must store only ref id, display name, size, MIME type, and mtime, never the Windows source path.
    - if a claimed/running worker job becomes stale, the WebUI should move it to `retrying` so the restored Windows worker can claim it again; after the configured retry cap, it should become `failed`.
    - after successful jobs, the worker may upload a low-bitrate MP4 preview and JPG thumbnail to `/api/worker/jobs/{job_id}/preview`; this endpoint must require HMAC signatures, enforce `webui.worker_preview_max_upload_mb`, count files against `remote_quota_bytes`, and never store Windows source paths in the manifest.
    - after successful jobs, the worker registers opaque full-output artifact refs; users request full downloads by queuing an `upload_artifact_cache` worker action, and the worker uploads only that selected file to `/api/worker/jobs/{job_id}/artifact-cache` as temporary remote cache.
@@ -86,6 +87,7 @@ Deployment steps:
    - new job submission returns HTTP 413 when the Windows worker local quota or selected project quota is already exhausted
    - upload quota is enforced across multi-file requests and active-job concurrency limits return HTTP 429 with a readable message
    - browser media upload is disabled in `worker_queue` mode unless explicitly enabled, so original videos do not land on the Contabo disk by default
+   - worker media refs appear in the task video selector as `worker-ref:<id>` options without exposing Windows source paths
    - the task form can queue `process_one` with a Windows worker-visible local video path without requiring that file to exist on Contabo
    - admins can disable users and update local/remote user quotas without disabling the last active admin
    - project quota usage is visible for generated managed artifacts

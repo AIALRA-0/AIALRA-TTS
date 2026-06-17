@@ -326,7 +326,8 @@ function renderVideoOptions() {
   for (const video of state.videos) {
     const option = document.createElement("option");
     option.value = video.path;
-    option.textContent = `${video.uploaded ? "[上传] " : ""}${video.name}`;
+    option.dataset.name = video.name || "";
+    option.textContent = `${video.worker_ref ? "[Worker] " : video.uploaded ? "[上传] " : ""}${video.name}`;
     select.appendChild(option);
   }
 }
@@ -660,7 +661,8 @@ function renderVideos() {
   table.append(row(["来源", "视频", "大小", "操作"], true));
   for (const video of state.videos) {
     const name = document.createElement("div");
-    name.innerHTML = `<strong>${escapeHtml(video.name)}</strong><div class="cell-path">${escapeHtml(video.path)}</div>`;
+    const displayPath = video.display_path || video.path;
+    name.innerHTML = `<strong>${escapeHtml(video.name)}</strong><div class="cell-path">${escapeHtml(displayPath)}</div>`;
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "secondary";
@@ -670,7 +672,7 @@ function renderVideos() {
       $("jobWorkerVideoPath").value = "";
       showTab("dashboard");
     });
-    table.append(row([video.uploaded ? "上传" : "课程", name, formatBytes(video.size), btn]));
+    table.append(row([video.worker_ref ? "Worker" : video.uploaded ? "上传" : "课程", name, formatBytes(video.size), btn]));
   }
 }
 
@@ -839,9 +841,11 @@ async function startJob(event) {
   event.preventDefault();
   const type = $("jobType").value;
   const workerVideoPath = $("jobWorkerVideoPath").value.trim();
+  const selectedVideo = $("jobVideo").selectedOptions[0];
   const payload = {
     type,
     video: workerVideoPath || $("jobVideo").value,
+    video_name: workerVideoPath ? "" : selectedVideo?.dataset?.name || selectedVideo?.textContent || "",
     seconds: Number($("jobSeconds").value || 90),
     report: $("jobReport").value,
     tag: $("jobTag").value || "webui",

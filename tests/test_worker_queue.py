@@ -31,7 +31,17 @@ from ecse_localizer.webui import (
     worker_status_payload,
     worker_status_changes,
 )
-from ecse_localizer.worker_client import canonical_json, extract_progress_from_text, redacted_command, summarize_result, worker_args, worker_headers, worker_signature
+from ecse_localizer.worker_client import (
+    canonical_json,
+    collect_worker_media_refs,
+    extract_progress_from_text,
+    redacted_command,
+    resolve_worker_media_args,
+    summarize_result,
+    worker_args,
+    worker_headers,
+    worker_signature,
+)
 from ecse_localizer.worker_client import find_registered_artifact, preview_source_path, register_worker_artifacts, upload_worker_artifact_cache, upload_worker_preview
 
 
@@ -550,6 +560,39 @@ def test_register_worker_artifacts_writes_local_registry_without_leaking_path(mo
     registered = find_registered_artifact(summary["ref_id"])
     assert registered["path"] == str(output)
     assert registry_path.exists()
+
+
+def test_worker_media_refs_register_and_resolve_without_leaking_path(monkeypatch, tmp_path):
+    registry_path = tmp_path / "registry.json"
+    monkeypatch.setattr("ecse_localizer.worker_client.artifact_registry_path", lambda: registry_path)
+    media_root = tmp_path / "media"
+    media_root.mkdir()
+    video = media_root / "lecture.mp4"
+    video.write_bytes(b"mp4")
+
+    summaries = collect_worker_media_refs({"input_dir": str(media_root), "worker": {"max_media_refs": 10}})
+
+    assert len(summaries) == 1
+    summary = summaries[0]
+    assert summary["name"] == "lecture.mp4"
+    assert "path" not in summary
+    resolved = resolve_worker_media_args(["process-one", "--video", f"worker-ref:{summary['ref_id']}"])
+    assert resolved == ["process-one", "--video", str(video.resolve())]
+
+
+def test_worker_media_refs_skip_generated_output_dirs(monkeypatch, tmp_path):
+    registry_path = tmp_path / "registry.json"
+    monkeypatch.setattr("ecse_localizer.worker_client.artifact_registry_path", lambda: registry_path)
+    source = tmp_path / "lecture.mp4"
+    source.write_bytes(b"source")
+    output_dir = tmp_path / "_localizer_output"
+    output_dir.mkdir()
+    generated = output_dir / "lecture_zh_dub.mp4"
+    generated.write_bytes(b"generated")
+
+    summaries = collect_worker_media_refs({"input_dir": str(tmp_path), "worker": {"max_media_refs": 10}})
+
+    assert [row["name"] for row in summaries] == ["lecture.mp4"]
 
 
 def test_upload_worker_artifact_cache_sends_signed_binary_without_plaintext_token(monkeypatch, tmp_path):

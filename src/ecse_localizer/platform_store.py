@@ -413,6 +413,7 @@ class PlatformStore:
             "version": str(payload.get("version") or ""),
             "message": str(payload.get("message") or ""),
             "metrics": sanitize_metrics(payload.get("metrics")) if isinstance(payload.get("metrics"), dict) else {},
+            "media_refs": sanitize_worker_media_refs(payload.get("media_refs")),
             "updated_at": iso_now(),
             "updated_at_epoch": int(time.time()),
         }
@@ -491,6 +492,25 @@ def public_user(user: dict[str, Any]) -> dict[str, Any]:
     row.setdefault("role", "user")
     row.setdefault("disabled", False)
     return row
+
+
+def sanitize_worker_media_refs(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for item in value[:1000]:
+        if not isinstance(item, dict) or not item.get("ref_id"):
+            continue
+        rows.append(
+            {
+                "ref_id": str(item.get("ref_id") or "")[:80],
+                "name": clean_name(str(item.get("name") or "worker-media"), default="worker-media"),
+                "size": int(max(0, coerce_float(item.get("size")))),
+                "mtime": max(0, coerce_float(item.get("mtime"))),
+                "media_type": str(item.get("media_type") or "application/octet-stream")[:120],
+            }
+        )
+    return rows
 
 
 def validate_username(username: str) -> None:

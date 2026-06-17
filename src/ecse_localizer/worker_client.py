@@ -19,6 +19,7 @@ from .artifacts import DOWNLOADABLE_OUTPUTS
 from .config import load_config
 from .job_config import write_job_config
 from .metrics import collect_system_metrics
+from .scan import VIDEO_SUFFIXES, should_skip
 from .utils import PROJECT_ROOT, ensure_dir, read_json, run_cmd, write_json
 
 
@@ -72,6 +73,7 @@ def claim_job(remote_base_url: str, worker_token: str, worker_id: str, config: d
         "worker_id": worker_id,
         "version": __version__,
         "metrics": collect_system_metrics(config),
+        "media_refs": collect_worker_media_refs(config),
     }
     body = canonical_json(payload)
     response = requests.post(
@@ -94,7 +96,7 @@ def run_worker_job(
     worker_id: str,
 ) -> dict[str, Any]:
     job_id = str(job["id"])
-    args = worker_args(job)
+    args = resolve_worker_media_args(worker_args(job))
     if not args:
         raise RuntimeError(f"Worker job {job_id} has no worker_args")
     base_config = load_config(config_path)
@@ -343,6 +345,8 @@ def load_artifact_registry() -> dict[str, Any]:
         return {"artifacts": []}
     if not isinstance(data.get("artifacts"), list):
         data["artifacts"] = []
+    if not isinstance(data.get("media"), list):
+        data["media"] = []
     return data
 
 
@@ -366,6 +370,112 @@ def worker_artifact_summary(row: dict[str, Any]) -> dict[str, Any]:
         "mtime": float(row.get("mtime", 0) or 0),
         "media_type": str(row.get("media_type") or "application/octet-stream"),
     }
+
+
+def collect_worker_media_refs(config: dict[str, Any]) -> list[dict[str, Any]]:
+    worker_cfg = config.get("worker", {}) if isinstance(config.get("worker"), dict) else {}
+    if not bool(worker_cfg.get("expose_media_refs", True)):
+        return []
+    roots = worker_media_roots(config)
+    max_refs = max(0, int(worker_cfg.get("max_media_refs", 500) or 500))
+    if max_refs <= 0:
+        return []
+    registry = load_artifact_registry()
+    rows = registry.setdefault("media", [])
+    existing = {str(row.get("ref_id")): row for row in rows if isinstance(row, dict)}
+    summaries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*"), key=lambda p: p.name.lower()):
+            if len(summaries) >= max_refs:
+                break
+            try:
+                relative = path.relative_to(root)
+            except ValueError:
+                relative = Path(path.name)
+            if should_skip(relative):
+                continue
+            if not path.is_file() or path.suffix.lower() not in VIDEO_SUFFIXES:
+                continue
+            try:
+                stat = path.stat()
+                resolved = str(path.resolve())
+            except OSError:
+                continue
+            ref_id = media_ref_id(path, stat.st_size, stat.st_mtime)
+            row = {
+                "ref_id": ref_id,
+                "name": path.name,
+                "path": resolved,
+                "size": stat.st_size,
+                "mtime": stat.st_mtime,
+                "media_type": media_type_for(path),
+                "registered_at": int(time.time()),
+            }
+            if ref_id in existing:
+                existing[ref_id].update(row)
+            else:
+                rows.append(row)
+            seen.add(ref_id)
+            summaries.append(worker_media_summary(row))
+        if len(summaries) >= max_refs:
+            break
+    registry["media"] = [row for row in rows if isinstance(row, dict) and str(row.get("ref_id") or "") in seen]
+    save_artifact_registry(registry)
+    return summaries
+
+
+def worker_media_roots(config: dict[str, Any]) -> list[Path]:
+    worker_cfg = config.get("worker", {}) if isinstance(config.get("worker"), dict) else {}
+    raw_roots = worker_cfg.get("media_roots")
+    roots = raw_roots if isinstance(raw_roots, list) else []
+    if not roots and config.get("input_dir"):
+        roots = [config["input_dir"]]
+    out: list[Path] = []
+    for value in roots:
+        text = str(value or "").strip()
+        if text:
+            out.append(Path(text))
+    return out
+
+
+def media_ref_id(path: Path, size: int, mtime: float) -> str:
+    raw = f"media\0{path.resolve()}\0{size}\0{mtime:.6f}"
+    return hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()[:32]
+
+
+def worker_media_summary(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ref_id": str(row.get("ref_id") or ""),
+        "name": str(row.get("name") or ""),
+        "size": int(row.get("size", 0) or 0),
+        "mtime": float(row.get("mtime", 0) or 0),
+        "media_type": str(row.get("media_type") or "application/octet-stream"),
+    }
+
+
+def resolve_worker_media_args(args: list[str]) -> list[str]:
+    out: list[str] = []
+    for item in args:
+        text = str(item)
+        if text.startswith("worker-ref:"):
+            out.append(find_registered_media(text.removeprefix("worker-ref:"))["path"])
+        else:
+            out.append(text)
+    return out
+
+
+def find_registered_media(ref_id: str) -> dict[str, Any]:
+    registry = load_artifact_registry()
+    for row in registry.get("media", []):
+        if isinstance(row, dict) and str(row.get("ref_id") or "") == ref_id:
+            path = Path(str(row.get("path") or ""))
+            if not path.exists() or not path.is_file():
+                raise RuntimeError(f"Worker media ref is missing on worker: {row.get('name') or ref_id}")
+            return dict(row)
+    raise RuntimeError(f"Worker media ref not found: {ref_id}")
 
 
 def find_registered_artifact(ref_id: str) -> dict[str, Any]:
