@@ -26,6 +26,7 @@ from .platform_store import PlatformStore
 from .qa import run_qa
 from .repair import repair_from_fidelity
 from .release_check import run_release_check
+from .remote_smoke import run_remote_smoke
 from .report import write_audit_report, write_index_report, write_video_report
 from .scan import audit_input, find_videos, select_existing_subtitle
 from .subtitle_io import (
@@ -89,6 +90,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p = sub.add_parser("translation-sample")
     p.add_argument("--output", help="Directory for translation_quality_sample.json/md. Defaults to work_dir/translation_quality_sample.")
     p.add_argument("--json", action="store_true", help="Print the full sample JSON result.")
+    p = sub.add_parser("remote-smoke")
+    p.add_argument("--output", help="Directory for remote_smoke_report.json/md. Defaults to work_dir/remote_smoke.")
+    p.add_argument("--json", action="store_true", help="Print the full smoke JSON result.")
 
     sub.add_parser("tts-health")
     p = sub.add_parser("worker-status")
@@ -143,6 +147,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_compact_rerender(args, config)
         if args.command == "translation-sample":
             return cmd_translation_sample(args, config)
+        if args.command == "remote-smoke":
+            return cmd_remote_smoke(args, config)
         if args.command == "tts-health":
             print(json.dumps(tts_health(config), ensure_ascii=False, indent=2))
             return 0
@@ -391,6 +397,16 @@ def cmd_translation_sample(args: argparse.Namespace, config: dict[str, Any]) -> 
     payload = {"pass": result["pass"], "json": result["json"], "markdown": result["markdown"]}
     if args.json:
         payload["sample"] = result["sample"]
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0 if result["pass"] else 2
+
+
+def cmd_remote_smoke(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    output = Path(args.output) if args.output else Path(config["work_dir"]) / "remote_smoke"
+    result = run_remote_smoke(config, output_dir=output)
+    payload = {"pass": result["pass"], "json": result.get("json"), "markdown": result.get("markdown"), "summary": result["summary"]}
+    if args.json:
+        payload["steps"] = result["steps"]
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0 if result["pass"] else 2
 

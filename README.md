@@ -160,6 +160,7 @@ Before committing:
 
 ```powershell
 .\tools\secret_scan.ps1
+.\11_remote_smoke.ps1
 .\10_release_check.ps1
 ```
 
@@ -176,6 +177,7 @@ python -m ecse_localizer report --output "<VIDEO_ROOT>\_localizer_output"
 python -m ecse_localizer fidelity-audit --report "<VIDEO_ROOT>\_localizer_output\<lecture>_report.json"
 python -m ecse_localizer repair-fidelity --report "<VIDEO_ROOT>\_localizer_output\<lecture>_report.json"
 python -m ecse_localizer translation-sample --output ".\runs\translation_quality_sample"
+python -m ecse_localizer remote-smoke --output ".\runs\remote_smoke"
 python -m ecse_localizer tts-health
 python -m ecse_localizer worker-status
 python -m ecse_localizer worker-health --skip-remote

@@ -21,6 +21,7 @@ python -m pytest -q
 python -m compileall .\src\ecse_localizer
 node --check .\src\ecse_localizer\static\app.js
 python -m ecse_localizer translation-sample --output ".\runs\translation_quality_sample"
+python -m ecse_localizer remote-smoke --output ".\runs\remote_smoke"
 python -m ecse_localizer worker-health --skip-remote
 python -m ecse_localizer --config deploy\config.remote.example.yaml deploy-check
 python -m ecse_localizer release-check

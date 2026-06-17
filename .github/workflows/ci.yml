@@ -49,6 +49,10 @@ jobs:
         shell: pwsh
         run: python -m ecse_localizer translation-sample --output ".\runs\translation_quality_sample"
 
+      - name: Remote worker queue smoke
+        shell: pwsh
+        run: python -m ecse_localizer remote-smoke --output ".\runs\remote_smoke"
+
       - name: Worker health local gate
         shell: pwsh
         run: python -m ecse_localizer worker-health --skip-remote
