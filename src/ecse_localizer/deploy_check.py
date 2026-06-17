@@ -66,6 +66,7 @@ def check_deploy_config(config: dict[str, Any], *, mode: str = "remote") -> dict
 
     check_numeric_range(findings, webui, "signed_url_ttl_seconds", "webui.signed_url_ttl_seconds", min_value=60, max_value=3600, level="warn")
     check_numeric_range(findings, webui, "worker_signature_max_skew_seconds", "webui.worker_signature_max_skew_seconds", min_value=30, max_value=600, level="warn")
+    check_numeric_range(findings, webui, "worker_offline_after_seconds", "webui.worker_offline_after_seconds", min_value=90, max_value=600, level="warn")
     check_numeric_range(findings, webui, "cleanup_older_than_days", "webui.cleanup_older_than_days", min_value=1, max_value=30, level="warn")
     check_numeric_range(findings, webui, "default_remote_quota_gb", "webui.default_remote_quota_gb", min_value=0.1, max_value=100, level="warn")
     check_numeric_range(findings, webui, "worker_preview_max_upload_mb", "webui.worker_preview_max_upload_mb", min_value=1, max_value=512, level="warn")

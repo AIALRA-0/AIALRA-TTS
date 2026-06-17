@@ -67,7 +67,7 @@ Deployment steps:
    - follow `deploy/REMOTE_TUNNEL_GUIDE.md` for the outbound-only worker connection model
    - set `webui.worker_auth_mode: "hmac"` and `webui.worker_require_nonce: true`; require `X-Worker-Timestamp` + `X-Worker-Nonce` + `X-Worker-Signature` for worker heartbeat/API
    - treat `WORKER_SHARED_TOKEN` as an HMAC secret; do not send it as a plaintext production header
-   - mark worker offline after missed heartbeats
+   - set `webui.worker_offline_after_seconds` above the worker heartbeat interval, for example 180 seconds for the default 60-second heartbeat
    - enable stale worker-job recovery with `webui.worker_requeue_stale_jobs=true`, choose a conservative `webui.worker_job_heartbeat_timeout_seconds`, and cap retries with `webui.worker_job_max_auto_retries`
    - on Windows, run:
      ```powershell

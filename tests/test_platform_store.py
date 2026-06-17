@@ -1,7 +1,9 @@
 import json
+import time
 from pathlib import Path
 
 from ecse_localizer.platform_store import PlatformStore, hash_password, verify_password
+from ecse_localizer.utils import read_json, write_json
 
 
 def make_config(tmp_path: Path) -> dict:
@@ -219,3 +221,20 @@ def test_worker_heartbeat_concurrency_defaults_and_clamps(tmp_path):
     assert store.record_worker_heartbeat({"worker_id": "worker-1"})["max_concurrent_jobs"] == 1
     assert store.record_worker_heartbeat({"worker_id": "worker-1", "max_concurrent_jobs": 99})["max_concurrent_jobs"] == 8
     assert store.record_worker_heartbeat({"worker_id": "worker-1", "worker": {"max_concurrent_jobs": 2}})["max_concurrent_jobs"] == 2
+
+
+def test_worker_status_uses_configured_offline_threshold(tmp_path):
+    config = make_config(tmp_path)
+    store = PlatformStore(config)
+    store.bootstrap()
+    store.record_worker_heartbeat({"worker_id": "worker-1"})
+    heartbeat = read_json(store.worker_path)
+    heartbeat["updated_at_epoch"] = int(time.time()) - 90
+    write_json(store.worker_path, heartbeat)
+
+    assert store.worker_status()["status"] == "online"
+
+    config["webui"]["worker_offline_after_seconds"] = 45
+    strict_store = PlatformStore(config)
+
+    assert strict_store.worker_status()["status"] == "offline"

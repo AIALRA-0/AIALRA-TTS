@@ -386,7 +386,7 @@ class PlatformStore:
         return total
 
     def local_usage_bytes(self) -> tuple[int, str]:
-        metrics = self.worker_status(offline_after_seconds=int(self.config.get("webui", {}).get("worker_offline_after_seconds", 45) or 45)).get("metrics", {})
+        metrics = self.worker_status().get("metrics", {})
         if isinstance(metrics, dict):
             local_storage = metrics.get("local_storage")
             if isinstance(local_storage, dict):
@@ -431,10 +431,17 @@ class PlatformStore:
         self._save(self.worker_path, row)
         return row
 
-    def worker_status(self, *, offline_after_seconds: int = 45) -> dict[str, Any]:
+    def worker_status(self, *, offline_after_seconds: int | None = None) -> dict[str, Any]:
         row = self._load(self.worker_path, {})
         if not row:
             return {"status": "local", "message": "No remote worker heartbeat recorded", "updated_at": None}
+        if offline_after_seconds is None:
+            webui = self.config.get("webui", {}) if isinstance(self.config.get("webui"), dict) else {}
+            try:
+                offline_after_seconds = int(webui.get("worker_offline_after_seconds", 180) or 180)
+            except (TypeError, ValueError):
+                offline_after_seconds = 180
+        offline_after_seconds = max(30, int(offline_after_seconds))
         age = int(time.time()) - int(row.get("updated_at_epoch", 0) or 0)
         if age > offline_after_seconds:
             row = dict(row)

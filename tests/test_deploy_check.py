@@ -37,6 +37,7 @@ def valid_remote_config() -> dict:
             "worker_require_nonce": True,
             "signed_url_ttl_seconds": 900,
             "worker_signature_max_skew_seconds": 300,
+            "worker_offline_after_seconds": 180,
             "cleanup_older_than_days": 7,
             "default_remote_quota_gb": 10,
             "worker_preview_max_upload_mb": 256,
@@ -94,6 +95,17 @@ def test_deploy_check_does_not_echo_secret_values():
     assert "secret_reused" in {item["code"] for item in result["findings"]}
 
 
+def test_deploy_check_warns_when_worker_offline_threshold_is_too_low():
+    config = valid_remote_config()
+    config["webui"]["worker_offline_after_seconds"] = 45
+
+    result = check_deploy_config(config)
+
+    findings = {(item["path"], item["code"]) for item in result["findings"]}
+    assert result["pass"] is True
+    assert ("webui.worker_offline_after_seconds", "number_below_recommended") in findings
+
+
 def test_deploy_check_cli_returns_nonzero_for_unsafe_config(tmp_path, capsys):
     path = tmp_path / "config.yaml"
     path.write_text(
@@ -129,6 +141,7 @@ webui:
   worker_require_nonce: true
   signed_url_ttl_seconds: 900
   worker_signature_max_skew_seconds: 300
+  worker_offline_after_seconds: 180
   cleanup_older_than_days: 7
   default_remote_quota_gb: 10
   worker_preview_max_upload_mb: 256
