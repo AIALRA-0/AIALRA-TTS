@@ -25,7 +25,7 @@ asr:
   model: "large-v3"
   compute_type: "float16"
   fallback_compute_type: "int8_float16"
-  language: "en"
+  language: "auto"
   supported_languages: ["auto", "en", "zh", "zh-CN", "yue", "ja", "ko", "es", "fr", "de"]
   vad: true
   word_timestamps: true

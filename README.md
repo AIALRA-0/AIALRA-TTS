@@ -148,7 +148,7 @@ It fails closed when production safety settings are missing: placeholder secrets
 ## Backends
 
 - Subtitles: existing `.vtt/.srt/.ass` are preferred and normalized before ASR.
-- ASR: `whisperx` then `faster-whisper` when installed; existing subtitles avoid ASR when good enough.
+- ASR: `whisperx` then `faster-whisper` when installed; existing subtitles avoid ASR when good enough. The default source language is `auto`, and reports record requested language, Whisper backend language code, detected language, and probability.
 - Audio enhancement: ffmpeg loudnorm/highpass/lowpass always available; DeepFilterNet/ClearerVoice optional.
 - Translation: local Ollama/LM Studio OpenAI-compatible endpoint only. `best_quality` reconstructs spoken paragraphs before per-segment JSON translation, then applies a course style guide, coherence pass, and deterministic quality flags for summary-like translations, over-compression, repeated calques, unchanged literal rewrites, and missing protected technical tokens such as formulas, code/file names, URLs, acronyms, variables, and model names. `fidelity-audit` reviews the finished report, and `repair-fidelity` rewrites only the failed/low-score/quality-flagged segments before regenerating subtitles, TTS, muxed video, and QA. Qwen 14B is preferred for quality; 7B is fallback.
 - `translation-sample` writes a deterministic local JSON/Markdown comparison of the same source segment across `literal`, `lecture`, `coherence`, and `repair` stages. Use it as a quick quality gate before long video runs.

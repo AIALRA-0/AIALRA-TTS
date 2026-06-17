@@ -16,6 +16,7 @@ translation:
   max_zh_chars_per_subtitle_line: 22
 
 asr:
+  language: "auto"
   supported_languages: ["auto", "en", "zh", "zh-CN", "yue", "ja", "ko", "es", "fr", "de"]
 
 tts:

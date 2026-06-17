@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 
-from ecse_localizer.asr import asr_language
+from ecse_localizer.asr import asr_language, asr_language_label, asr_metadata_from_info
 from ecse_localizer.job_config import apply_job_overrides, write_job_config
 
 
@@ -108,6 +108,52 @@ def test_write_job_config_strips_webui_secrets(tmp_path: Path):
 
 
 def test_asr_language_auto_and_null_enable_detection():
+    assert asr_language({}) is None
     assert asr_language({"asr": {"language": "auto"}}) is None
     assert asr_language({"asr": {"language": None}}) is None
     assert asr_language({"asr": {"language": "en"}}) == "en"
+    assert asr_language({"asr": {"language": "zh-CN"}}) == "zh"
+    assert asr_language({"asr": {"language": "mandarin"}}) == "zh"
+    assert asr_language({"asr": {"language": "cantonese"}}) == "zh"
+    assert asr_language_label({"asr": {"language": None}}) == "auto"
+    assert asr_language_label({"asr": {"language": "zh-CN"}}) == "zh-CN"
+
+
+def test_asr_metadata_records_detected_language():
+    class Info:
+        language = "ja"
+        language_probability = 0.87654
+        duration = 12.34567
+
+    metadata = asr_metadata_from_info(
+        Info(),
+        {"asr": {"language": "auto", "vad": False, "word_timestamps": False}},
+        model_name="large-v3",
+        device="cuda",
+        compute_type="float16",
+    )
+
+    assert metadata["requested_language"] == "auto"
+    assert metadata["backend_language"] == "auto"
+    assert metadata["detected_language"] == "ja"
+    assert metadata["language_probability"] == 0.8765
+    assert metadata["duration"] == 12.3457
+    assert metadata["model"] == "large-v3"
+    assert metadata["device"] == "cuda"
+    assert metadata["compute_type"] == "float16"
+    assert metadata["vad"] is False
+    assert metadata["word_timestamps"] is False
+
+
+def test_asr_metadata_records_backend_language_alias():
+    metadata = asr_metadata_from_info(
+        {"language": "zh", "language_probability": 0.9},
+        {"asr": {"language": "zh-CN"}},
+        model_name="large-v3",
+        device="cuda",
+        compute_type="float16",
+    )
+
+    assert metadata["requested_language"] == "zh-CN"
+    assert metadata["backend_language"] == "zh"
+    assert metadata["detected_language"] == "zh"

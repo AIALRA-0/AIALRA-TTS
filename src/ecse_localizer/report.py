@@ -38,6 +38,7 @@ def write_video_report(path_md: str | Path, path_json: str | Path, data: dict[st
         f"- Mode: {data.get('mode')}",
         f"- Subtitle source: {data.get('subtitle_source')}",
         f"- ASR backend: {data.get('asr_backend')}",
+        f"- ASR language: requested={data.get('asr', {}).get('requested_language', 'unknown')}, backend={data.get('asr', {}).get('backend_language', 'unknown')}, detected={data.get('asr', {}).get('detected_language', 'unknown')}, probability={data.get('asr', {}).get('language_probability')}",
         f"- LLM/translation backend: {data.get('translation_backend')}",
         f"- TTS backend: {data.get('tts', {}).get('backend')}",
         f"- Audio enhancement: {data.get('audio_enhancement')}",

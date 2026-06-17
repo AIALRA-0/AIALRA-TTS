@@ -11,7 +11,7 @@ from typing import Any
 
 from . import __version__
 from .artifacts import cleanup_expired_files
-from .asr import transcribe_audio
+from .asr import asr_language_label, transcribe_audio_with_metadata
 from .audio_enhance import enhance_audio
 from .capabilities import language_capabilities
 from .compact import compact_rerender_from_report
@@ -623,13 +623,21 @@ def process_video(
 
     subtitle_source = select_existing_subtitle(video, media_duration(video))
     asr_backend = "existing_subtitle"
+    asr_metadata: dict[str, Any] = {
+        "requested_language": asr_language_label(config),
+        "backend_language": "existing_subtitle",
+        "detected_language": None,
+        "language_probability": None,
+        "source": "existing_subtitle",
+    }
     if subtitle_source:
         en_segments = read_subtitles(subtitle_source)
         en_segments = normalize_segments(en_segments, max_end=process_duration if mode == "smoke" else None)
         en_segments = split_long_segments(en_segments)
         logger.info("Using existing subtitles: %s (%d segments)", subtitle_source, len(en_segments))
     else:
-        en_segments, asr_backend = transcribe_audio(enhanced_audio, config, logger)
+        en_segments, asr_backend, asr_metadata = transcribe_audio_with_metadata(enhanced_audio, config, logger)
+        asr_metadata["source"] = "local_asr"
         en_segments = normalize_segments(en_segments, max_end=process_duration if mode == "smoke" else None)
         en_segments = split_long_segments(en_segments)
         subtitle_source = Path("ASR")
@@ -694,6 +702,7 @@ def process_video(
         "work_video": str(work_video),
         "subtitle_source": str(subtitle_source),
         "asr_backend": asr_backend,
+        "asr": asr_metadata,
         "translation_backend": translation_backend,
         "audio_enhancement": enhancement_backend,
         "tts": tts_info,
