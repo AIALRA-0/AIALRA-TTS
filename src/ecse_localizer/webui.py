@@ -326,6 +326,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Artifact not found")
         if not row.get("remote_worker_artifact") or not row.get("download_requestable"):
             raise HTTPException(status_code=400, detail="Artifact is already cached or cannot be requested from a worker")
+        existing = find_active_artifact_cache_job(state, user, artifact_id=str(row["id"]), artifact_ref_id=str(row["artifact_ref_id"]))
+        if existing:
+            worker_info = worker_status_payload(state)
+            return {
+                "ok": True,
+                "job": public_job_record(existing),
+                "dispatch": {"target": "worker", "queued": True, "worker": worker_info, "existing": True},
+            }
         enforce_artifact_cache_request_limits(state, user, row)
         enforce_active_job_limits(state, user)
         worker_info = worker_status_payload(state)
@@ -1445,6 +1453,20 @@ def enforce_artifact_cache_request_limits(state: WebState, username: str, artifa
     global_remaining = max(0, global_quota - int(quota.get("remote_global_used_bytes") or 0)) if global_quota else 0
     if global_quota > 0 and size > global_remaining:
         raise HTTPException(status_code=413, detail=f"Global remote quota exceeded. Remaining bytes: {global_remaining}")
+
+
+def find_active_artifact_cache_job(state: WebState, username: str, *, artifact_id: str, artifact_ref_id: str) -> dict[str, Any] | None:
+    for record in list_jobs(state, username):
+        if record.get("type") != "cache_artifact":
+            continue
+        if normalize_job_status(str(record.get("status") or "")) not in ACTIVE_JOB_STATUSES:
+            continue
+        metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+        if metadata.get("worker_action") != "upload_artifact_cache":
+            continue
+        if str(metadata.get("artifact_id") or "") == artifact_id or str(metadata.get("artifact_ref_id") or "") == artifact_ref_id:
+            return record
+    return None
 
 
 def upsert_worker_preview_manifest(

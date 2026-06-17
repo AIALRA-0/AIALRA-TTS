@@ -2251,6 +2251,7 @@ def test_request_worker_artifact_cache_creates_worker_job(tmp_path):
     config_path = write_config(tmp_path)
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     config["webui"]["execution_mode"] = "worker_queue"
+    config["webui"]["max_active_jobs_per_user"] = 1
     config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
     app = create_app(config_path)
     state = app.state.web
@@ -2297,6 +2298,58 @@ def test_request_worker_artifact_cache_creates_worker_job(tmp_path):
     assert job["dispatch_target"] == "worker"
     assert job["metadata"]["worker_action"] == "upload_artifact_cache"
     assert job["metadata"]["artifact_ref_id"] == "ref1"
+
+    second = client.post(artifact["request_cache_url"], json={})
+
+    assert second.status_code == 200
+    assert second.json()["job"]["id"] == job["id"]
+    assert second.json()["dispatch"]["existing"] is True
+    cache_jobs = [item for item in client.get("/api/jobs").json()["jobs"] if item["type"] == "cache_artifact"]
+    assert [item["id"] for item in cache_jobs] == [job["id"]]
+
+
+def test_request_worker_artifact_cache_allows_retry_after_failed_cache_job(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    source_job = create_job_record(
+        state,
+        "process_one",
+        "Remote process",
+        ["python", "-m", "ecse_localizer", "process-one", "--video", r"C:\private\lecture.mp4"],
+        user="admin",
+        metadata={"project_id": "course", "folder_id": "week_1"},
+        dispatch_target="worker",
+    )
+    update_job(
+        state,
+        source_job["id"],
+        {
+            "status": "done",
+            "worker_artifacts": [{"ref_id": "ref1", "source_output_key": "zh_dub_mp4", "name": "lecture_zh_dub.mp4", "size": 123}],
+        },
+    )
+    artifact = next(item for item in client.get("/api/artifacts").json()["artifacts"] if item.get("remote_worker_artifact"))
+    first = client.post(artifact["request_cache_url"], json={})
+    assert first.status_code == 200
+    first_job_id = first.json()["job"]["id"]
+    update_job(state, first_job_id, {"status": "failed", "returncode": 1})
+
+    second = client.post(artifact["request_cache_url"], json={})
+
+    assert second.status_code == 200
+    assert second.json()["job"]["id"] != first_job_id
+    cache_jobs = [item for item in client.get("/api/jobs").json()["jobs"] if item["type"] == "cache_artifact"]
+    assert len(cache_jobs) == 2
 
 
 def test_request_worker_artifact_cache_rejects_known_size_over_remote_quota(tmp_path):
