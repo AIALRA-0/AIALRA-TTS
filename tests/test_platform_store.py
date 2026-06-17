@@ -70,6 +70,39 @@ def test_remote_quota_counts_uploads_and_preview_manifest(tmp_path):
     assert quota["local_used_bytes"] == 0
 
 
+def test_remote_quota_deduplicates_preview_manifest_paths(tmp_path):
+    config = make_config(tmp_path)
+    preview_dir = tmp_path / "previews"
+    preview_dir.mkdir()
+    config["webui"]["preview_dir"] = str(preview_dir)
+    config["webui"]["preview_manifest"] = str(preview_dir / "preview_manifest.json")
+    store = PlatformStore(config)
+    store.bootstrap()
+
+    upload = store.user_upload_dir("admin") / "lecture.mp4"
+    upload.write_bytes(b"upload")
+    preview = preview_dir / "lecture_preview.mp4"
+    thumbnail = preview_dir / "lecture_thumb.jpg"
+    preview.write_bytes(b"preview")
+    thumbnail.write_bytes(b"thumb")
+    Path(config["webui"]["preview_manifest"]).write_text(
+        json.dumps(
+            {
+                "previews": [
+                    {"owner": "admin", "preview_path": str(preview), "thumbnail_path": str(thumbnail)},
+                    {"owner": "admin", "preview_path": str(preview), "thumbnail_path": str(thumbnail)},
+                    {"owner": "admin", "preview_path": str(upload)},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    quota = store.quota_status("admin")
+
+    assert quota["remote_used_bytes"] == len(b"uploadpreviewthumb")
+
+
 def test_can_store_uses_remote_quota(tmp_path):
     config = make_config(tmp_path)
     config["webui"]["default_remote_quota_gb"] = 0.000001

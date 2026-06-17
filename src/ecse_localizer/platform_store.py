@@ -594,7 +594,32 @@ class PlatformStore:
         return user_ok and global_ok
 
     def remote_usage_bytes(self, username: str) -> int:
-        total = directory_size(self.user_upload_dir(username))
+        total = 0
+        seen: set[str] = set()
+
+        def add_file_once(path_value: Any) -> None:
+            nonlocal total
+            if not path_value:
+                return
+            try:
+                target = Path(str(path_value))
+                if not target.exists() or not target.is_file():
+                    return
+                key = str(target.resolve()).lower()
+            except OSError:
+                return
+            if key in seen:
+                return
+            seen.add(key)
+            try:
+                total += target.stat().st_size
+            except OSError:
+                return
+
+        upload_dir = self.user_upload_dir(username)
+        if upload_dir.exists():
+            for item in upload_dir.rglob("*"):
+                add_file_once(item)
         webui = self.config.get("webui", {})
         manifest = Path(str(webui.get("preview_manifest") or Path(webui.get("preview_dir") or Path(self.config["output_dir"]) / "previews") / "preview_manifest.json"))
         if manifest.exists():
@@ -606,8 +631,8 @@ class PlatformStore:
             if isinstance(rows, list):
                 for row in rows:
                     if isinstance(row, dict) and (not row.get("owner") or str(row.get("owner")) == username):
-                        total += file_size(row.get("preview_path") or row.get("path"))
-                        total += file_size(row.get("thumbnail_path"))
+                        add_file_once(row.get("preview_path") or row.get("path"))
+                        add_file_once(row.get("thumbnail_path"))
         return total
 
     def remote_total_usage_bytes(self) -> int:
