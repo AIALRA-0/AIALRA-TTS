@@ -57,6 +57,7 @@ def test_tuning_fields_include_tts_slot_trim_controls():
     assert fields["tts.trim_overlong_audio_to_slot"]["type"] == "bool"
     assert fields["tts.trim_overlong_audio_to_slot"]["value"] is True
     assert fields["tts.shrink_delayed_slots_to_original_timeline"]["type"] == "bool"
+    assert fields["tts.compact_distributed_max_gap_seconds"]["type"] == "float"
     assert fields["tts.slot_trim_tolerance_seconds"]["type"] == "float"
     assert fields["tts.slot_trim_fade_seconds"]["type"] == "float"
 
@@ -84,7 +85,9 @@ def test_static_template_controls_have_save_update_and_delete_actions():
         assert f'id="{button_id}"' in html
         assert '$("' + button_id + '").addEventListener("click"' in js
     assert 'id="jobShrinkDelayedSlots"' in html
+    assert 'id="jobCompactMaxGap"' in html
     assert "tts_shrink_delayed_slots_to_original_timeline" in js
+    assert "tts_compact_max_gap_seconds" in js
     assert "async function deleteCurrentTemplate()" in js
 
 
@@ -254,6 +257,7 @@ def test_template_update_api_applies_to_worker_job_metadata(tmp_path):
             "params": {
                 "quality_mode": "best_quality",
                 "tts_speed": "1.15",
+                "tts_compact_max_gap_seconds": "1.5",
                 "tts_shrink_delayed_slots_to_original_timeline": "false",
                 "unknown_secret": "drop",
             },
@@ -265,6 +269,7 @@ def test_template_update_api_applies_to_worker_job_metadata(tmp_path):
     assert updated["name"] == "Reusable tuned"
     assert updated["params"]["quality_mode"] == "best_quality"
     assert updated["params"]["tts_speed"] == 1.15
+    assert updated["params"]["tts_compact_max_gap_seconds"] == 1.5
     assert updated["params"]["tts_shrink_delayed_slots_to_original_timeline"] is False
     assert "unknown_secret" not in updated["params"]
 
@@ -275,6 +280,7 @@ def test_template_update_api_applies_to_worker_job_metadata(tmp_path):
     assert metadata["template_id"] == template["id"]
     assert metadata["quality_mode"] == "best_quality"
     assert metadata["tts_speed"] == 1.15
+    assert metadata["tts_compact_max_gap_seconds"] == 1.5
     assert metadata["tts_shrink_delayed_slots_to_original_timeline"] is False
 
 

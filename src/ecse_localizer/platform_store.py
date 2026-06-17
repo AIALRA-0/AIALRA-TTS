@@ -27,6 +27,7 @@ TEMPLATE_PARAM_KEYS = {
     "tts_emotion",
     "tts_end_gap_seconds",
     "tts_min_audio_gap_seconds",
+    "tts_compact_max_gap_seconds",
     "tts_shrink_delayed_slots_to_original_timeline",
     "tts_speaker_gender",
     "mux_keep_original_audio",
@@ -531,6 +532,7 @@ class PlatformStore:
                 "tts_emotion": "clear_engaged_teaching",
                 "tts_end_gap_seconds": 0.2,
                 "tts_min_audio_gap_seconds": 0.08,
+                "tts_compact_max_gap_seconds": 2.0,
                 "tts_shrink_delayed_slots_to_original_timeline": True,
                 "tts_speaker_gender": "auto",
                 "mux_keep_original_audio": False,
@@ -835,7 +837,7 @@ def sanitize_template_params(params: dict[str, Any]) -> dict[str, Any]:
     for key, value in raw.items():
         if key not in TEMPLATE_PARAM_KEYS:
             continue
-        if key in {"tts_speed", "tts_end_gap_seconds", "tts_min_audio_gap_seconds", "mux_original_audio_volume"}:
+        if key in {"tts_speed", "tts_end_gap_seconds", "tts_min_audio_gap_seconds", "tts_compact_max_gap_seconds", "mux_original_audio_volume"}:
             out[key] = coerce_float(value)
         elif key in {"tts_shrink_delayed_slots_to_original_timeline", "mux_keep_original_audio", "mux_hard_subtitle", "mux_soft_subtitle"}:
             out[key] = coerce_bool(value)

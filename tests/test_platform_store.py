@@ -258,6 +258,7 @@ def test_parameter_templates_are_user_scoped_and_sanitized(tmp_path):
 
     default_template = store.list_templates("admin")[0]
     assert default_template["params"]["quality_mode"] == "best_quality"
+    assert default_template["params"]["tts_compact_max_gap_seconds"] == 2.0
     assert default_template["params"]["tts_shrink_delayed_slots_to_original_timeline"] is True
 
     template = store.create_template(
@@ -268,12 +269,14 @@ def test_parameter_templates_are_user_scoped_and_sanitized(tmp_path):
             "target_tts_language": "yue",
             "quality_mode": "fast",
             "tts_speed": "1.1",
+            "tts_compact_max_gap_seconds": "1.5",
             "tts_shrink_delayed_slots_to_original_timeline": "false",
             "mux_hard_subtitle": "false",
             "unknown_secret": "must-drop",
         },
     )
     assert template["params"]["tts_speed"] == 1.1
+    assert template["params"]["tts_compact_max_gap_seconds"] == 1.5
     assert template["params"]["tts_shrink_delayed_slots_to_original_timeline"] is False
     assert template["params"]["mux_hard_subtitle"] is False
     assert "unknown_secret" not in template["params"]
