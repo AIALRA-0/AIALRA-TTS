@@ -432,6 +432,16 @@ def test_artifact_download_urls_are_user_scoped(tmp_path):
     assert response.status_code == 401
     assert "Invalid signed URL" in response.text
 
+    admin = TestClient(app)
+    response = admin.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    response = admin.patch("/api/users/student.one", json={"disabled": True})
+    assert response.status_code == 200
+
+    response = anonymous.get(download_url)
+    assert response.status_code == 401
+    assert "Login or signed token required" in response.text
+
 
 def test_ownerless_remote_preview_is_admin_only(tmp_path):
     if TestClient is None:

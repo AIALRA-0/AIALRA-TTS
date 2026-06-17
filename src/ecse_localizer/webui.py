@@ -975,7 +975,8 @@ def token_username(state: WebState, token: str, artifact_id_value: str) -> str |
     username = str(payload.get("u") or "")
     if not username or payload.get("a") != artifact_id_value:
         return None
-    if not state.store.get_user(username):
+    record = state.store.get_user(username)
+    if not record or record.get("disabled"):
         return None
     return username
 
