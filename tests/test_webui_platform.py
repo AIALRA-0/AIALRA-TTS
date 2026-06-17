@@ -537,6 +537,34 @@ def test_upload_enforces_remote_quota(tmp_path):
     assert "Remote quota exceeded" in response.text
 
 
+def test_upload_failure_rolls_back_files_saved_earlier_in_batch(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["default_remote_quota_gb"] = 0.000001
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+
+    response = client.post(
+        "/api/upload",
+        files=[
+            ("files", ("first.mp4", BytesIO(b"x" * 600), "video/mp4")),
+            ("files", ("second.mp4", BytesIO(b"x" * 600), "video/mp4")),
+        ],
+    )
+
+    assert response.status_code == 413
+    assert "Remote quota exceeded" in response.text
+    assert not list(state.store.user_upload_dir("admin").glob("*"))
+    assert client.get("/api/quota").json()["remote_used_bytes"] == 0
+
+
 def test_upload_enforces_global_remote_quota(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

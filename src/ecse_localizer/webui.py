@@ -367,56 +367,64 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         global_base_used = int(quota.get("remote_global_used_bytes") or 0)
         global_quota_bytes = int(quota.get("remote_global_quota_bytes") or 0)
         reserved_bytes = 0
-        for item in files:
-            name = safe_upload_name(item.filename or "upload.bin")
-            suffix = Path(name).suffix.lower()
-            if suffix not in ALLOWED_UPLOAD_SUFFIXES:
-                raise HTTPException(status_code=400, detail=f"Unsupported file type: {suffix}")
-            target = unique_path(state.store.user_upload_dir(user) / name)
-            size = 0
-            try:
-                with target.open("wb") as fh:
-                    while True:
-                        chunk = await item.read(1024 * 1024)
-                        if not chunk:
-                            break
-                        size += len(chunk)
-                        if size > max_bytes:
-                            raise HTTPException(status_code=413, detail=f"Upload exceeds {state.webui.get('max_upload_mb')} MB")
-                        if not upload_fits_quota(base_used, reserved_bytes, size, quota_bytes):
-                            remaining = max(0, quota_bytes - base_used - reserved_bytes)
-                            raise HTTPException(status_code=413, detail=f"Remote quota exceeded. Remaining bytes: {remaining}")
-                        if global_quota_bytes > 0 and not upload_fits_quota(global_base_used, reserved_bytes, size, global_quota_bytes):
-                            remaining = max(0, global_quota_bytes - global_base_used - reserved_bytes)
-                            raise HTTPException(status_code=413, detail=f"Global remote quota exceeded. Remaining bytes: {remaining}")
-                        fh.write(chunk)
-            except HTTPException:
-                await item.close()
+        created_targets: list[Path] = []
+        try:
+            for item in files:
+                name = safe_upload_name(item.filename or "upload.bin")
+                suffix = Path(name).suffix.lower()
+                if suffix not in ALLOWED_UPLOAD_SUFFIXES:
+                    await item.close()
+                    raise HTTPException(status_code=400, detail=f"Unsupported file type: {suffix}")
+                target = unique_path(state.store.user_upload_dir(user) / name)
+                size = 0
+                try:
+                    with target.open("wb") as fh:
+                        while True:
+                            chunk = await item.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            size += len(chunk)
+                            if size > max_bytes:
+                                raise HTTPException(status_code=413, detail=f"Upload exceeds {state.webui.get('max_upload_mb')} MB")
+                            if not upload_fits_quota(base_used, reserved_bytes, size, quota_bytes):
+                                remaining = max(0, quota_bytes - base_used - reserved_bytes)
+                                raise HTTPException(status_code=413, detail=f"Remote quota exceeded. Remaining bytes: {remaining}")
+                            if global_quota_bytes > 0 and not upload_fits_quota(global_base_used, reserved_bytes, size, global_quota_bytes):
+                                remaining = max(0, global_quota_bytes - global_base_used - reserved_bytes)
+                                raise HTTPException(status_code=413, detail=f"Global remote quota exceeded. Remaining bytes: {remaining}")
+                            fh.write(chunk)
+                except Exception:
+                    target.unlink(missing_ok=True)
+                    raise
+                finally:
+                    await item.close()
+                created_targets.append(target)
+                if is_admin(state, user):
+                    saved.append(
+                        {
+                            "name": target.name,
+                            "path": str(target),
+                            "size": size,
+                            "uploaded": True,
+                            "display_path": str(target),
+                        }
+                    )
+                else:
+                    saved.append(
+                        {
+                            "name": target.name,
+                            "path": video_ref_for_path(state, user, str(target)),
+                            "size": size,
+                            "uploaded": True,
+                            "local_video_ref": True,
+                            "display_path": f"uploaded media: {target.name}",
+                        }
+                    )
+                reserved_bytes += size
+        except Exception:
+            for target in created_targets:
                 target.unlink(missing_ok=True)
-                raise
-            await item.close()
-            if is_admin(state, user):
-                saved.append(
-                    {
-                        "name": target.name,
-                        "path": str(target),
-                        "size": size,
-                        "uploaded": True,
-                        "display_path": str(target),
-                    }
-                )
-            else:
-                saved.append(
-                    {
-                        "name": target.name,
-                        "path": video_ref_for_path(state, user, str(target)),
-                        "size": size,
-                        "uploaded": True,
-                        "local_video_ref": True,
-                        "display_path": f"uploaded media: {target.name}",
-                    }
-                )
-            reserved_bytes += size
+            raise
         return {"ok": True, "saved": saved, "quota": state.store.quota_status(user)}
 
     @app.get("/api/tuning")
