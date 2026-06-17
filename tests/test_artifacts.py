@@ -9,6 +9,7 @@ from ecse_localizer.artifacts import (
     artifact_catalog,
     artifact_id,
     cleanup_expired_files,
+    filter_artifact_records,
     filter_artifacts_for_user,
     safe_delete_artifact,
     safe_delete_artifact_record,
@@ -131,6 +132,38 @@ def test_worker_artifact_refs_are_requestable_without_worker_paths(tmp_path):
     signed = with_signed_urls([row], secret="secret", username="student", ttl_seconds=60)[0]
     assert signed["request_cache_url"] == "/api/artifacts/worker_artifact_abc123/request-cache"
     assert "download_url" not in signed
+
+
+def test_artifact_records_filter_by_project_folder_job_and_kind(tmp_path):
+    config = make_config(tmp_path)
+    out = Path(config["output_dir"])
+    video = out / "lecture_zh_dub.mp4"
+    video.write_bytes(b"mp4")
+    report = out / "lecture_report.json"
+    report.write_text(
+        json.dumps({"name": "lecture", "outputs": {"zh_dub_mp4": str(video)}}),
+        encoding="utf-8",
+    )
+    jobs = [
+        {
+            "id": "job-1",
+            "user": "student",
+            "result_report": str(report),
+            "metadata": {"project_id": "course", "folder_id": "week_1"},
+        }
+    ]
+
+    rows = artifact_catalog(config, jobs)
+
+    mp4 = next(row for row in rows if row["kind"] == "zh_dub_mp4")
+    assert mp4["project_id"] == "course"
+    assert mp4["folder_id"] == "week_1"
+    assert mp4["job_id"] == "job-1"
+    assert [row["id"] for row in filter_artifact_records(rows, project_id="course", folder_id="week_1", job_id="job-1", kind="zh_dub_mp4")] == [mp4["id"]]
+    assert filter_artifact_records(rows, project_id="other") == []
+    assert filter_artifact_records(rows, folder_id="week_2") == []
+    assert filter_artifact_records(rows, job_id="job-2") == []
+    assert filter_artifact_records(rows, kind="bilingual_srt") == []
 
 
 def test_artifact_filter_hides_ownerless_rows_from_non_admin():

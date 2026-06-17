@@ -148,6 +148,13 @@ function bindEvents() {
   });
   $("jobFilterFolder").addEventListener("change", refreshJobs);
   $("jobFilterStatus").addEventListener("change", refreshJobs);
+  $("artifactFilterProject").addEventListener("change", () => {
+    renderArtifactFilterFolders();
+    loadArtifacts();
+  });
+  $("artifactFilterFolder").addEventListener("change", loadArtifacts);
+  $("artifactFilterKind").addEventListener("change", loadArtifacts);
+  $("artifactFilterJob").addEventListener("change", loadArtifacts);
   $("jobTemplate").addEventListener("change", applySelectedTemplate);
   ["jobSourceLanguage", "jobSubtitleLanguage", "jobTtsLanguage"].forEach((id) => {
     const el = $(id);
@@ -255,6 +262,7 @@ async function loadDashboard() {
     renderProjectOptions();
     renderFolderOptions();
     renderJobFilterOptions();
+    renderArtifactFilterOptions();
     renderProjects();
   }
   state.reports = data.latest_reports || [];
@@ -518,6 +526,7 @@ async function loadProjects() {
     renderProjectOptions();
     renderFolderOptions();
     renderJobFilterOptions();
+    renderArtifactFilterOptions();
     renderProjects();
   } catch (error) {
     console.warn("Project load failed:", error);
@@ -632,6 +641,48 @@ function renderJobFilterFolders() {
   all.textContent = "全部文件夹";
   select.appendChild(all);
   const project = state.projects.find((item) => item.id === $("jobFilterProject")?.value);
+  for (const folder of project?.folders || []) {
+    const option = document.createElement("option");
+    option.value = folder.id;
+    option.textContent = folder.name || folder.id;
+    select.appendChild(option);
+  }
+  if (selected && Array.from(select.options).some((option) => option.value === selected)) {
+    select.value = selected;
+  }
+}
+
+function renderArtifactFilterOptions() {
+  const select = $("artifactFilterProject");
+  if (!select) return;
+  const selected = select.value;
+  select.innerHTML = "";
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "全部项目";
+  select.appendChild(all);
+  for (const project of state.projects) {
+    const option = document.createElement("option");
+    option.value = project.id;
+    option.textContent = `${project.owner ? `${project.owner} / ` : ""}${project.name}`;
+    select.appendChild(option);
+  }
+  if (selected && state.projects.some((item) => item.id === selected)) {
+    select.value = selected;
+  }
+  renderArtifactFilterFolders();
+}
+
+function renderArtifactFilterFolders() {
+  const select = $("artifactFilterFolder");
+  if (!select) return;
+  const selected = select.value;
+  select.innerHTML = "";
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "全部文件夹";
+  select.appendChild(all);
+  const project = state.projects.find((item) => item.id === $("artifactFilterProject")?.value);
   for (const folder of project?.folders || []) {
     const option = document.createElement("option");
     option.value = folder.id;
@@ -788,6 +839,7 @@ async function createFolder(event) {
     renderProjectOptions();
     renderFolderOptions();
     renderJobFilterOptions();
+    renderArtifactFilterOptions();
     renderProjects();
   } catch (error) {
     toast(`创建文件夹失败：${error.message}`);
@@ -807,6 +859,7 @@ async function saveProjectSettings(projectId) {
     renderProjectOptions();
     renderFolderOptions();
     renderJobFilterOptions();
+    renderArtifactFilterOptions();
     renderProjects();
   } catch (error) {
     toast(`保存项目失败：${error.message}`);
@@ -825,6 +878,7 @@ async function saveFolderSettings(projectId, folderId) {
     renderProjectOptions();
     renderFolderOptions();
     renderJobFilterOptions();
+    renderArtifactFilterOptions();
     renderProjects();
   } catch (error) {
     toast(`保存文件夹失败：${error.message}`);
@@ -1092,12 +1146,26 @@ function renderVideos() {
 
 async function loadArtifacts() {
   try {
-    const data = await api("/api/artifacts");
+    const data = await api(`/api/artifacts${artifactFilterQuery()}`);
     state.artifacts = data.artifacts || [];
     renderArtifacts();
   } catch (error) {
     console.warn("Artifact load failed:", error);
   }
+}
+
+function artifactFilterQuery() {
+  const params = new URLSearchParams();
+  const project = $("artifactFilterProject")?.value || "";
+  const folder = $("artifactFilterFolder")?.value || "";
+  const job = $("artifactFilterJob")?.value.trim() || "";
+  const kind = $("artifactFilterKind")?.value || "";
+  if (project) params.set("project_id", project);
+  if (folder) params.set("folder_id", folder);
+  if (job) params.set("job_id", job);
+  if (kind) params.set("kind", kind);
+  const query = params.toString();
+  return query ? `?${query}` : "";
 }
 
 function renderArtifacts() {

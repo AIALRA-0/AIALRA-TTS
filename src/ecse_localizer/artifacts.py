@@ -46,8 +46,10 @@ def artifact_catalog(config: dict[str, Any], jobs: list[dict[str, Any]] | None =
         except Exception:
             continue
         job = job_by_report.get(str(report_path.resolve()).lower())
+        metadata = job.get("metadata") if job and isinstance(job.get("metadata"), dict) else {}
         owner = job.get("user") if job else report.get("user")
-        project_id = (job.get("metadata") or {}).get("project_id") if job else report.get("project_id")
+        project_id = metadata.get("project_id") if job else report.get("project_id")
+        folder_id = metadata.get("folder_id", "root") if job else report.get("folder_id", "root")
         group_id = artifact_id(report_path)
         bundle_paths = [report_path, report_path.with_suffix(".md")]
         for key, value in (report.get("outputs") or {}).items():
@@ -63,6 +65,7 @@ def artifact_catalog(config: dict[str, Any], jobs: list[dict[str, Any]] | None =
             "mtime": report_path.stat().st_mtime,
             "owner": owner,
             "project_id": project_id,
+            "folder_id": folder_id,
             "job_id": job.get("id") if job else None,
             "report": str(report_path),
             "outputs": len([p for p in bundle_paths if p.exists()]),
@@ -85,6 +88,7 @@ def artifact_catalog(config: dict[str, Any], jobs: list[dict[str, Any]] | None =
                 "mtime": path.stat().st_mtime,
                 "owner": owner,
                 "project_id": project_id,
+                "folder_id": folder_id,
                 "job_id": job.get("id") if job else None,
                 "report": str(report_path),
                 "previewable": path.suffix.lower() in PREVIEWABLE_SUFFIXES,
@@ -98,6 +102,7 @@ def artifact_catalog(config: dict[str, Any], jobs: list[dict[str, Any]] | None =
                 config=config,
                 owner=owner,
                 project_id=project_id,
+                folder_id=folder_id,
                 job_id=job.get("id") if job else None,
                 report=str(report_path),
                 source_output_key=str(key),
@@ -153,6 +158,7 @@ def add_preview_record(
     config: dict[str, Any],
     owner: str | None = None,
     project_id: str | None = None,
+    folder_id: str | None = None,
     job_id: str | None = None,
     report: str | None = None,
     source_output_key: str | None = None,
@@ -175,6 +181,7 @@ def add_preview_record(
         "mtime": preview_path.stat().st_mtime,
         "owner": row.get("owner", owner),
         "project_id": row.get("project_id", project_id),
+        "folder_id": row.get("folder_id", folder_id),
         "job_id": row.get("job_id", job_id),
         "report": row.get("report", report),
         "source_output_key": row.get("source_output_key", source_output_key),
@@ -221,6 +228,32 @@ def filter_artifacts_for_user(artifacts: list[dict[str, Any]], username: str, *,
     if admin:
         return artifacts
     return [row for row in artifacts if row.get("owner") == username]
+
+
+def filter_artifact_records(
+    artifacts: list[dict[str, Any]],
+    *,
+    project_id: str = "",
+    folder_id: str = "",
+    job_id: str = "",
+    kind: str = "",
+) -> list[dict[str, Any]]:
+    project = str(project_id or "").strip()
+    folder = str(folder_id or "").strip()
+    job = str(job_id or "").strip()
+    artifact_kind = str(kind or "").strip()
+    out: list[dict[str, Any]] = []
+    for row in artifacts:
+        if project and str(row.get("project_id") or "") != project:
+            continue
+        if folder and folder != "all" and str(row.get("folder_id") or "root") != folder:
+            continue
+        if job and str(row.get("job_id") or row.get("source_job_id") or "") != job:
+            continue
+        if artifact_kind and str(row.get("kind") or "") != artifact_kind:
+            continue
+        out.append(row)
+    return out
 
 
 def find_artifact(artifacts: list[dict[str, Any]], aid: str) -> dict[str, Any] | None:

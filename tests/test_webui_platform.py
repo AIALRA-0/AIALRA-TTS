@@ -114,6 +114,19 @@ def test_static_job_history_has_deleted_filter_and_restore_action():
     assert '`/api/jobs/${encodeURIComponent(jobId)}/restore`' in js
 
 
+def test_static_artifact_history_has_scope_filters():
+    static_root = Path(__file__).parents[1] / "src" / "ecse_localizer" / "static"
+    html = (static_root / "index.html").read_text(encoding="utf-8")
+    js = (static_root / "app.js").read_text(encoding="utf-8")
+
+    for element_id in ["artifactFilterProject", "artifactFilterFolder", "artifactFilterJob", "artifactFilterKind"]:
+        assert f'id="{element_id}"' in html
+    assert "function artifactFilterQuery()" in js
+    for field in ["project_id", "folder_id", "job_id", "kind"]:
+        assert f'params.set("{field}"' in js
+    assert "renderArtifactFilterOptions()" in js
+
+
 def test_webui_login_project_and_quota(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
@@ -905,6 +918,70 @@ def test_artifact_download_urls_are_user_scoped(tmp_path):
     response = anonymous.get(download_url)
     assert response.status_code == 401
     assert "Login or signed token required" in response.text
+
+
+def test_artifacts_endpoint_filters_by_project_folder_job_and_kind(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    course = state.store.create_project("admin", "Course")
+    week_1 = state.store.create_folder("admin", course["id"], "Week 1")
+    other = state.store.create_project("admin", "Other")
+    output = Path(state.config["output_dir"])
+    course_video = output / "course_zh_dub.mp4"
+    course_report = output / "course_report.json"
+    other_video = output / "other_zh_dub.mp4"
+    other_report = output / "other_report.json"
+    course_video.write_bytes(b"course mp4")
+    other_video.write_bytes(b"other mp4")
+    course_report.write_text(
+        json.dumps({"name": "course", "outputs": {"zh_dub_mp4": str(course_video)}}),
+        encoding="utf-8",
+    )
+    other_report.write_text(
+        json.dumps({"name": "other", "outputs": {"zh_dub_mp4": str(other_video)}}),
+        encoding="utf-8",
+    )
+    course_job = create_job_record(
+        state,
+        "process_one",
+        "Course job",
+        ["python", "-m", "ecse_localizer", "process-one"],
+        user="admin",
+        metadata={"project_id": course["id"], "folder_id": week_1["id"]},
+        dispatch_target="worker",
+    )
+    other_job = create_job_record(
+        state,
+        "process_one",
+        "Other job",
+        ["python", "-m", "ecse_localizer", "process-one"],
+        user="admin",
+        metadata={"project_id": other["id"], "folder_id": "root"},
+        dispatch_target="worker",
+    )
+    update_job(state, course_job["id"], {"status": "done", "result_report": str(course_report)})
+    update_job(state, other_job["id"], {"status": "done", "result_report": str(other_report)})
+
+    response = client.get(f"/api/artifacts?project_id={course['id']}&folder_id={week_1['id']}&kind=zh_dub_mp4")
+    assert response.status_code == 200
+    names = [row["name"] for row in response.json()["artifacts"]]
+    assert names == ["course_zh_dub.mp4"]
+
+    response = client.get(f"/api/artifacts?job_id={other_job['id']}&kind=zh_dub_mp4")
+    assert response.status_code == 200
+    names = [row["name"] for row in response.json()["artifacts"]]
+    assert names == ["other_zh_dub.mp4"]
+
+    response = client.get(f"/api/artifacts?project_id={course['id']}&folder_id=root")
+    assert response.status_code == 200
+    assert response.json()["artifacts"] == []
 
 
 def test_ownerless_remote_preview_is_admin_only(tmp_path):

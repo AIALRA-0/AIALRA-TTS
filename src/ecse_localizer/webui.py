@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from .artifacts import (
     artifact_catalog,
     cleanup_expired_files,
+    filter_artifact_records,
     filter_artifacts_for_user,
     find_artifact,
     preview_cache_dir,
@@ -242,10 +243,17 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return effective_language_capabilities(state, llm=llm, tts=tts)
 
     @app.get("/api/artifacts")
-    def artifacts(user: str = Depends(require_user)) -> dict[str, Any]:
+    def artifacts(
+        project_id: str = "",
+        folder_id: str = "",
+        job_id: str = "",
+        kind: str = "",
+        user: str = Depends(require_user),
+    ) -> dict[str, Any]:
         state.reload_config()
         rows = artifact_catalog(state.config, list_jobs(state, None))
         rows = filter_artifacts_for_user(rows, user, admin=is_admin(state, user))
+        rows = filter_artifact_records(rows, project_id=project_id, folder_id=folder_id, job_id=job_id, kind=kind)
         rows = with_signed_urls(rows[:300], secret=download_secret(state), username=user, ttl_seconds=int(state.webui.get("signed_url_ttl_seconds", 900)))
         return {"artifacts": rows, "quota": state.store.quota_status(user)}
 

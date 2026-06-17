@@ -286,6 +286,33 @@
             <button id="cleanupDryRunBtn" type="button" class="secondary">清理预估</button>
             <button id="cleanupApplyBtn" type="button" class="danger">执行清理</button>
           </div>
+          <div class="task-grid compact-grid">
+            <label>
+              项目
+              <select id="artifactFilterProject"></select>
+            </label>
+            <label>
+              文件夹
+              <select id="artifactFilterFolder"></select>
+            </label>
+            <label>
+              任务 ID
+              <input id="artifactFilterJob" placeholder="可选" />
+            </label>
+            <label>
+              类型
+              <select id="artifactFilterKind">
+                <option value="">全部类型</option>
+                <option value="report_bundle">report_bundle</option>
+                <option value="zh_dub_mp4">zh_dub_mp4</option>
+                <option value="zh_dub_bilingual_hardsub_mp4">zh_dub_bilingual_hardsub_mp4</option>
+                <option value="zh_dub_wav">zh_dub_wav</option>
+                <option value="bilingual_srt">bilingual_srt</option>
+                <option value="bilingual_ass">bilingual_ass</option>
+                <option value="remote_preview">remote_preview</option>
+              </select>
+            </label>
+          </div>
           <pre id="cleanupResult" class="log-box small"></pre>
           <div id="artifactsTable" class="table artifact-table"></div>
           <div id="artifactPreview" class="preview-panel"></div>
