@@ -680,6 +680,14 @@ def test_worker_status_changes_extracts_result_paths_as_fields():
     assert changes["result_video"] == "demo.mp4"
 
 
+def test_worker_status_changes_rejects_worker_deleted_status():
+    with pytest.raises(Exception) as excinfo:
+        worker_status_changes({"status": "deleted"})
+
+    assert getattr(excinfo.value, "status_code", None) == 400
+    assert "Unsupported worker job status: deleted" in str(excinfo.value)
+
+
 def test_worker_status_changes_preserves_running_progress_and_metrics():
     changes = worker_status_changes(
         {

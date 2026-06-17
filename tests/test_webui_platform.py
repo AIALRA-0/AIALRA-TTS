@@ -1719,6 +1719,42 @@ def test_worker_status_update_refreshes_heartbeat_and_job_progress(tmp_path):
     assert response.json()["quota"]["local_used_bytes"] == 12345
 
 
+def test_worker_status_update_cannot_soft_delete_job(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+
+    record = create_job_record(
+        state,
+        "audit",
+        "Remote audit",
+        ["python", "-m", "ecse_localizer", "audit"],
+        user="admin",
+        metadata={},
+        dispatch_target="worker",
+    )
+    update_job(state, record["id"], {"status": "claimed", "claimed_by": "worker-1"})
+
+    response = client.post(
+        f"/api/worker/jobs/{record['id']}/status",
+        headers={"x-worker-token": "worker-token"},
+        json={"status": "deleted", "worker_id": "worker-1"},
+    )
+
+    assert response.status_code == 400
+    assert "Unsupported worker job status: deleted" in response.text
+    assert read_job(state, record["id"])["status"] == "claimed"
+
+
 def test_metrics_endpoint_returns_live_worker_metrics_without_paths(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

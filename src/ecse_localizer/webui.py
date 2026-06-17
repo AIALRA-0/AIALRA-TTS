@@ -1885,7 +1885,7 @@ def requeue_stale_worker_jobs_locked(state: WebState) -> list[dict[str, Any]]:
 
 
 def worker_status_changes(body: dict[str, Any]) -> dict[str, Any]:
-    allowed = {"queued", "claimed", "running", "paused", "retrying", "done", "passed", "failed", "cancelled", "deleted"}
+    allowed = {"queued", "claimed", "running", "paused", "retrying", "done", "passed", "failed", "cancelled"}
     status = str(body.get("status") or "").lower()
     if status not in allowed:
         raise HTTPException(status_code=400, detail=f"Unsupported worker job status: {status}")
