@@ -12,6 +12,7 @@ from . import __version__
 from .artifacts import cleanup_expired_files
 from .asr import transcribe_audio
 from .audio_enhance import enhance_audio
+from .capabilities import language_capabilities
 from .compact import compact_rerender_from_report
 from .config import load_config, privacy_guard
 from .ffmpeg_utils import cut_video, extract_audio, media_duration
@@ -252,14 +253,16 @@ def cmd_worker_status(config: dict[str, Any]) -> int:
     store = PlatformStore(config)
     store.bootstrap()
     llm = LocalLLMClient(config).status()
+    tts = tts_health(config)
     payload = {
         "worker_id": "local-windows-worker",
         "version": __version__,
         "privacy": config.get("privacy", {}),
         "metrics": collect_system_metrics(config),
         "media_refs": collect_worker_media_refs(config),
-        "tts": tts_health(config),
+        "tts": tts,
         "llm": llm.__dict__,
+        "capabilities": language_capabilities(config, llm_status=llm, tts_status=tts),
         "worker": store.worker_status(),
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))

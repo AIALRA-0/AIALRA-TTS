@@ -32,7 +32,7 @@ Deployment steps:
    - Set small Contabo remote quota defaults.
    - Set `webui.default_project_quota_gb` to the per-project generated-artifact budget.
    - Set `webui.max_active_jobs_per_user` and `webui.max_active_jobs_global` conservatively for the first public test.
-   - Set `asr.supported_languages`, `translation.supported_target_languages`, and `tts.supported_languages` to match the Windows worker's installed models.
+   - Set `asr.supported_languages`, `translation.supported_target_languages`, and `tts.supported_languages` as fallback hints; when the Windows worker is online, its heartbeat/claim `capabilities` payload should be treated as the authoritative local model capability view.
    - Keep full media storage on the Windows worker.
    - Set `webui.execution_mode=worker_queue` on Contabo.
    - Keep `webui.allow_remote_media_uploads=false` on Contabo unless a deliberate short-lived cache policy is approved.
@@ -85,7 +85,7 @@ Deployment steps:
    - project creation works
    - project folders can be created and selected for jobs
    - parameter templates can be listed, created, selected, and applied to queued worker jobs
-   - the task form displays ASR/subtitle/TTS language support hints from the configured local model capabilities
+   - the task form displays ASR/subtitle/TTS language support hints from the online Windows worker heartbeat when available, otherwise from configured fallback capabilities
    - the task form can queue both `fidelity_audit` and `repair_fidelity`; repair jobs must use the selected report and default to its sibling `*_fidelity_report.json`
    - user quota is enforced
    - `remote_quota_bytes` limits Contabo uploads plus preview-cache files, while `local_quota_bytes` remains the Windows worker storage budget
@@ -97,6 +97,7 @@ Deployment steps:
    - admins can disable users and update local/remote user quotas without disabling the last active admin
    - project quota usage is visible for generated managed artifacts
    - worker heartbeat appears online
+   - worker heartbeat/claim payloads can publish ASR, translation, and TTS language capabilities; `/api/capabilities` should report `source=worker_heartbeat` while that worker is online
    - unsigned worker requests are rejected when `worker_auth_mode=hmac`
    - replaying the same signed worker request with the same nonce is rejected
    - job submission while the worker is offline shows a queued/waiting state and records the worker status at submit time

@@ -397,6 +397,44 @@ def test_worker_status_update_refreshes_heartbeat_and_job_progress(tmp_path):
     assert response.json()["quota"]["local_used_bytes"] == 12345
 
 
+def test_capabilities_prefer_online_worker_heartbeat(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config["webui"]["worker_auth_mode"] = "hmac"
+    config["translation"]["supported_target_languages"] = ["zh-CN"]
+    config["tts"] = {"supported_languages": ["zh-CN"], "language": "zh-CN"}
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    client = TestClient(app)
+
+    worker_caps = {
+        "asr": {"supported_languages": ["auto", "en", "ja"], "current_supported": True},
+        "translation": {"supported_target_languages": ["zh-CN", "ja"], "current_supported": True},
+        "tts": {"supported_languages": ["zh-CN", "ja"], "current_supported": True},
+    }
+    body = json.dumps({"worker_id": "worker-1", "capabilities": worker_caps}, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    response = client.post(
+        "/api/worker/heartbeat",
+        data=body.encode("utf-8"),
+        headers=worker_headers("worker-token", path="/api/worker/heartbeat", body=body),
+    )
+    assert response.status_code == 200
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    response = client.get("/api/capabilities")
+
+    assert response.status_code == 200
+    caps = response.json()
+    assert caps["source"] == "worker_heartbeat"
+    assert caps["worker_id"] == "worker-1"
+    assert caps["tts"]["supported_languages"] == ["zh-CN", "ja"]
+    assert caps["translation"]["supported_target_languages"] == ["zh-CN", "ja"]
+
+
 def test_running_worker_job_cancel_is_polled_and_finalized(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

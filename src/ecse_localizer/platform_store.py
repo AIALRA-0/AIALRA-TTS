@@ -11,7 +11,7 @@ from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from .metrics import sanitize_metrics
-from .redaction import sanitize_remote_text
+from .redaction import sanitize_remote_text, sanitize_remote_value
 from .utils import PROJECT_ROOT, ensure_dir, read_json, write_json
 
 
@@ -408,13 +408,21 @@ class PlatformStore:
         return float(web.get("default_project_quota_gb", web.get("default_local_quota_gb", 500)) or 500)
 
     def record_worker_heartbeat(self, payload: dict[str, Any]) -> dict[str, Any]:
+        previous = self._load(self.worker_path, {})
+        capabilities = sanitize_worker_capabilities(payload.get("capabilities"))
+        if not capabilities and isinstance(previous, dict):
+            capabilities = previous.get("capabilities") if isinstance(previous.get("capabilities"), dict) else {}
+        media_refs = sanitize_worker_media_refs(payload.get("media_refs"))
+        if not isinstance(payload.get("media_refs"), list) and isinstance(previous, dict):
+            media_refs = previous.get("media_refs") if isinstance(previous.get("media_refs"), list) else []
         row = {
             "status": str(payload.get("status") or "online"),
             "worker_id": str(payload.get("worker_id") or "local-windows-worker"),
             "version": str(payload.get("version") or ""),
             "message": sanitize_remote_text(payload.get("message") or ""),
             "metrics": sanitize_metrics(payload.get("metrics")) if isinstance(payload.get("metrics"), dict) else {},
-            "media_refs": sanitize_worker_media_refs(payload.get("media_refs")),
+            "media_refs": media_refs,
+            "capabilities": capabilities,
             "updated_at": iso_now(),
             "updated_at_epoch": int(time.time()),
         }
@@ -525,6 +533,13 @@ def safe_worker_media_name(value: Any) -> str:
     else:
         candidate = posix_name or windows_name
     return clean_name(sanitize_remote_text(candidate), default="worker-media")
+
+
+def sanitize_worker_capabilities(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    cleaned = sanitize_remote_value(value)
+    return cleaned if isinstance(cleaned, dict) else {}
 
 
 def validate_username(username: str) -> None:

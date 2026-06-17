@@ -30,16 +30,18 @@ function New-WorkerSignedHeaders {
     [string]$Body
   )
   $timestamp = [string][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+  $nonce = [guid]::NewGuid().ToString("N")
   $encoding = [System.Text.Encoding]::UTF8
   $bodyBytes = $encoding.GetBytes($Body)
   $sha = [System.Security.Cryptography.SHA256]::Create()
   $bodyHash = ConvertTo-LowerHex -Bytes ($sha.ComputeHash($bodyBytes))
-  $message = "$timestamp`n$($Method.ToUpperInvariant())`n$Path`n$bodyHash"
+  $message = "$timestamp`n$($Method.ToUpperInvariant())`n$Path`n$nonce`n$bodyHash"
   $hmac = [System.Security.Cryptography.HMACSHA256]::new($encoding.GetBytes($Token))
   $signature = ConvertTo-LowerHex -Bytes ($hmac.ComputeHash($encoding.GetBytes($message)))
   return @{
     "X-Worker-Auth" = "hmac-sha256"
     "X-Worker-Timestamp" = $timestamp
+    "X-Worker-Nonce" = $nonce
     "X-Worker-Signature" = $signature
   }
 }

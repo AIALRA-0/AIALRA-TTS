@@ -17,11 +17,14 @@ import requests
 
 from . import __version__
 from .artifacts import DOWNLOADABLE_OUTPUTS
+from .capabilities import language_capabilities
 from .config import load_config
 from .job_config import write_job_config
+from .llm_local import LocalLLMClient
 from .metrics import collect_system_metrics
 from .redaction import sanitize_remote_command, sanitize_remote_text
 from .scan import VIDEO_SUFFIXES, should_skip
+from .tts import tts_health
 from .utils import PROJECT_ROOT, ensure_dir, read_json, run_cmd, write_json
 
 
@@ -76,6 +79,7 @@ def claim_job(remote_base_url: str, worker_token: str, worker_id: str, config: d
         "version": __version__,
         "metrics": collect_system_metrics(config),
         "media_refs": collect_worker_media_refs(config),
+        "capabilities": worker_language_capabilities(config),
     }
     body = canonical_json(payload)
     response = requests.post(
@@ -198,6 +202,18 @@ def run_worker_job(
 def worker_action(job: dict[str, Any]) -> str:
     metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
     return str(metadata.get("worker_action") or "").strip()
+
+
+def worker_language_capabilities(config: dict[str, Any]) -> dict[str, Any]:
+    try:
+        llm = LocalLLMClient(config).status()
+    except Exception:
+        llm = {"available": False, "backend": "none", "model": None}
+    try:
+        tts = tts_health(config)
+    except Exception:
+        tts = {"backend": "none"}
+    return language_capabilities(config, llm_status=llm, tts_status=tts)
 
 
 def run_worker_action(

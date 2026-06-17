@@ -176,6 +176,10 @@ def test_worker_heartbeat_redacts_message_and_media_ref_names(tmp_path):
             "worker_id": "worker-1",
             "message": f"watching {win_root}\\lecture.mp4 via http://{private_ip}:8787/?token=abc123",
             "metrics": {"disk": {"path": f"{win_root}\\_localizer_output", "used_percent": 55}},
+            "capabilities": {
+                "asr": {"supported_languages": ["auto", "en"]},
+                "tts": {"supported_languages": ["zh-CN"], "note": f"model at {win_root}\\voice.onnx"},
+            },
             "media_refs": [
                 {
                     "ref_id": "media-1",
@@ -197,3 +201,9 @@ def test_worker_heartbeat_redacts_message_and_media_ref_names(tmp_path):
     assert "path" not in row["metrics"]["disk"]
     assert row["media_refs"][0]["name"] == "lecture.mp4"
     assert "path" not in row["media_refs"][0]
+    assert row["capabilities"]["tts"]["note"] == "model at <local-path>"
+
+    updated = store.record_worker_heartbeat({"status": "online", "worker_id": "worker-1", "message": "status-only ping"})
+
+    assert updated["capabilities"] == row["capabilities"]
+    assert updated["media_refs"] == row["media_refs"]

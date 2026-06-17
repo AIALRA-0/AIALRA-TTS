@@ -189,6 +189,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         llm = LocalLLMClient(state.config).status()
         tts = tts_health(state.config)
         worker = worker_status_payload(state)
+        caps = effective_language_capabilities(state, llm=llm, tts=tts, worker=worker)
         return {
             "input_dir": state.config["input_dir"],
             "output_dir": state.config["output_dir"],
@@ -200,7 +201,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             "latest_jobs": list_jobs(state, user)[:8],
             "tts": tts,
             "llm": llm.__dict__,
-            "capabilities": language_capabilities(state.config, llm_status=llm, tts_status=tts),
+            "capabilities": caps,
             "quota": state.store.quota_status(user),
             "projects": state.store.list_projects(user, admin=is_admin(state, user)),
             "worker": worker,
@@ -222,7 +223,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         state.reload_config()
         llm = LocalLLMClient(state.config).status()
         tts = tts_health(state.config)
-        return language_capabilities(state.config, llm_status=llm, tts_status=tts)
+        return effective_language_capabilities(state, llm=llm, tts=tts)
 
     @app.get("/api/artifacts")
     def artifacts(user: str = Depends(require_user)) -> dict[str, Any]:
@@ -528,6 +529,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                 "worker_id": worker_id,
                 "version": str(body.get("version") or ""),
                 "metrics": body.get("metrics") if isinstance(body.get("metrics"), dict) else {},
+                "media_refs": body.get("media_refs") if isinstance(body.get("media_refs"), list) else None,
+                "capabilities": body.get("capabilities") if isinstance(body.get("capabilities"), dict) else {},
                 "message": "claim poll",
             }
         )
@@ -1517,6 +1520,27 @@ def worker_status_payload(state: WebState) -> dict[str, Any]:
         }
     )
     return row
+
+
+def effective_language_capabilities(
+    state: WebState,
+    *,
+    llm: Any | None = None,
+    tts: dict[str, Any] | None = None,
+    worker: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    execution_mode = str(state.webui.get("execution_mode", "local_subprocess") or "local_subprocess")
+    if execution_mode == "worker_queue":
+        worker = worker or worker_status_payload(state)
+        worker_caps = worker.get("capabilities") if isinstance(worker, dict) else {}
+        if worker.get("heartbeat_online") and isinstance(worker_caps, dict) and worker_caps:
+            caps = dict(worker_caps)
+            caps["source"] = "worker_heartbeat"
+            caps["worker_id"] = worker.get("worker_id")
+            return caps
+    caps = language_capabilities(state.config, llm_status=llm or LocalLLMClient(state.config).status(), tts_status=tts or tts_health(state.config))
+    caps["source"] = "webui_config"
+    return caps
 
 
 def dashboard_metrics(state: WebState, worker: dict[str, Any] | None = None) -> dict[str, Any]:
