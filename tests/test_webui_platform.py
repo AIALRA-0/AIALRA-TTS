@@ -833,8 +833,21 @@ def test_reports_and_dashboard_are_user_scoped(tmp_path):
     state.store.create_user("student.one", "long-enough-password")
     state.store.create_user("student.two", "another-long-password")
     output = Path(state.config["output_dir"])
+    one_video = output / "one_source.mp4"
+    one_dub = output / "one_zh_dub.mp4"
+    one_video.write_bytes(b"source")
+    one_dub.write_bytes(b"dub")
+    one_report = output / "one_report.json"
     (output / "one_report.json").write_text(
-        json.dumps({"name": "one", "user": "student.one", "qa": {"pass": True, "issues": []}}),
+        json.dumps(
+            {
+                "name": "one",
+                "user": "student.one",
+                "source_video": str(one_video),
+                "outputs": {"zh_dub_mp4": str(one_dub)},
+                "qa": {"pass": True, "issues": []},
+            }
+        ),
         encoding="utf-8",
     )
     (output / "two_report.json").write_text(
@@ -851,19 +864,76 @@ def test_reports_and_dashboard_are_user_scoped(tmp_path):
         assert response.status_code == 200
         response = student_one.get("/api/reports")
         assert response.status_code == 200
-        assert {report["name"] for report in response.json()["reports"]} == {"one"}
+        reports = response.json()["reports"]
+        assert {report["name"] for report in reports} == {"one"}
+        report = reports[0]
+        rendered_reports = json.dumps(reports, ensure_ascii=False)
+        assert report["path"].startswith("report-ref:")
+        assert report["report_ref"] is True
+        assert report["display_path"] == "report: one_report.json"
+        assert report["video"] == "one_source.mp4"
+        assert report["zh_dub_mp4"] == "one_zh_dub.mp4"
+        assert str(one_report) not in rendered_reports
+        assert str(one_video) not in rendered_reports
+        assert str(one_dub) not in rendered_reports
         response = student_one.get("/api/dashboard")
         assert response.status_code == 200
         payload = response.json()
         assert payload["report_count"] == 1
         assert {report["name"] for report in payload["latest_reports"]} == {"one"}
+        rendered_dashboard = json.dumps(payload["latest_reports"], ensure_ascii=False)
+        assert str(one_report) not in rendered_dashboard
+        assert str(one_video) not in rendered_dashboard
+        assert str(one_dub) not in rendered_dashboard
 
     with TestClient(app) as admin:
         response = admin.post("/api/login", json={"username": "admin", "password": "local-password"})
         assert response.status_code == 200
         response = admin.get("/api/reports")
         assert response.status_code == 200
-        assert {report["name"] for report in response.json()["reports"]} == {"one", "two", "legacy"}
+        admin_reports = response.json()["reports"]
+        assert {report["name"] for report in admin_reports} == {"one", "two", "legacy"}
+        assert str(one_report) in {report["path"] for report in admin_reports}
+
+
+def test_report_refs_allow_non_admin_report_jobs_without_path_leak(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    state.store.create_user("student.one", "long-enough-password")
+    project = state.store.create_project("student.one", "Course")
+    report_path = Path(state.config["output_dir"]) / "student_report.json"
+    report_path.write_text(
+        json.dumps({"name": "student-report", "user": "student.one", "qa": {"pass": True, "issues": []}}),
+        encoding="utf-8",
+    )
+
+    client = TestClient(app)
+    response = client.post("/api/login", json={"username": "student.one", "password": "long-enough-password"})
+    assert response.status_code == 200
+    report_ref = client.get("/api/reports").json()["reports"][0]["path"]
+    assert report_ref.startswith("report-ref:")
+
+    response = client.post(
+        "/api/jobs",
+        json={"type": "fidelity_audit", "report": report_ref, "project_id": project["id"], "folder_id": "root"},
+    )
+    assert response.status_code == 200
+    rendered = json.dumps(response.json(), ensure_ascii=False)
+    assert str(report_path) not in rendered
+    assert response.json()["job"]["queued_for_worker"] is True
+
+    response = client.post(
+        "/api/jobs",
+        json={"type": "fidelity_audit", "report": str(report_path), "project_id": project["id"], "folder_id": "root"},
+    )
+    assert response.status_code == 400
+    assert "Report reference is required" in response.text
 
 
 def test_dashboard_redacts_storage_paths_for_non_admin(tmp_path):

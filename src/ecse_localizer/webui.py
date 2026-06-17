@@ -847,6 +847,10 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         job_type = str(body.get("type", ""))
         if job_type == "process_one":
             body["video"] = resolve_video_reference(state, user, str(body.get("video") or ""))
+        if job_type in {"compact_rerender", "fidelity_audit", "repair_fidelity"}:
+            body["report"] = resolve_report_reference(state, user, str(body.get("report") or ""))
+        if job_type == "repair_fidelity" and body.get("fidelity_report") and not is_admin(state, user):
+            raise HTTPException(status_code=400, detail="Fidelity report reference is admin-only")
         execution_mode = str(state.webui.get("execution_mode", "local_subprocess"))
         worker_queue = execution_mode == "worker_queue" or bool(body.get("queue_for_worker"))
         command, title = build_job_command(job_type, body, state, validate_paths=not worker_queue)
@@ -2131,6 +2135,38 @@ def resolve_video_reference(state: WebState, user: str, video: str) -> str:
     raise HTTPException(status_code=404, detail="Video reference not found")
 
 
+def report_ref_for_path(state: WebState, user: str, path: str) -> str:
+    resolved = str(Path(path).resolve()).lower()
+    secret = download_secret(state)
+    body = f"report\n{user}\n{resolved}".encode("utf-8", errors="ignore")
+    digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()[:24]
+    return f"report-ref:{digest}"
+
+
+def resolve_report_reference(state: WebState, user: str, report: str) -> str:
+    value = str(report or "").strip()
+    if not value.startswith("report-ref:"):
+        if is_admin(state, user):
+            return value
+        raise HTTPException(status_code=400, detail="Report reference is required")
+    reports = list_reports(state.config, limit=10000)
+    jobs_by_report: dict[str, dict[str, Any]] = {}
+    for job in list_jobs(state, None):
+        report_path = str(job.get("result_report") or "")
+        if report_path:
+            jobs_by_report[str(Path(report_path).resolve()).lower()] = job
+    for row in reports:
+        path = str(row.get("path") or "")
+        key = str(Path(path).resolve()).lower()
+        job = jobs_by_report.get(key)
+        owner = str((job or {}).get("user") or row.get("owner") or "")
+        if owner != user:
+            continue
+        if report_ref_for_path(state, user, path) == value:
+            return path
+    raise HTTPException(status_code=404, detail="Report reference not found")
+
+
 def worker_media_video_records(state: WebState) -> list[dict[str, Any]]:
     worker = worker_status_payload(state)
     media_refs = worker.get("media_refs") if isinstance(worker, dict) else []
@@ -2189,10 +2225,24 @@ def list_visible_reports(state: WebState, user: str, limit: int = 50) -> list[di
         if admin or owner == user:
             row = dict(report)
             row["owner"] = owner
+            if not admin:
+                row = public_report_record(state, user, row)
             visible.append(row)
         if len(visible) >= limit:
             break
     return visible
+
+
+def public_report_record(state: WebState, user: str, row: dict[str, Any]) -> dict[str, Any]:
+    report_path = str(row.get("path") or "")
+    out = dict(row)
+    out["path"] = report_ref_for_path(state, user, report_path)
+    out["report_ref"] = True
+    out["display_path"] = f"report: {file_display_name(report_path)}"
+    for key in ["video", "zh_dub_mp4", "hard_sub"]:
+        if out.get(key):
+            out[key] = file_display_name(str(out[key]))
+    return out
 
 
 def report_summary(path: Path) -> dict[str, Any]:

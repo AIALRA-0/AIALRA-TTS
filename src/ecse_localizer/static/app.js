@@ -1120,7 +1120,8 @@ function renderReports() {
     status.className = `status ${report.pass ? "ok" : "warn"}`;
     status.textContent = report.pass ? "PASS" : "CHECK";
     const name = document.createElement("div");
-    name.innerHTML = `<strong>${escapeHtml(report.name)}</strong><div class="cell-path">${escapeHtml(report.path)}</div>`;
+    const displayPath = report.display_path || report.path;
+    name.innerHTML = `<strong>${escapeHtml(report.name)}</strong><div class="cell-path">${escapeHtml(displayPath)}</div>`;
     table.append(row([status, name, String(report.issues ?? "-"), report.tts || "-"]));
   }
 }
