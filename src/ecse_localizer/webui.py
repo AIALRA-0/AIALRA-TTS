@@ -202,10 +202,12 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         worker = worker_status_payload(state)
         caps = effective_language_capabilities(state, llm=llm, tts=tts, worker=worker)
         jobs = list_jobs(state, user)
+        storage = dashboard_storage_summary(state, user)
         return {
-            "input_dir": state.config["input_dir"],
-            "output_dir": state.config["output_dir"],
-            "upload_dir": str(state.store.user_upload_dir(user)),
+            "input_dir": storage["input"],
+            "output_dir": storage["output"],
+            "upload_dir": storage["upload"],
+            "storage_summary": storage,
             "upload_policy": browser_upload_policy(state),
             "video_count": len(videos),
             "report_count": len(list_visible_reports(state, user, limit=10000)),
@@ -993,6 +995,22 @@ def is_admin(state: WebState, username: str) -> bool:
 def require_admin_access(state: WebState, username: str) -> None:
     if not is_admin(state, username):
         raise HTTPException(status_code=403, detail="Admin required")
+
+
+def dashboard_storage_summary(state: WebState, username: str) -> dict[str, Any]:
+    if is_admin(state, username):
+        return {
+            "redacted": False,
+            "input": str(state.config["input_dir"]),
+            "output": str(state.config["output_dir"]),
+            "upload": str(state.store.user_upload_dir(username)),
+        }
+    return {
+        "redacted": True,
+        "input": "managed course media",
+        "output": "managed output storage",
+        "upload": "your upload storage",
+    }
 
 
 def can_access_record(state: WebState, username: str, record: dict[str, Any]) -> bool:

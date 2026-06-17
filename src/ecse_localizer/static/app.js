@@ -233,7 +233,7 @@ function stopLiveTimers() {
 
 async function loadDashboard() {
   const data = await api("/api/dashboard");
-  $("pathLine").textContent = `输入：${data.input_dir}    输出：${data.output_dir}`;
+  $("pathLine").textContent = dashboardStorageLine(data);
   $("metricVideos").textContent = data.video_count;
   $("metricReports").textContent = data.report_count;
   $("metricTts").textContent = data.tts.backend || "-";
@@ -250,6 +250,17 @@ async function loadDashboard() {
   renderProjects();
   state.reports = data.latest_reports || [];
   renderReports();
+}
+
+function dashboardStorageLine(data) {
+  const storage = data.storage_summary || {};
+  const input = storage.input || data.input_dir || "-";
+  const output = storage.output || data.output_dir || "-";
+  const upload = storage.upload || data.upload_dir || "-";
+  if (storage.redacted) {
+    return `存储：${input} · ${output} · ${upload}`;
+  }
+  return `输入：${input}    输出：${output}    上传：${upload}`;
 }
 
 async function loadMetrics() {

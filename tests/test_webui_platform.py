@@ -510,6 +510,43 @@ def test_reports_and_dashboard_are_user_scoped(tmp_path):
         assert {report["name"] for report in response.json()["reports"]} == {"one", "two", "legacy"}
 
 
+def test_dashboard_redacts_storage_paths_for_non_admin(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    app = create_app(config_path)
+    state = app.state.web
+    state.store.create_user("student.one", "long-enough-password")
+    raw_input = str(state.config["input_dir"])
+    raw_output = str(state.config["output_dir"])
+    raw_upload = str(state.store.user_upload_dir("student.one"))
+
+    with TestClient(app) as student:
+        response = student.post("/api/login", json={"username": "student.one", "password": "long-enough-password"})
+        assert response.status_code == 200
+        response = student.get("/api/dashboard")
+        assert response.status_code == 200
+        payload = response.json()
+        rendered = json.dumps(payload, ensure_ascii=False)
+        assert payload["storage_summary"]["redacted"] is True
+        assert raw_input not in rendered
+        assert raw_output not in rendered
+        assert raw_upload not in rendered
+        assert payload["input_dir"] == "managed course media"
+        assert payload["output_dir"] == "managed output storage"
+        assert payload["upload_dir"] == "your upload storage"
+
+    with TestClient(app) as admin:
+        response = admin.post("/api/login", json={"username": "admin", "password": "local-password"})
+        assert response.status_code == 200
+        response = admin.get("/api/dashboard")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["storage_summary"]["redacted"] is False
+        assert payload["input_dir"] == raw_input
+        assert payload["output_dir"] == raw_output
+
+
 def test_artifact_download_urls_are_user_scoped(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

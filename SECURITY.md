@@ -28,6 +28,8 @@ Remote WebUI deployments should keep `webui.cookie_secure=true` and `webui.csrf_
 
 Global tuning and raw YAML configuration endpoints are admin-only. They may expose local paths, worker credentials, download-signing secrets, and deployment controls.
 
+Dashboard storage paths are redacted for non-admin users. Ordinary users receive storage labels, while admins can still see absolute paths for deployment troubleshooting.
+
 ## Artifact Access And Deletion
 
 Generated artifact download URLs are short-lived HMAC-signed URLs. The URL binds to the artifact id and user; it does not expose the filesystem path in the token.
