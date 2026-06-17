@@ -129,7 +129,7 @@ Optional Windows Scheduled Tasks:
 .\install_worker_task.ps1 -RemoteBaseUrl $env:REMOTE_PUBLIC_BASE_URL -WorkerToken $env:WORKER_SHARED_TOKEN -StoreUserEnvironment
 ```
 
-The unified task reads `REMOTE_PUBLIC_BASE_URL` and `WORKER_SHARED_TOKEN` from the user environment at runtime, so the token is not embedded in the scheduled task command line. The older `install_worker_heartbeat_task.ps1` and `install_worker_poll_task.ps1` scripts are still available for split deployments.
+The unified task reads `REMOTE_PUBLIC_BASE_URL` and `WORKER_SHARED_TOKEN` from the persistent User/Machine environment at runtime, so the token is not embedded in the scheduled task command line. The installer refuses to create the task unless those values are already persistent or `-StoreUserEnvironment` is used. The older `install_worker_heartbeat_task.ps1` and `install_worker_poll_task.ps1` scripts are still available for split deployments.
 
 Contabo deployment templates live in `deploy/`:
 

@@ -23,10 +23,27 @@ if (-not $WorkerToken) {
   throw "WorkerToken is required. Set WORKER_SHARED_TOKEN or pass -WorkerToken."
 }
 
+function Test-PersistentEnvValue {
+  param(
+    [Parameter(Mandatory=$true)][string]$Name,
+    [Parameter(Mandatory=$true)][string]$Expected
+  )
+  $userValue = [Environment]::GetEnvironmentVariable($Name, "User")
+  $machineValue = [Environment]::GetEnvironmentVariable($Name, "Machine")
+  return (($userValue -and $userValue -eq $Expected) -or ($machineValue -and $machineValue -eq $Expected))
+}
+
 if ($StoreUserEnvironment) {
   [Environment]::SetEnvironmentVariable("REMOTE_PUBLIC_BASE_URL", $RemoteBaseUrl, "User")
   [Environment]::SetEnvironmentVariable("WORKER_SHARED_TOKEN", $WorkerToken, "User")
   Write-Host "Stored REMOTE_PUBLIC_BASE_URL and WORKER_SHARED_TOKEN in the current user's environment."
+} else {
+  if (-not (Test-PersistentEnvValue -Name "REMOTE_PUBLIC_BASE_URL" -Expected $RemoteBaseUrl)) {
+    throw "REMOTE_PUBLIC_BASE_URL is not set in the persistent User/Machine environment. Rerun with -StoreUserEnvironment or set it before installing the scheduled task."
+  }
+  if (-not (Test-PersistentEnvValue -Name "WORKER_SHARED_TOKEN" -Expected $WorkerToken)) {
+    throw "WORKER_SHARED_TOKEN is not set in the persistent User/Machine environment. Rerun with -StoreUserEnvironment or set it before installing the scheduled task."
+  }
 }
 
 $script = Join-Path $ProjectRoot "13_start_worker.ps1"
@@ -47,7 +64,5 @@ $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatt
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
 
 Write-Host "Installed scheduled task: $TaskName"
-Write-Host "The task reads REMOTE_PUBLIC_BASE_URL and WORKER_SHARED_TOKEN from the user environment at runtime."
-if (-not $StoreUserEnvironment) {
-  Write-Host "If those variables are not already persistent, rerun with -StoreUserEnvironment or set them manually before the task starts."
-}
+Write-Host "The task reads REMOTE_PUBLIC_BASE_URL and WORKER_SHARED_TOKEN from the persistent User/Machine environment at runtime."
+Write-Host "The worker token is not embedded in the scheduled task command line."

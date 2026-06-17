@@ -101,7 +101,7 @@ Deployment steps:
      ```powershell
      .\install_worker_task.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN" -StoreUserEnvironment
      ```
-     The unified scheduled task reads the remote URL and worker token from the user environment at runtime instead of embedding the token in task arguments.
+     The unified scheduled task reads the remote URL and worker token from the persistent User/Machine environment at runtime instead of embedding the token in task arguments; the installer refuses to create the task unless those values are already persistent or `-StoreUserEnvironment` is used.
 11. Validate:
    - `python -m ecse_localizer --config deploy/config.remote.yaml deploy-check` returns PASS before the service is exposed
    - `.\09_worker_healthcheck.ps1` returns PASS on the Windows worker before scheduled tasks are installed
