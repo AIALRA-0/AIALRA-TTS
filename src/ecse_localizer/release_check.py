@@ -7,6 +7,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 
 Finding = dict[str, str]
 
@@ -72,6 +74,7 @@ def run_release_check(repo_root: str | Path) -> dict[str, Any]:
     check_versions(root, findings)
     check_required_files(root, findings)
     check_gitignore(root, findings)
+    check_example_security_defaults(root, findings)
     check_tracked_files(root, findings)
     errors = sum(1 for item in findings if item["level"] == "error")
     warnings = sum(1 for item in findings if item["level"] == "warn")
@@ -127,6 +130,32 @@ def check_gitignore(root: Path, findings: list[Finding]) -> None:
     for pattern in REQUIRED_GITIGNORE_PATTERNS:
         if pattern not in lines:
             add(findings, "error", "gitignore_pattern_missing", ".gitignore", f"Missing ignore pattern: {pattern}")
+
+
+def check_example_security_defaults(root: Path, findings: list[Finding]) -> None:
+    path = root / "config.example.yaml"
+    if not path.exists():
+        return
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        add(findings, "error", "config_example_invalid", "config.example.yaml", type(exc).__name__)
+        return
+    if not isinstance(data, dict):
+        add(findings, "error", "config_example_invalid", "config.example.yaml", "Expected a YAML mapping.")
+        return
+    webui = data.get("webui")
+    if not isinstance(webui, dict):
+        add(findings, "error", "config_example_webui_missing", "config.example.yaml:webui", "Example config must include WebUI safety defaults.")
+        return
+    if webui.get("worker_require_nonce") is not True:
+        add(
+            findings,
+            "error",
+            "config_example_worker_nonce_not_required",
+            "config.example.yaml:webui.worker_require_nonce",
+            "Example worker API defaults must require HMAC nonce replay protection.",
+        )
 
 
 def check_tracked_files(root: Path, findings: list[Finding]) -> None:

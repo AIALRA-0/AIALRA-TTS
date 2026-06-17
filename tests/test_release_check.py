@@ -26,6 +26,7 @@ version = "{pyproject_version}"
         "deploy/Caddyfile.example",
         "deploy/nginx.conf.example",
         "deploy/bootstrap_contabo.py",
+        "deploy/systemd/aialra-worker-tunnel.service",
         ".env.example",
         "licenses_report.md",
         "tools/secret_scan.ps1",
@@ -40,7 +41,10 @@ version = "{pyproject_version}"
         "install_worker_task.ps1",
     ]:
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
-        (root / rel).write_text("placeholder\n", encoding="utf-8")
+        if rel == "config.example.yaml":
+            (root / rel).write_text("webui:\n  worker_require_nonce: true\n", encoding="utf-8")
+        else:
+            (root / rel).write_text("placeholder\n", encoding="utf-8")
     (root / ".gitignore").write_text(
         "\n".join(
             [
@@ -86,3 +90,13 @@ def test_release_check_detects_missing_ignore_pattern(tmp_path):
 
     assert result["pass"] is False
     assert "gitignore_pattern_missing" in {item["code"] for item in result["findings"]}
+
+
+def test_release_check_detects_unsafe_example_worker_nonce(tmp_path):
+    write_minimal_repo(tmp_path)
+    (tmp_path / "config.example.yaml").write_text("webui:\n  worker_require_nonce: false\n", encoding="utf-8")
+
+    result = run_release_check(tmp_path)
+
+    assert result["pass"] is False
+    assert "config_example_worker_nonce_not_required" in {item["code"] for item in result["findings"]}
