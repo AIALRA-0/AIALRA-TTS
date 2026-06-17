@@ -49,7 +49,9 @@ Parameter templates store non-secret generation settings such as source language
 
 The task form shows local language capability hints for ASR, subtitle translation, and TTS. These hints come from `asr.supported_languages`, `translation.supported_target_languages`, `translation.allow_unlisted_targets`, and `tts.supported_languages`, plus the currently detected local LLM/TTS backend. Unlisted subtitle targets can be queued when the local LLM is available, but they are flagged as QA-required; TTS targets must be supported by the active local TTS backend.
 
-The WebUI also has a `产物` page for generated artifacts. It can list reports, subtitles, WAV/MP4 outputs, show local preview links for media, create short-lived signed download URLs, delete managed output files, and run cleanup dry-runs. Deletion is restricted to managed output, run, and upload directories; it refuses to touch the original video root. Uploads enforce suffix, per-file size, user quota, and request-level reserved bytes; job submission enforces per-user and global active-job limits.
+The WebUI also has a `产物` page for generated artifacts. It can list reports, subtitles, WAV/MP4 outputs, show local preview links for media, create short-lived signed download URLs, delete managed output files, and run cleanup dry-runs. Deletion is restricted to managed output, run, upload, and preview-cache directories; it refuses to touch the original video root. Uploads enforce suffix, per-file size, user quota, and request-level reserved bytes; job submission enforces per-user and global active-job limits.
+
+For Contabo mode, low-bitrate previews and thumbnails can be registered through `webui.preview_manifest` without exposing Windows source paths. The manifest can be a list or `{ "previews": [...] }`; each row may include `name`, `preview_path`, `thumbnail_path`, `owner`, `project_id`, `job_id`, and `source_output_key`. The API serves only the preview-cache files through signed URLs.
 
 Job records are JSON files with `schema_version`. WebUI normalizes older records on read/claim/update by filling missing metadata, log path, dispatch target, timestamps, retry count, and worker args when possible. Job states are normalized to `queued`, `claimed`, `running`, `paused`, `retrying`, `done`, `failed`, `cancelled`, and `deleted`; older `passed` records are migrated to `done` with `legacy_status: passed`.
 
@@ -63,7 +65,7 @@ The intended production layout is:
 - Windows local worker: all media storage, GPU/CPU processing, ASR, translation, subtitles, TTS, muxing, and artifact cleanup.
 - Connection: Windows initiates a reverse tunnel or private VPN connection. Do not expose the Windows worker directly to the public internet.
 
-Contabo should store only metadata, small thumbnails, low-bitrate previews, and optional short-lived caches. Original videos and full-resolution outputs remain on the local worker by default.
+Contabo should store only metadata, small thumbnails, low-bitrate previews, and optional short-lived caches under `webui.preview_dir`. Original videos and full-resolution outputs remain on the local worker by default.
 
 Windows worker heartbeat:
 

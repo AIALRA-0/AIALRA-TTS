@@ -390,6 +390,22 @@ h2 {
   padding: 0 10px;
 }
 
+.artifact-name {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.artifact-thumb {
+  width: 74px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #111827;
+}
+
 .preview-panel {
   margin-top: 14px;
   display: grid;

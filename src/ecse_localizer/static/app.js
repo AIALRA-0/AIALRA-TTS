@@ -670,7 +670,9 @@ function renderArtifacts() {
   }
   for (const artifact of state.artifacts.slice(0, 120)) {
     const name = document.createElement("div");
-    name.innerHTML = `<strong>${escapeHtml(artifact.name)}</strong><div class="cell-path">${escapeHtml(artifact.path)}</div>`;
+    const displayPath = artifact.display_path || artifact.path || "";
+    name.className = "artifact-name";
+    name.innerHTML = `${artifact.thumbnail_url ? `<img class="artifact-thumb" src="${escapeHtml(artifact.thumbnail_url)}" alt="" />` : ""}<div><strong>${escapeHtml(artifact.name)}</strong><div class="cell-path">${escapeHtml(displayPath)}</div></div>`;
     const actions = document.createElement("div");
     actions.className = "artifact-actions";
     if (artifact.download_url) {
@@ -709,6 +711,7 @@ function previewArtifact(artifact) {
     const video = document.createElement("video");
     video.controls = true;
     video.src = artifact.preview_url;
+    if (artifact.thumbnail_url) video.poster = artifact.thumbnail_url;
     panel.appendChild(video);
   } else if ((artifact.media_type || "").startsWith("audio/")) {
     const audio = document.createElement("audio");

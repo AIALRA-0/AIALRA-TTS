@@ -41,6 +41,7 @@ Deployment steps:
 6. Configure persistent volumes only for:
    - metadata database or JSON store
    - thumbnails/previews cache
+   - `webui.preview_dir` and `webui.preview_manifest` for low-bitrate preview rows
    - short-lived logs
 7. Configure a cleanup job:
    - remove expired previews
@@ -94,7 +95,9 @@ Deployment steps:
    - worker status updates through `/api/worker/jobs/{job_id}/status`
    - `/api/artifacts` lists only authorized artifacts
    - signed artifact download URLs expire and do not expose filesystem paths
-   - artifact deletion refuses paths outside managed output/run/upload roots
+   - preview manifest rows expose only preview-cache paths/display names, never Windows `source_path`
+   - preview thumbnails use signed `variant=thumbnail` URLs
+   - artifact deletion refuses paths outside managed output/run/upload/preview roots
 
 Do not push `.env`, production config, logs, media, model weights, IP addresses, server hostnames, or credentials back to GitHub.
 

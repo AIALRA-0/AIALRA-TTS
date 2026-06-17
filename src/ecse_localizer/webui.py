@@ -227,7 +227,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return {"artifacts": rows, "quota": state.store.quota_status(user)}
 
     @app.get("/api/artifacts/{artifact_id}/download")
-    def download_artifact(artifact_id: str, request: Request, token: str = "", download: int = 0) -> FileResponse:
+    def download_artifact(artifact_id: str, request: Request, token: str = "", download: int = 0, variant: str = "") -> FileResponse:
         user = verify_session(request, state)
         token_user = user or token_username(state, token, artifact_id)
         if not token_user:
@@ -238,11 +238,17 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         row = find_artifact(rows, artifact_id)
         if not row:
             raise HTTPException(status_code=404, detail="Artifact not found")
+        media_type = row.get("media_type") or None
         path = Path(row["path"])
+        if variant == "thumbnail":
+            if not row.get("thumbnail_path"):
+                raise HTTPException(status_code=404, detail="Thumbnail not found")
+            path = Path(str(row["thumbnail_path"]))
+            media_type = row.get("thumbnail_media_type") or None
         if not path.exists() or not path.is_file():
             raise HTTPException(status_code=404, detail="File missing")
         disposition = "attachment" if download else "inline"
-        return FileResponse(path, media_type=row.get("media_type") or None, filename=path.name, content_disposition_type=disposition)
+        return FileResponse(path, media_type=media_type, filename=path.name, content_disposition_type=disposition)
 
     @app.delete("/api/artifacts/{artifact_id}")
     def delete_artifact(artifact_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
