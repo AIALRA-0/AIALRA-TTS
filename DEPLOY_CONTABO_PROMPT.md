@@ -65,6 +65,7 @@ Deployment steps:
    - if the Windows worker heartbeat is missing or stale, new jobs must stay `queued` and the UI must show that they are waiting for the local worker, not that GPU processing has already started.
    - during long jobs, the worker posts `running` status updates with best-effort progress, GPU/CPU/disk metrics, and a short log tail; do not require Contabo to read Windows log files directly.
    - after successful jobs, the worker may upload a low-bitrate MP4 preview and JPG thumbnail to `/api/worker/jobs/{job_id}/preview`; this endpoint must require HMAC signatures, enforce `webui.worker_preview_max_upload_mb`, count files against `remote_quota_bytes`, and never store Windows source paths in the manifest.
+   - after successful jobs, the worker registers opaque full-output artifact refs; users request full downloads by queuing an `upload_artifact_cache` worker action, and the worker uploads only that selected file to `/api/worker/jobs/{job_id}/artifact-cache` as temporary remote cache.
    - or install the scheduled task:
      ```powershell
      .\install_worker_heartbeat_task.ps1 -RemoteBaseUrl "https://your-domain.example" -WorkerToken "$env:WORKER_SHARED_TOKEN"
@@ -102,6 +103,7 @@ Deployment steps:
    - preview manifest rows expose only preview-cache paths/display names, never Windows `source_path`
    - preview thumbnails use signed `variant=thumbnail` URLs
    - worker preview uploads reject unsigned bodies, reject disallowed suffixes, and return HTTP 413 when the remote quota would be exceeded
+   - worker full-output refs expose no Windows path, show a request-cache action before download, and cached full files obey `webui.worker_artifact_cache_max_upload_mb` plus `remote_quota_bytes`
    - artifact deletion refuses paths outside managed output/run/upload/preview roots
 
 Do not push `.env`, production config, logs, media, model weights, IP addresses, server hostnames, or credentials back to GitHub.

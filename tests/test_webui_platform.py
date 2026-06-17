@@ -395,6 +395,118 @@ def test_worker_preview_upload_registers_manifest_and_artifact(tmp_path):
     assert quota["remote_used_bytes"] >= len(body) + len(thumb_body)
 
 
+def test_request_worker_artifact_cache_creates_worker_job(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["execution_mode"] = "worker_queue"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    source_job = create_job_record(
+        state,
+        "process_one",
+        "Remote process",
+        ["python", "-m", "ecse_localizer", "process-one", "--video", r"C:\private\lecture.mp4"],
+        user="admin",
+        metadata={"project_id": "course", "folder_id": "week_1"},
+        dispatch_target="worker",
+    )
+    update_job(
+        state,
+        source_job["id"],
+        {
+            "status": "done",
+            "worker_artifacts": [
+                {
+                    "ref_id": "ref1",
+                    "source_output_key": "zh_dub_mp4",
+                    "name": "lecture_zh_dub.mp4",
+                    "size": 123,
+                    "media_type": "video/mp4",
+                }
+            ],
+        },
+    )
+
+    response = client.get("/api/artifacts")
+    assert response.status_code == 200
+    artifact = next(item for item in response.json()["artifacts"] if item.get("remote_worker_artifact"))
+    assert artifact["request_cache_url"] == "/api/artifacts/worker_artifact_ref1/request-cache"
+    assert "download_url" not in artifact
+
+    response = client.post(artifact["request_cache_url"], json={})
+    assert response.status_code == 200
+    job = response.json()["job"]
+    assert job["type"] == "cache_artifact"
+    assert job["dispatch_target"] == "worker"
+    assert job["metadata"]["worker_action"] == "upload_artifact_cache"
+    assert job["metadata"]["artifact_ref_id"] == "ref1"
+
+
+def test_worker_artifact_cache_upload_registers_downloadable_artifact(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["webui"]["worker_auth_mode"] = "hmac"
+    config["webui"]["preview_dir"] = str(tmp_path / "previews")
+    config["webui"]["preview_manifest"] = str(tmp_path / "previews" / "preview_manifest.json")
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    app = create_app(config_path)
+    state = app.state.web
+    client = TestClient(app)
+
+    response = client.post("/api/login", json={"username": "admin", "password": "local-password"})
+    assert response.status_code == 200
+    record = create_job_record(
+        state,
+        "cache_artifact",
+        "Cache artifact",
+        ["worker-action", "upload-artifact-cache", "ref1"],
+        user="admin",
+        metadata={
+            "worker_action": "upload_artifact_cache",
+            "artifact_id": "worker_artifact_ref1",
+            "artifact_ref_id": "ref1",
+            "artifact_name": "lecture_zh_dub.mp4",
+            "source_output_key": "zh_dub_mp4",
+            "project_id": "course",
+            "folder_id": "week_1",
+        },
+        dispatch_target="worker",
+    )
+    update_job(state, record["id"], {"status": "claimed", "claimed_by": "worker-1"})
+
+    path = f"/api/worker/jobs/{record['id']}/artifact-cache"
+    body = b"full mp4"
+    headers = worker_headers("worker-token", path=path, body=body)
+    headers.update(
+        {
+            "Content-Type": "video/mp4",
+            "X-Worker-Artifact-Id": "worker_artifact_ref1",
+            "X-Worker-Artifact-Ref": "ref1",
+            "X-Worker-Artifact-Name": "lecture_zh_dub.mp4",
+            "X-Worker-Artifact-File-Name": "lecture_zh_dub.mp4",
+            "X-Worker-Artifact-Source-Key": "zh_dub_mp4",
+            "X-Worker-Id": "worker-1",
+        }
+    )
+    response = client.post(path, data=body, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["artifact"]["id"] == "worker_artifact_ref1"
+
+    artifact = next(item for item in client.get("/api/artifacts").json()["artifacts"] if item["id"] == "worker_artifact_ref1")
+    assert artifact["download_url"]
+    assert artifact["remote_cache"] is True
+    assert "request_cache_url" not in artifact
+
+
 def test_worker_preview_upload_respects_remote_quota(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))

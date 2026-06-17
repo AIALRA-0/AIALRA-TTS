@@ -161,6 +161,7 @@ webui:
   platform_dir: "C:/path/to/ECSE 4961/_localizer_project/runs/platform"
   max_upload_mb: 20480
   worker_preview_max_upload_mb: 256
+  worker_artifact_cache_max_upload_mb: 2048
   default_local_quota_gb: 500
   default_remote_quota_gb: 10
   default_project_quota_gb: 500

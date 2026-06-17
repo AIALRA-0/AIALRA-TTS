@@ -710,6 +710,14 @@ function renderArtifacts() {
       download.target = "_blank";
       actions.appendChild(download);
     }
+    if (artifact.request_cache_url) {
+      const request = document.createElement("button");
+      request.type = "button";
+      request.className = "secondary";
+      request.textContent = "请求下载";
+      request.addEventListener("click", () => requestArtifactCache(artifact));
+      actions.appendChild(request);
+    }
     if (artifact.preview_url) {
       const preview = document.createElement("button");
       preview.type = "button";
@@ -718,12 +726,14 @@ function renderArtifacts() {
       preview.addEventListener("click", () => previewArtifact(artifact));
       actions.appendChild(preview);
     }
-    const del = document.createElement("button");
-    del.type = "button";
-    del.className = "danger";
-    del.textContent = "删除";
-    del.addEventListener("click", () => deleteArtifact(artifact));
-    actions.appendChild(del);
+    if (artifact.path) {
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "danger";
+      del.textContent = "删除";
+      del.addEventListener("click", () => deleteArtifact(artifact));
+      actions.appendChild(del);
+    }
     table.append(row([artifact.kind || "-", name, formatBytes(artifact.size || 0), actions]));
   }
 }
@@ -760,6 +770,16 @@ async function deleteArtifact(artifact) {
     await loadDashboard();
   } catch (error) {
     toast(`删除失败：${error.message}`);
+  }
+}
+
+async function requestArtifactCache(artifact) {
+  try {
+    const result = await api(artifact.request_cache_url, { method: "POST", body: "{}" });
+    toast(`已创建下载缓存任务：${result.job?.id || ""}`);
+    await refreshJobs();
+  } catch (error) {
+    toast(`请求下载失败：${error.message}`);
   }
 }
 

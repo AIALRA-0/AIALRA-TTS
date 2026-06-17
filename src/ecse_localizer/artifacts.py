@@ -104,7 +104,46 @@ def artifact_catalog(config: dict[str, Any], jobs: list[dict[str, Any]] | None =
             )
     for preview in load_preview_manifest(config):
         add_preview_record(records, preview, config=config)
+    add_worker_artifact_records(records, jobs or [])
     return sorted(records.values(), key=lambda row: float(row.get("mtime") or 0), reverse=True)
+
+
+def add_worker_artifact_records(records: dict[str, dict[str, Any]], jobs: list[dict[str, Any]]) -> None:
+    for job in jobs:
+        artifacts = job.get("worker_artifacts")
+        if not isinstance(artifacts, list):
+            continue
+        metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
+        for raw in artifacts:
+            if not isinstance(raw, dict) or not raw.get("ref_id"):
+                continue
+            ref_id = safe_ref_id(str(raw["ref_id"]))
+            aid = f"worker_artifact_{ref_id}"
+            if aid in records and records[aid].get("path"):
+                continue
+            records.setdefault(
+                aid,
+                {
+                    "id": aid,
+                    "kind": str(raw.get("source_output_key") or "worker_full_artifact"),
+                    "name": str(raw.get("name") or f"{ref_id}.bin"),
+                    "size": int(raw.get("size", 0) or 0),
+                    "mtime": float(raw.get("mtime", 0) or 0),
+                    "owner": job.get("user"),
+                    "project_id": metadata.get("project_id"),
+                    "folder_id": metadata.get("folder_id", "root"),
+                    "job_id": job.get("id"),
+                    "source_job_id": job.get("id"),
+                    "source_output_key": raw.get("source_output_key"),
+                    "media_type": raw.get("media_type") or mimetypes.guess_type(str(raw.get("name") or ""))[0] or "application/octet-stream",
+                    "previewable": False,
+                    "remote_worker_artifact": True,
+                    "download_requestable": True,
+                    "artifact_ref_id": ref_id,
+                    "full_available": True,
+                    "display_path": f"Windows worker: {raw.get('name') or ref_id}",
+                },
+            )
 
 
 def add_preview_record(
@@ -142,6 +181,7 @@ def add_preview_record(
         "previewable": preview_path.suffix.lower() in PREVIEWABLE_SUFFIXES,
         "media_type": row.get("media_type") or mimetypes.guess_type(preview_path.name)[0] or "application/octet-stream",
         "remote_preview": True,
+        "remote_cache": bool(row.get("remote_cache", False)),
         "full_available": bool(row.get("full_available", False)),
     }
     if thumbnail_ok and thumbnail_path:
@@ -310,12 +350,15 @@ def with_signed_urls(
     for row in artifacts:
         item = dict(row)
         if item.get("kind") != "report_bundle":
-            token = sign_artifact_token(secret, str(item["id"]), username, ttl_seconds=ttl_seconds)
-            item["download_url"] = f"/api/artifacts/{item['id']}/download?token={token}&download=1"
-            if item.get("previewable"):
-                item["preview_url"] = f"/api/artifacts/{item['id']}/download?token={token}"
-            if item.get("thumbnail_path"):
-                item["thumbnail_url"] = f"/api/artifacts/{item['id']}/download?token={token}&variant=thumbnail"
+            if item.get("download_requestable") and not item.get("path"):
+                item["request_cache_url"] = f"/api/artifacts/{item['id']}/request-cache"
+            else:
+                token = sign_artifact_token(secret, str(item["id"]), username, ttl_seconds=ttl_seconds)
+                item["download_url"] = f"/api/artifacts/{item['id']}/download?token={token}&download=1"
+                if item.get("previewable"):
+                    item["preview_url"] = f"/api/artifacts/{item['id']}/download?token={token}"
+                if item.get("thumbnail_path"):
+                    item["thumbnail_url"] = f"/api/artifacts/{item['id']}/download?token={token}&variant=thumbnail"
         rows.append(item)
     return rows
 
@@ -333,3 +376,8 @@ def is_relative_to(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def safe_ref_id(value: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in value).strip("._-")
+    return cleaned[:120] or hashlib.sha256(value.encode("utf-8", errors="ignore")).hexdigest()[:24]

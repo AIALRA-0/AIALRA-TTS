@@ -20,6 +20,7 @@ from ecse_localizer.webui import (
     require_worker_token,
     read_job,
     retry_job_record,
+    save_worker_artifact_cache_upload,
     save_worker_preview_upload,
     soft_delete_job,
     update_job,
@@ -29,7 +30,7 @@ from ecse_localizer.webui import (
     worker_status_changes,
 )
 from ecse_localizer.worker_client import canonical_json, extract_progress_from_text, redacted_command, summarize_result, worker_args, worker_headers, worker_signature
-from ecse_localizer.worker_client import preview_source_path, upload_worker_preview
+from ecse_localizer.worker_client import find_registered_artifact, preview_source_path, register_worker_artifacts, upload_worker_artifact_cache, upload_worker_preview
 
 
 def write_config(tmp_path: Path) -> Path:
@@ -451,6 +452,67 @@ def test_upload_worker_preview_sends_signed_binary_without_plaintext_token(monke
     assert "X-Worker-Token" not in captured["headers"]
 
 
+def test_register_worker_artifacts_writes_local_registry_without_leaking_path(monkeypatch, tmp_path):
+    registry_path = tmp_path / "registry.json"
+    monkeypatch.setattr("ecse_localizer.worker_client.artifact_registry_path", lambda: registry_path)
+    output = tmp_path / "lecture_zh_dub.mp4"
+    output.write_bytes(b"mp4")
+    report_json = tmp_path / "lecture_report.json"
+    report_json.write_text(json.dumps({"outputs": {"zh_dub_mp4": str(output)}}), encoding="utf-8")
+    report_md = tmp_path / "lecture_report.md"
+    report_md.write_text("report", encoding="utf-8")
+
+    summaries = register_worker_artifacts({"report": str(report_md)}, {"id": "job-1"})
+
+    assert len(summaries) == 1
+    summary = summaries[0]
+    assert summary["name"] == "lecture_zh_dub.mp4"
+    assert summary["source_output_key"] == "zh_dub_mp4"
+    assert "path" not in summary
+    registered = find_registered_artifact(summary["ref_id"])
+    assert registered["path"] == str(output)
+    assert registry_path.exists()
+
+
+def test_upload_worker_artifact_cache_sends_signed_binary_without_plaintext_token(monkeypatch, tmp_path):
+    artifact = tmp_path / "lecture_zh_dub.mp4"
+    artifact.write_bytes(b"full mp4")
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"ok": True, "artifact": {"id": "worker_artifact_ref1"}}
+
+    def fake_post(url, data, headers, timeout):
+        captured.update({"url": url, "data": data, "headers": headers, "timeout": timeout})
+        return Response()
+
+    monkeypatch.setattr("ecse_localizer.worker_client.requests.post", fake_post)
+    result = upload_worker_artifact_cache(
+        "https://remote.example",
+        "worker-token",
+        "cache-job-1",
+        artifact,
+        artifact_id="worker_artifact_ref1",
+        artifact_ref_id="ref1",
+        display_name="lecture_zh_dub.mp4",
+        source_output_key="zh_dub_mp4",
+        worker_id="worker-1",
+    )
+
+    assert result["ok"] is True
+    assert captured["url"] == "https://remote.example/api/worker/jobs/cache-job-1/artifact-cache"
+    assert captured["data"] == b"full mp4"
+    assert captured["headers"]["Content-Type"] == "video/mp4"
+    assert captured["headers"]["X-Worker-Artifact-Id"] == "worker_artifact_ref1"
+    assert captured["headers"]["X-Worker-Artifact-Ref"] == "ref1"
+    assert "X-Worker-Signature" in captured["headers"]
+    assert "X-Worker-Token" not in captured["headers"]
+
+
 def test_save_worker_preview_upload_writes_manifest_without_source_path(tmp_path):
     state = WebState(write_config(tmp_path))
     record = create_job_record(
@@ -494,6 +556,56 @@ def test_save_worker_preview_upload_writes_manifest_without_source_path(tmp_path
     assert "source_path" not in manifest["previews"][0]
     assert "private" not in json.dumps(manifest, ensure_ascii=False)
     assert state.store.quota_status("admin")["remote_used_bytes"] >= len(body)
+
+
+def test_save_worker_artifact_cache_upload_writes_downloadable_manifest(tmp_path):
+    state = WebState(write_config(tmp_path))
+    record = create_job_record(
+        state,
+        "cache_artifact",
+        "Cache artifact",
+        ["worker-action", "upload-artifact-cache", "ref1"],
+        user="admin",
+        metadata={
+            "worker_action": "upload_artifact_cache",
+            "artifact_id": "worker_artifact_ref1",
+            "artifact_ref_id": "ref1",
+            "artifact_name": "lecture_zh_dub.mp4",
+            "source_job_id": "source-job",
+            "source_output_key": "zh_dub_mp4",
+            "project_id": "course",
+            "folder_id": "week_1",
+        },
+        dispatch_target="worker",
+    )
+    update_job(state, record["id"], {"status": "claimed", "claimed_by": "worker-1"})
+    record = read_job(state, record["id"])
+
+    row = save_worker_artifact_cache_upload(
+        state,
+        record,
+        fake_worker_request(
+            state,
+            {
+                "x-worker-id": "worker-1",
+                "x-worker-artifact-id": "worker_artifact_ref1",
+                "x-worker-artifact-ref": "ref1",
+                "x-worker-artifact-name": "lecture_zh_dub.mp4",
+                "x-worker-artifact-file-name": "lecture_zh_dub.mp4",
+                "x-worker-artifact-source-key": "zh_dub_mp4",
+            },
+            path=f"/api/worker/jobs/{record['id']}/artifact-cache",
+        ),
+        b"full mp4",
+    )
+
+    assert row["id"] == "worker_artifact_ref1"
+    assert row["remote_cache"] is True
+    assert row["preview_path"].endswith("lecture_zh_dub.mp4")
+    assert Path(row["preview_path"]).read_bytes() == b"full mp4"
+    manifest = json.loads((Path(state.config["output_dir"]) / "previews" / "preview_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["previews"][0]["display_path"] == "remote cache: lecture_zh_dub.mp4"
+    assert "source_path" not in manifest["previews"][0]
 
 
 def test_save_worker_preview_upload_enforces_quota_without_testclient(tmp_path):

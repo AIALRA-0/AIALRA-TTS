@@ -89,6 +89,72 @@ def test_preview_manifest_catalog_uses_preview_cache_without_source_path(tmp_pat
     assert "variant=thumbnail" in signed["thumbnail_url"]
 
 
+def test_worker_artifact_refs_are_requestable_without_worker_paths(tmp_path):
+    config = make_config(tmp_path)
+    jobs = [
+        {
+            "id": "job-1",
+            "user": "student",
+            "metadata": {"project_id": "course", "folder_id": "week_1"},
+            "worker_artifacts": [
+                {
+                    "ref_id": "abc123",
+                    "source_output_key": "zh_dub_mp4",
+                    "name": "lecture_zh_dub.mp4",
+                    "size": 1234,
+                    "mtime": 42,
+                    "media_type": "video/mp4",
+                }
+            ],
+        }
+    ]
+
+    row = next(item for item in artifact_catalog(config, jobs) if item.get("remote_worker_artifact"))
+    assert row["id"] == "worker_artifact_abc123"
+    assert row["artifact_ref_id"] == "abc123"
+    assert row["display_path"] == "Windows worker: lecture_zh_dub.mp4"
+    assert "path" not in row
+    assert "worker-local" not in json.dumps(row)
+
+    signed = with_signed_urls([row], secret="secret", username="student", ttl_seconds=60)[0]
+    assert signed["request_cache_url"] == "/api/artifacts/worker_artifact_abc123/request-cache"
+    assert "download_url" not in signed
+
+
+def test_remote_cache_manifest_overrides_worker_ref_for_download(tmp_path):
+    config = make_config(tmp_path)
+    preview_dir = Path(config["webui"]["preview_dir"])
+    preview_dir.mkdir()
+    cached = preview_dir / "lecture_zh_dub.mp4"
+    cached.write_bytes(b"full cache")
+    (preview_dir / "preview_manifest.json").write_text(
+        json.dumps(
+            {
+                "previews": [
+                    {
+                        "id": "worker_artifact_abc123",
+                        "kind": "zh_dub_mp4",
+                        "name": "lecture_zh_dub.mp4",
+                        "preview_path": str(cached),
+                        "remote_cache": True,
+                        "full_available": True,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    jobs = [{"id": "job-1", "worker_artifacts": [{"ref_id": "abc123", "name": "lecture_zh_dub.mp4"}]}]
+
+    row = next(item for item in artifact_catalog(config, jobs) if item["id"] == "worker_artifact_abc123")
+    assert row["path"] == str(cached)
+    assert row["remote_cache"] is True
+    assert row["remote_preview"] is True
+    signed = with_signed_urls([row], secret="secret", username="student", ttl_seconds=60)[0]
+    assert "download_url" in signed
+    assert "request_cache_url" not in signed
+
+
 def test_delete_preview_manifest_record_removes_thumbnail(tmp_path):
     config = make_config(tmp_path)
     preview_dir = Path(config["webui"]["preview_dir"])

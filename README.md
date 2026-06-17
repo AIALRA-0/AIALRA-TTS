@@ -55,6 +55,8 @@ For Contabo mode, low-bitrate previews and thumbnails can be registered through 
 
 When a queued Windows worker job finishes successfully, the worker can generate a low-bitrate MP4 plus JPG thumbnail with ffmpeg and upload them to `/api/worker/jobs/{job_id}/preview`. These uploads use the same HMAC worker signature as heartbeat/status requests, are capped by `webui.worker_preview_max_upload_mb`, and count against `remote_quota_bytes`. Preview upload failure is non-fatal: the full local output remains on the Windows worker and the job status still reflects the actual processing result.
 
+The worker also registers opaque full-output artifact refs after successful jobs. Contabo stores only safe metadata such as file name, size, MIME type, output key, and `ref_id`; it does not store the Windows path. In the artifacts page these entries show `请求下载`. Clicking it queues a worker action that uploads the selected full file to a remote temporary cache, capped by `webui.worker_artifact_cache_max_upload_mb` and the user's `remote_quota_bytes`. Once cached, the same artifact becomes a normal signed download link and can be cleaned up by the preview/cache cleanup policy.
+
 Quota fields are split by storage responsibility. `remote_quota_bytes` limits Contabo-side uploads plus preview-cache files; `local_quota_bytes` is kept as the Windows worker storage budget for original media and full outputs. Upload requests reserve bytes against the remote quota across all files in the same request. In `worker_queue` production mode, browser media upload is disabled by default unless `webui.allow_remote_media_uploads: true` is explicitly set; this prevents long-term original videos from landing on the Contabo disk.
 
 Job records are JSON files with `schema_version`. WebUI normalizes older records on read/claim/update by filling missing metadata, log path, dispatch target, timestamps, retry count, and worker args when possible. Job states are normalized to `queued`, `claimed`, `running`, `paused`, `retrying`, `done`, `failed`, `cancelled`, and `deleted`; older `passed` records are migrated to `done` with `legacy_status: passed`.
@@ -97,6 +99,8 @@ Queued jobs carry only portable worker arguments plus non-secret job metadata su
 While a worker job is running, the Windows worker periodically reports a remote-safe status payload: `running`, `worker_id`, `pid`, best-effort `progress`, system metrics, and a log tail. Contabo stores only that summary; full logs stay on the Windows worker.
 
 After a successful worker job, set `worker.upload_previews: true` to have the worker create and upload a preview cache item. The default preview is 854px wide at about 700k video bitrate and 96k AAC audio; adjust `worker.preview_max_width`, `worker.preview_video_bitrate`, `worker.preview_audio_bitrate`, and `worker.preview_max_seconds` to fit the remote storage quota.
+
+Full-output downloads in remote mode are request-based. The Windows worker keeps a local artifact registry under `runs/worker_artifacts/registry.json`, receives `upload_artifact_cache` jobs, and uploads only the requested file to `/api/worker/jobs/{job_id}/artifact-cache` using HMAC. Treat that remote cache as temporary storage, not the source of truth.
 
 Optional Windows Scheduled Tasks:
 

@@ -241,6 +241,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         row = find_artifact(rows, artifact_id)
         if not row:
             raise HTTPException(status_code=404, detail="Artifact not found")
+        if not row.get("path"):
+            raise HTTPException(status_code=409, detail="Artifact is on the Windows worker; request a temporary cache first")
         media_type = row.get("media_type") or None
         path = Path(row["path"])
         if variant == "thumbnail":
@@ -259,11 +261,45 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         row = find_artifact(rows, artifact_id)
         if not row:
             raise HTTPException(status_code=404, detail="Artifact not found")
+        if row.get("remote_worker_artifact") and not row.get("path"):
+            raise HTTPException(status_code=400, detail="Worker artifact refs do not delete local files; delete the source job instead")
         try:
             deleted = safe_delete_artifact_record(row, state.config)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"ok": True, "artifact": row, "deleted": deleted, "quota": state.store.quota_status(user)}
+
+    @app.post("/api/artifacts/{artifact_id}/request-cache")
+    def request_artifact_cache(artifact_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
+        rows = filter_artifacts_for_user(artifact_catalog(state.config, list_jobs(state, None)), user, admin=is_admin(state, user))
+        row = find_artifact(rows, artifact_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        if not row.get("remote_worker_artifact") or not row.get("download_requestable"):
+            raise HTTPException(status_code=400, detail="Artifact is already cached or cannot be requested from a worker")
+        enforce_active_job_limits(state, user)
+        worker_info = worker_status_payload(state)
+        metadata = {
+            "worker_action": "upload_artifact_cache",
+            "artifact_id": str(row["id"]),
+            "artifact_ref_id": str(row["artifact_ref_id"]),
+            "artifact_name": str(row.get("name") or ""),
+            "source_job_id": str(row.get("source_job_id") or row.get("job_id") or ""),
+            "source_output_key": str(row.get("source_output_key") or ""),
+            "project_id": str(row.get("project_id") or ""),
+            "folder_id": str(row.get("folder_id") or "root"),
+            "worker_status_at_submit": worker_info,
+        }
+        record = create_job_record(
+            state,
+            "cache_artifact",
+            f"Cache artifact: {file_display_name(str(row.get('name') or row['id']))}",
+            ["worker-action", "upload-artifact-cache", str(row["artifact_ref_id"])],
+            user=user,
+            metadata=metadata,
+            dispatch_target="worker",
+        )
+        return {"ok": True, "job": record, "dispatch": {"target": "worker", "queued": True, "worker": worker_info}}
 
     @app.post("/api/cleanup")
     async def cleanup(request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
@@ -534,6 +570,32 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             }
         )
         return {"ok": True, "preview": row, "bytes": len(body), "quota": state.store.quota_status(str(record.get("user") or ""))}
+
+    @app.post("/api/worker/jobs/{job_id}/artifact-cache")
+    async def worker_upload_artifact_cache(job_id: str, request: Request) -> dict[str, Any]:
+        body = await request.body()
+        require_worker_token(request, state, body)
+        record = read_job(state, job_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Job not found")
+        row = save_worker_artifact_cache_upload(state, record, request, body)
+        update_job(
+            state,
+            job_id,
+            {
+                "cached_artifact_id": row["id"],
+                "cached_artifact_uploaded_at": iso_now(),
+                "cached_artifact_name": row.get("name", ""),
+            },
+        )
+        state.store.record_worker_heartbeat(
+            {
+                "status": "online",
+                "worker_id": str(request.headers.get("x-worker-id") or record.get("claimed_by") or "local-windows-worker"),
+                "message": f"job {job_id} artifact cache uploaded",
+            }
+        )
+        return {"ok": True, "artifact": row, "bytes": len(body), "quota": state.store.quota_status(str(record.get("user") or ""))}
 
     @app.get("/api/jobs")
     def jobs(user: str = Depends(require_user)) -> dict[str, Any]:
@@ -809,6 +871,42 @@ def save_worker_preview_upload(state: WebState, record: dict[str, Any], request:
     return row
 
 
+def save_worker_artifact_cache_upload(state: WebState, record: dict[str, Any], request: Request, body: bytes) -> dict[str, Any]:
+    if not body:
+        raise HTTPException(status_code=400, detail="Artifact cache body is empty")
+    metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    if metadata.get("worker_action") != "upload_artifact_cache":
+        raise HTTPException(status_code=400, detail="Job is not an artifact cache upload")
+    worker_id = str(request.headers.get("x-worker-id") or "")
+    claimed_by = str(record.get("claimed_by") or "")
+    if claimed_by and worker_id and worker_id != claimed_by:
+        raise HTTPException(status_code=403, detail="Worker does not own this job")
+    max_bytes = int(state.webui.get("worker_artifact_cache_max_upload_mb", 2048) or 2048) * 1024 * 1024
+    if len(body) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"Worker artifact cache exceeds {state.webui.get('worker_artifact_cache_max_upload_mb', 2048)} MB")
+
+    job_id = safe_job_id(str(record.get("id") or ""))
+    filename = safe_upload_name(str(request.headers.get("x-worker-artifact-file-name") or request.headers.get("x-worker-artifact-name") or "artifact.bin"))
+    validate_worker_artifact_suffix(filename)
+    target_dir = ensure_dir(preview_cache_dir(state.config) / "artifact_cache" / safe_preview_id(job_id))
+    target = (target_dir / filename).resolve()
+    if target.parent != target_dir.resolve():
+        raise HTTPException(status_code=400, detail="Invalid artifact cache file name")
+
+    owner = str(record.get("user") or "")
+    existing_size = target.stat().st_size if target.exists() else 0
+    quota = state.store.quota_status(owner)
+    base_used = max(0, int(quota["remote_used_bytes"]) - existing_size)
+    quota_bytes = int(quota["remote_quota_bytes"])
+    if not upload_fits_quota(base_used, 0, len(body), quota_bytes):
+        remaining = max(0, quota_bytes - base_used)
+        raise HTTPException(status_code=413, detail=f"Remote quota exceeded. Remaining bytes: {remaining}")
+
+    target.write_bytes(body)
+    row = upsert_worker_artifact_cache_manifest(state, record, request, target)
+    return row
+
+
 def upsert_worker_preview_manifest(
     state: WebState,
     record: dict[str, Any],
@@ -859,11 +957,63 @@ def upsert_worker_preview_manifest(
         return dict(row)
 
 
+def upsert_worker_artifact_cache_manifest(state: WebState, record: dict[str, Any], request: Request, target: Path) -> dict[str, Any]:
+    manifest_path = preview_manifest_path(state.config)
+    ensure_dir(manifest_path.parent)
+    metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    artifact_id = safe_preview_id(str(request.headers.get("x-worker-artifact-id") or metadata.get("artifact_id") or f"{record.get('id')}_artifact"))
+    rows: list[dict[str, Any]]
+    with state.lock:
+        if manifest_path.exists():
+            try:
+                data = read_json(manifest_path)
+                raw_rows = data.get("previews", data) if isinstance(data, dict) else data
+            except Exception:
+                raw_rows = []
+        else:
+            raw_rows = []
+        rows = [row for row in raw_rows if isinstance(row, dict)] if isinstance(raw_rows, list) else []
+        row = next((item for item in rows if str(item.get("id") or "") == artifact_id), None)
+        if row is None:
+            row = {"id": artifact_id}
+            rows.append(row)
+        row.update(
+            {
+                "id": artifact_id,
+                "kind": str(request.headers.get("x-worker-artifact-source-key") or metadata.get("source_output_key") or "remote_cached_artifact"),
+                "name": safe_preview_display_name(str(request.headers.get("x-worker-artifact-name") or metadata.get("artifact_name") or target.name)),
+                "owner": str(record.get("user") or ""),
+                "project_id": str(metadata.get("project_id") or ""),
+                "folder_id": str(metadata.get("folder_id") or "root"),
+                "job_id": str(metadata.get("source_job_id") or record.get("id") or ""),
+                "cache_job_id": str(record.get("id") or ""),
+                "artifact_ref_id": str(request.headers.get("x-worker-artifact-ref") or metadata.get("artifact_ref_id") or ""),
+                "source_output_key": str(request.headers.get("x-worker-artifact-source-key") or metadata.get("source_output_key") or ""),
+                "preview_path": str(target),
+                "path": str(target),
+                "display_path": f"remote cache: {target.name}",
+                "remote_cache": True,
+                "full_available": True,
+                "updated_at": iso_now(),
+            }
+        )
+        row.pop("source_path", None)
+        write_json(manifest_path, {"previews": rows})
+        return dict(row)
+
+
 def validate_worker_preview_suffix(filename: str, variant: str) -> None:
     suffix = Path(filename).suffix.lower()
     allowed = {".jpg", ".jpeg", ".png", ".webp"} if variant == "thumbnail" else {".mp4", ".webm", ".mov", ".m4v", ".mkv"}
     if suffix not in allowed:
         raise HTTPException(status_code=400, detail=f"Unsupported worker preview file type: {suffix}")
+
+
+def validate_worker_artifact_suffix(filename: str) -> None:
+    suffix = Path(filename).suffix.lower()
+    allowed = ALLOWED_UPLOAD_SUFFIXES | {".json", ".tsv", ".txt", ".md"}
+    if suffix not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unsupported worker artifact cache file type: {suffix}")
 
 
 def safe_preview_id(value: str) -> str:
@@ -1004,6 +1154,7 @@ def worker_status_changes(body: dict[str, Any]) -> dict[str, Any]:
         "result_report",
         "result_video",
         "worker_id",
+        "worker_artifacts",
         "metrics",
         "command",
     ]:

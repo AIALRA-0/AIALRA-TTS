@@ -15,10 +15,11 @@ from typing import Any
 import requests
 
 from . import __version__
+from .artifacts import DOWNLOADABLE_OUTPUTS
 from .config import load_config
 from .job_config import write_job_config
 from .metrics import collect_system_metrics
-from .utils import PROJECT_ROOT, ensure_dir, run_cmd
+from .utils import PROJECT_ROOT, ensure_dir, read_json, run_cmd, write_json
 
 
 def poll_once(
@@ -35,7 +36,10 @@ def poll_once(
         return {"ok": True, "claimed": False}
     if dry_run:
         return {"ok": True, "claimed": True, "dry_run": True, "job": job}
-    result = run_worker_job(job, remote_base_url, worker_token, config_path, worker_id=worker_id)
+    if worker_action(job):
+        result = run_worker_action(job, remote_base_url, worker_token, config_path, worker_id=worker_id)
+    else:
+        result = run_worker_job(job, remote_base_url, worker_token, config_path, worker_id=worker_id)
     return {"ok": True, "claimed": True, "job_id": job.get("id"), "result": result}
 
 
@@ -141,6 +145,9 @@ def run_worker_job(
         log.flush()
     result = extract_json_result(log_path)
     status = "done" if returncode == 0 else "failed"
+    worker_artifacts: list[dict[str, Any]] = []
+    if status == "done":
+        worker_artifacts = register_worker_artifacts(result, job)
     preview_summary: dict[str, Any] = {}
     if status == "done":
         preview_summary = try_create_and_upload_preview(result, job, remote_base_url, worker_token, base_config, worker_id=worker_id)
@@ -154,12 +161,219 @@ def run_worker_job(
         "result": summarize_result(result),
         "metrics": collect_system_metrics(base_config),
     }
+    if worker_artifacts:
+        payload["worker_artifacts"] = worker_artifacts
     if preview_summary:
         payload["preview"] = preview_summary
     if final_progress is not None:
         payload["progress"] = final_progress
     post_status(remote_base_url, worker_token, job_id, payload)
-    return {"status": status, "returncode": returncode, "log": str(log_path), "result": summarize_result(result), "preview": preview_summary}
+    return {
+        "status": status,
+        "returncode": returncode,
+        "log": str(log_path),
+        "result": summarize_result(result),
+        "preview": preview_summary,
+        "worker_artifacts": worker_artifacts,
+    }
+
+
+def worker_action(job: dict[str, Any]) -> str:
+    metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
+    return str(metadata.get("worker_action") or "").strip()
+
+
+def run_worker_action(
+    job: dict[str, Any],
+    remote_base_url: str,
+    worker_token: str,
+    config_path: str | Path,
+    *,
+    worker_id: str,
+) -> dict[str, Any]:
+    action = worker_action(job)
+    if action == "upload_artifact_cache":
+        return run_upload_artifact_cache_job(job, remote_base_url, worker_token, config_path, worker_id=worker_id)
+    raise RuntimeError(f"Unsupported worker action: {action}")
+
+
+def run_upload_artifact_cache_job(
+    job: dict[str, Any],
+    remote_base_url: str,
+    worker_token: str,
+    config_path: str | Path,
+    *,
+    worker_id: str,
+) -> dict[str, Any]:
+    job_id = str(job["id"])
+    config = load_config(config_path)
+    metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
+    ref_id = str(metadata.get("artifact_ref_id") or "")
+    try_post_status(
+        remote_base_url,
+        worker_token,
+        job_id,
+        {
+            "status": "running",
+            "worker_id": worker_id,
+            "progress": 5,
+            "metrics": collect_system_metrics(config),
+            "log_tail": f"Preparing artifact cache upload for {ref_id}",
+        },
+    )
+    try:
+        artifact = find_registered_artifact(ref_id)
+        path = Path(str(artifact["path"]))
+        if not path.exists() or not path.is_file():
+            raise RuntimeError(f"Registered artifact is missing on worker: {artifact.get('name') or ref_id}")
+        uploaded = upload_worker_artifact_cache(
+            remote_base_url,
+            worker_token,
+            job_id,
+            path,
+            artifact_id=str(metadata.get("artifact_id") or f"worker_artifact_{ref_id}"),
+            artifact_ref_id=ref_id,
+            display_name=str(metadata.get("artifact_name") or artifact.get("name") or path.name),
+            source_output_key=str(metadata.get("source_output_key") or artifact.get("source_output_key") or "artifact"),
+            worker_id=worker_id,
+        )
+        payload = {
+            "status": "done",
+            "returncode": 0,
+            "worker_id": worker_id,
+            "progress": 100,
+            "result": {"artifact_cache": uploaded.get("artifact", uploaded), "artifact_ref_id": ref_id},
+            "metrics": collect_system_metrics(config),
+            "log_tail": f"Uploaded artifact cache for {artifact.get('name') or path.name}",
+        }
+        post_status(remote_base_url, worker_token, job_id, payload)
+        return {"status": "done", "artifact": uploaded}
+    except Exception as exc:
+        payload = {
+            "status": "failed",
+            "returncode": 1,
+            "worker_id": worker_id,
+            "progress": 100,
+            "error": str(exc),
+            "metrics": collect_system_metrics(config),
+            "log_tail": f"Artifact cache upload failed: {exc}",
+        }
+        try_post_status(remote_base_url, worker_token, job_id, payload)
+        return {"status": "failed", "error": str(exc)}
+
+
+def register_worker_artifacts(result: dict[str, Any] | None, job: dict[str, Any]) -> list[dict[str, Any]]:
+    outputs = collect_result_output_paths(result)
+    if not outputs:
+        return []
+    registry = load_artifact_registry()
+    rows = registry.setdefault("artifacts", [])
+    existing = {str(row.get("ref_id")): row for row in rows if isinstance(row, dict)}
+    job_id = str(job.get("id") or "")
+    summaries: list[dict[str, Any]] = []
+    for source_output_key, path in outputs.items():
+        if not path.exists() or not path.is_file():
+            continue
+        stat = path.stat()
+        ref_id = artifact_ref_id(job_id, source_output_key, path, stat.st_size, stat.st_mtime)
+        row = {
+            "ref_id": ref_id,
+            "job_id": job_id,
+            "source_output_key": source_output_key,
+            "name": path.name,
+            "path": str(path),
+            "size": stat.st_size,
+            "mtime": stat.st_mtime,
+            "media_type": media_type_for(path),
+            "registered_at": int(time.time()),
+        }
+        if ref_id in existing:
+            existing[ref_id].update(row)
+        else:
+            rows.append(row)
+        summaries.append(worker_artifact_summary(row))
+    save_artifact_registry(registry)
+    return summaries
+
+
+def collect_result_output_paths(result: dict[str, Any] | None) -> dict[str, Path]:
+    outputs: dict[str, Path] = {}
+    if not result:
+        return outputs
+    report_json = result_report_json_path(result)
+    if report_json and report_json.exists():
+        try:
+            report = read_json(report_json)
+        except Exception:
+            report = {}
+        for key, value in (report.get("outputs") or {}).items():
+            if key in DOWNLOADABLE_OUTPUTS and value:
+                outputs[str(key)] = Path(str(value))
+    if not outputs and result.get("video"):
+        outputs["zh_dub_mp4"] = Path(str(result["video"]))
+    return outputs
+
+
+def result_report_json_path(result: dict[str, Any]) -> Path | None:
+    raw = result.get("report")
+    if not raw:
+        return None
+    path = Path(str(raw))
+    if path.suffix.lower() == ".json":
+        return path
+    if path.suffix.lower() == ".md":
+        return path.with_suffix(".json")
+    candidate = path.with_suffix(".json")
+    return candidate if candidate.exists() else path
+
+
+def artifact_registry_path() -> Path:
+    return PROJECT_ROOT / "runs" / "worker_artifacts" / "registry.json"
+
+
+def load_artifact_registry() -> dict[str, Any]:
+    path = artifact_registry_path()
+    if not path.exists():
+        return {"artifacts": []}
+    try:
+        data = read_json(path)
+    except Exception:
+        return {"artifacts": []}
+    if not isinstance(data, dict):
+        return {"artifacts": []}
+    if not isinstance(data.get("artifacts"), list):
+        data["artifacts"] = []
+    return data
+
+
+def save_artifact_registry(registry: dict[str, Any]) -> None:
+    path = artifact_registry_path()
+    ensure_dir(path.parent)
+    write_json(path, registry)
+
+
+def artifact_ref_id(job_id: str, source_output_key: str, path: Path, size: int, mtime: float) -> str:
+    raw = f"{job_id}\0{source_output_key}\0{path.resolve()}\0{size}\0{mtime:.6f}"
+    return hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()[:32]
+
+
+def worker_artifact_summary(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ref_id": str(row.get("ref_id") or ""),
+        "source_output_key": str(row.get("source_output_key") or ""),
+        "name": str(row.get("name") or ""),
+        "size": int(row.get("size", 0) or 0),
+        "mtime": float(row.get("mtime", 0) or 0),
+        "media_type": str(row.get("media_type") or "application/octet-stream"),
+    }
+
+
+def find_registered_artifact(ref_id: str) -> dict[str, Any]:
+    registry = load_artifact_registry()
+    for row in registry.get("artifacts", []):
+        if isinstance(row, dict) and str(row.get("ref_id") or "") == ref_id:
+            return row
+    raise RuntimeError(f"Worker artifact ref not found: {ref_id}")
 
 
 def try_create_and_upload_preview(
@@ -326,6 +540,33 @@ def upload_worker_preview(
     headers["X-Worker-Preview-Source-Key"] = source_output_key
     headers["X-Worker-Id"] = worker_id
     response = requests.post(endpoint(remote_base_url, path), data=body, headers=headers, timeout=120)
+    response.raise_for_status()
+    return response.json()
+
+
+def upload_worker_artifact_cache(
+    remote_base_url: str,
+    worker_token: str,
+    job_id: str,
+    file_path: Path,
+    *,
+    artifact_id: str,
+    artifact_ref_id: str,
+    display_name: str,
+    source_output_key: str,
+    worker_id: str,
+) -> dict[str, Any]:
+    path = f"/api/worker/jobs/{job_id}/artifact-cache"
+    body = file_path.read_bytes()
+    headers = worker_headers(worker_token, path=path, body=body)
+    headers["Content-Type"] = media_type_for(file_path)
+    headers["X-Worker-Artifact-Id"] = artifact_id
+    headers["X-Worker-Artifact-Ref"] = artifact_ref_id
+    headers["X-Worker-Artifact-Name"] = display_name
+    headers["X-Worker-Artifact-File-Name"] = file_path.name
+    headers["X-Worker-Artifact-Source-Key"] = source_output_key
+    headers["X-Worker-Id"] = worker_id
+    response = requests.post(endpoint(remote_base_url, path), data=body, headers=headers, timeout=300)
     response.raise_for_status()
     return response.json()
 
