@@ -50,7 +50,7 @@
         <button class="tab" data-tab="projects">项目</button>
         <button class="tab" data-tab="artifacts">产物</button>
         <button class="tab" data-tab="jobs">历史任务</button>
-        <button class="tab" data-tab="settings">参数设置</button>
+        <button class="tab" data-tab="settings" data-admin-only>参数设置</button>
       </nav>
 
       <section id="dashboardTab" class="tab-panel active">
@@ -350,7 +350,7 @@
         </section>
       </section>
 
-      <section id="settingsTab" class="tab-panel">
+      <section id="settingsTab" class="tab-panel" data-admin-only>
         <section class="panel">
           <div class="panel-head">
             <h2>常用参数</h2>

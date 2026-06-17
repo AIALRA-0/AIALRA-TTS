@@ -9,7 +9,7 @@ import pytest
 
 
 if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 _OPEN_TEST_CLIENTS = weakref.WeakSet()
 
@@ -66,7 +66,7 @@ def release_windows_testclient_sockets():
             client.close()
     if sys.platform != "win32":
         return
-    # Starlette/FastAPI TestClient creates short-lived loop sockets on Windows.
-    # Force cleanup between tests so full-suite runs do not hit WinError 10055.
+    # Keep cleanup aggressive so leaked handles from failed TestClient setup do
+    # not spill into later tests on Windows.
     gc.collect()
     time.sleep(0.02)

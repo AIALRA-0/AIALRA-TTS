@@ -67,6 +67,13 @@ def test_static_ui_does_not_expose_raw_worker_path_placeholder():
     assert "jobWorkerVideoPath" in html
 
 
+def test_static_settings_ui_is_admin_only():
+    html = (Path(__file__).parents[1] / "src" / "ecse_localizer" / "static" / "index.html").read_text(encoding="utf-8")
+
+    assert '<button class="tab" data-tab="settings" data-admin-only>' in html
+    assert '<section id="settingsTab" class="tab-panel" data-admin-only>' in html
+
+
 def test_webui_login_project_and_quota(tmp_path):
     if TestClient is None:
         pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
@@ -269,6 +276,38 @@ def test_cleanup_endpoint_is_admin_only(tmp_path):
     cleanup = response.json()["cleanup"]
     assert cleanup["dry_run"] is True
     assert "items" in cleanup
+
+
+def test_global_settings_and_raw_config_are_admin_only(tmp_path):
+    if TestClient is None:
+        pytest.skip(str(TESTCLIENT_IMPORT_ERROR))
+    config_path = write_config(tmp_path)
+    app = create_app(config_path)
+    state = app.state.web
+    state.store.create_user("student.one", "long-enough-password")
+
+    with TestClient(app) as student:
+        response = student.post("/api/login", json={"username": "student.one", "password": "long-enough-password"})
+        assert response.status_code == 200
+        response = student.get("/api/tuning")
+        assert response.status_code == 403
+        response = student.post("/api/tuning", json={"values": {"tts.cosyvoice_gain": 2.0}})
+        assert response.status_code == 403
+        response = student.get("/api/config/raw")
+        assert response.status_code == 403
+        assert "worker-token" not in response.text
+        response = student.post("/api/config/raw", json={"yaml": "privacy:\n  allow_cloud_api: true\n"})
+        assert response.status_code == 403
+
+    with TestClient(app) as admin:
+        response = admin.post("/api/login", json={"username": "admin", "password": "local-password"})
+        assert response.status_code == 200
+        response = admin.get("/api/tuning")
+        assert response.status_code == 200
+        assert response.json()["fields"]
+        response = admin.get("/api/config/raw")
+        assert response.status_code == 200
+        assert "worker-token" in response.text
 
 
 def test_upload_enforces_remote_quota(tmp_path):

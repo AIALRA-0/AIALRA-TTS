@@ -371,12 +371,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return {"ok": True, "saved": saved, "quota": state.store.quota_status(user)}
 
     @app.get("/api/tuning")
-    def get_tuning(_: str = Depends(require_user)) -> dict[str, Any]:
+    def get_tuning(user: str = Depends(require_user)) -> dict[str, Any]:
+        require_admin_access(state, user)
         state.reload_config()
         return {"fields": fields_from_config(state.config)}
 
     @app.post("/api/tuning")
-    async def update_tuning(request: Request, _: str = Depends(require_user)) -> dict[str, Any]:
+    async def update_tuning(request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
+        require_admin_access(state, user)
         body = await request.json()
         values = body.get("values", {})
         if not isinstance(values, dict):
@@ -395,11 +397,13 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return {"ok": True, "fields": fields_from_config(state.config)}
 
     @app.get("/api/config/raw")
-    def get_raw_config(_: str = Depends(require_user)) -> PlainTextResponse:
+    def get_raw_config(user: str = Depends(require_user)) -> PlainTextResponse:
+        require_admin_access(state, user)
         return PlainTextResponse(state.config_path.read_text(encoding="utf-8"), media_type="text/plain; charset=utf-8")
 
     @app.post("/api/config/raw")
-    async def save_raw_config(request: Request, _: str = Depends(require_user)) -> dict[str, Any]:
+    async def save_raw_config(request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
+        require_admin_access(state, user)
         body = await request.json()
         raw = str(body.get("yaml", ""))
         try:
@@ -984,6 +988,11 @@ def token_username(state: WebState, token: str, artifact_id_value: str) -> str |
 def is_admin(state: WebState, username: str) -> bool:
     user = state.store.get_user(username) or {}
     return user.get("role") == "admin"
+
+
+def require_admin_access(state: WebState, username: str) -> None:
+    if not is_admin(state, username):
+        raise HTTPException(status_code=403, detail="Admin required")
 
 
 def can_access_record(state: WebState, username: str, record: dict[str, Any]) -> bool:

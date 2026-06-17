@@ -8,6 +8,8 @@ const state = {
   templates: [],
   capabilities: null,
   uploadPolicy: null,
+  currentUser: null,
+  currentRole: "user",
   selectedJob: null,
   jobTimer: null,
   metricsTimer: null,
@@ -54,10 +56,13 @@ function showLogin() {
   $("appView").hidden = true;
 }
 
-function showApp(user) {
+function showApp(user, userRecord = null) {
   $("loginView").hidden = true;
   $("appView").hidden = false;
+  state.currentUser = user || null;
+  state.currentRole = userRecord?.role || "user";
   $("sessionUser").textContent = user ? `已登录：${user}` : "";
+  renderAdminUi();
   const loginButton = $("loginButton");
   if (loginButton) {
     loginButton.disabled = false;
@@ -80,7 +85,7 @@ async function bootstrap() {
   try {
     const session = await api("/api/session");
     if (session.authenticated) {
-      showApp(session.user);
+      showApp(session.user, session.user_record);
       refreshAll();
     } else {
       showLogin();
@@ -104,7 +109,8 @@ function bindEvents() {
       };
       const result = await api("/api/login", { method: "POST", body: JSON.stringify(payload) });
       loginButton.textContent = "已登录，正在加载...";
-      showApp(result.user);
+      const session = await api("/api/session").catch(() => ({ user: result.user, user_record: null }));
+      showApp(session.user || result.user, session.user_record);
       refreshAll();
     } catch (error) {
       $("loginError").textContent = error.message;
@@ -153,6 +159,10 @@ function bindEvents() {
 }
 
 function showTab(name) {
+  if (name === "settings" && !isAdminUser()) {
+    toast("参数设置仅管理员可用");
+    name = "dashboard";
+  }
   document.querySelectorAll(".tab").forEach((el) => el.classList.toggle("active", el.dataset.tab === name));
   document.querySelectorAll(".tab-panel").forEach((el) => el.classList.toggle("active", el.id === `${name}Tab`));
   if (name === "jobs") refreshJobs();
@@ -168,13 +178,32 @@ function showTab(name) {
 }
 
 async function refreshAll() {
-  const results = await Promise.allSettled([loadDashboard(), loadVideos(), loadReports(), refreshJobs(), loadProjects(), loadUsers(), loadArtifacts(), loadTemplates(), loadTuning()]);
+  const tasks = [loadDashboard(), loadVideos(), loadReports(), refreshJobs(), loadProjects(), loadArtifacts(), loadTemplates()];
+  if (isAdminUser()) {
+    tasks.push(loadUsers(), loadTuning());
+  } else {
+    renderUsers("当前账号不是管理员，不能查看用户列表。");
+  }
+  const results = await Promise.allSettled(tasks);
   const failed = results.filter((item) => item.status === "rejected");
   if (failed.length) {
     console.warn("Partial refresh failed:", failed.map((item) => item.reason));
     toast(`部分数据刷新失败：${failed[0].reason?.message || failed[0].reason}`);
   }
   startLiveTimers();
+}
+
+function isAdminUser() {
+  return state.currentRole === "admin";
+}
+
+function renderAdminUi() {
+  document.querySelectorAll("[data-admin-only]").forEach((el) => {
+    el.hidden = !isAdminUser();
+  });
+  if (!isAdminUser() && document.querySelector(".tab.active")?.dataset.tab === "settings") {
+    showTab("dashboard");
+  }
 }
 
 function startLiveTimers() {
