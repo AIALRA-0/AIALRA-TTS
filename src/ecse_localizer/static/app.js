@@ -11,6 +11,7 @@ const state = {
   currentUser: null,
   currentRole: "user",
   selectedJob: null,
+  showArchivedProjects: false,
   jobTimer: null,
   metricsTimer: null,
 };
@@ -136,6 +137,10 @@ function bindEvents() {
   $("uploadForm").addEventListener("submit", uploadFiles);
   $("projectForm").addEventListener("submit", createProject);
   $("folderForm").addEventListener("submit", createFolder);
+  $("showArchivedProjects").addEventListener("change", () => {
+    state.showArchivedProjects = $("showArchivedProjects").checked;
+    loadProjects();
+  });
   $("jobProject").addEventListener("change", renderFolderOptions);
   $("jobFilterProject").addEventListener("change", () => {
     renderJobFilterFolders();
@@ -245,11 +250,13 @@ async function loadDashboard() {
   renderUploadPolicy();
   state.capabilities = data.capabilities || null;
   renderLanguageCapabilities();
-  state.projects = data.projects || [];
-  renderProjectOptions();
-  renderFolderOptions();
-  renderJobFilterOptions();
-  renderProjects();
+  if (!state.showArchivedProjects) {
+    state.projects = data.projects || [];
+    renderProjectOptions();
+    renderFolderOptions();
+    renderJobFilterOptions();
+    renderProjects();
+  }
   state.reports = data.latest_reports || [];
   renderReports();
 }
@@ -505,7 +512,8 @@ function renderReportOptions() {
 
 async function loadProjects() {
   try {
-    const data = await api("/api/projects");
+    const query = state.showArchivedProjects ? "?include_archived=true" : "";
+    const data = await api(`/api/projects${query}`);
     state.projects = data.projects || [];
     renderProjectOptions();
     renderFolderOptions();
@@ -583,7 +591,7 @@ function setChecked(id, value) {
 function renderProjectOptions() {
   const selects = [$("jobProject"), $("folderProject")].filter(Boolean);
   for (const select of selects) select.innerHTML = "";
-  for (const project of state.projects) {
+  for (const project of activeProjects()) {
     for (const select of selects) {
       const option = document.createElement("option");
       option.value = project.id;
@@ -638,9 +646,10 @@ function renderJobFilterFolders() {
 function renderFolderOptions() {
   const select = $("jobFolder");
   if (!select) return;
-  const project = state.projects.find((item) => item.id === $("jobProject").value) || state.projects[0];
+  const projects = activeProjects();
+  const project = projects.find((item) => item.id === $("jobProject").value) || projects[0];
   select.innerHTML = "";
-  for (const folder of project?.folders || [{ id: "root", name: "Root" }]) {
+  for (const folder of activeFolders(project)) {
     const option = document.createElement("option");
     option.value = folder.id;
     option.textContent = folder.name || folder.id;
@@ -659,51 +668,72 @@ function renderProjects() {
   for (const project of state.projects) {
     const item = document.createElement("div");
     item.className = "job-item";
+    if (project.archived_at) item.classList.add("muted-item");
     const projectQuotaGb = bytesToGb(project.quota_project_bytes || 0, 0);
     item.innerHTML = `
       <div class="job-title">
         <span>${escapeHtml(project.name)}</span>
-        <span class="status ok">${escapeHtml(project.owner || "")}</span>
+        <span class="status ${project.archived_at ? "warn" : "ok"}">${project.archived_at ? "archived" : escapeHtml(project.owner || "")}</span>
       </div>
       <div class="job-meta">${escapeHtml(project.id)} · ${escapeHtml(project.description || "")}</div>
+      ${project.archived_at ? `<div class="job-meta">archived ${escapeHtml(project.archived_at || "")} by ${escapeHtml(project.archived_by || "")}</div>` : ""}
       <div class="job-meta">project quota ${formatBytes(project.project_used_bytes || 0)} / ${formatBytes(project.quota_project_bytes || 0)}</div>
       <div class="project-edit">
-        <label>项目名 <input data-project-name="${escapeHtml(project.id)}" value="${escapeHtml(project.name)}" /></label>
-        <label>描述 <input data-project-description="${escapeHtml(project.id)}" value="${escapeHtml(project.description || "")}" /></label>
-        <label>项目额度 GB <input data-project-quota="${escapeHtml(project.id)}" type="number" min="0" step="0.1" value="${projectQuotaGb}" /></label>
+        <label>项目名 <input data-project-name="${escapeHtml(project.id)}" value="${escapeHtml(project.name)}" ${project.archived_at ? "disabled" : ""} /></label>
+        <label>描述 <input data-project-description="${escapeHtml(project.id)}" value="${escapeHtml(project.description || "")}" ${project.archived_at ? "disabled" : ""} /></label>
+        <label>项目额度 GB <input data-project-quota="${escapeHtml(project.id)}" type="number" min="0" step="0.1" value="${projectQuotaGb}" ${project.archived_at ? "disabled" : ""} /></label>
       </div>
       <div class="folder-edit-list"></div>
     `;
     const actions = document.createElement("div");
     actions.className = "artifact-actions";
-    const saveProjectButton = document.createElement("button");
-    saveProjectButton.type = "button";
-    saveProjectButton.className = "secondary";
-    saveProjectButton.textContent = "保存项目";
-    saveProjectButton.addEventListener("click", () => saveProjectSettings(project.id));
-    actions.appendChild(saveProjectButton);
-    const archiveProjectButton = document.createElement("button");
-    archiveProjectButton.type = "button";
-    archiveProjectButton.className = "secondary";
-    archiveProjectButton.textContent = "归档项目";
-    archiveProjectButton.addEventListener("click", () => archiveProject(project));
-    actions.appendChild(archiveProjectButton);
+    if (project.archived_at) {
+      const restoreProjectButton = document.createElement("button");
+      restoreProjectButton.type = "button";
+      restoreProjectButton.className = "secondary";
+      restoreProjectButton.textContent = "恢复项目";
+      restoreProjectButton.addEventListener("click", () => restoreProject(project));
+      actions.appendChild(restoreProjectButton);
+    } else {
+      const saveProjectButton = document.createElement("button");
+      saveProjectButton.type = "button";
+      saveProjectButton.className = "secondary";
+      saveProjectButton.textContent = "保存项目";
+      saveProjectButton.addEventListener("click", () => saveProjectSettings(project.id));
+      actions.appendChild(saveProjectButton);
+      const archiveProjectButton = document.createElement("button");
+      archiveProjectButton.type = "button";
+      archiveProjectButton.className = "secondary";
+      archiveProjectButton.textContent = "归档项目";
+      archiveProjectButton.addEventListener("click", () => archiveProject(project));
+      actions.appendChild(archiveProjectButton);
+    }
     const folderList = item.querySelector(".folder-edit-list");
     for (const folder of project.folders || []) {
       const row = document.createElement("div");
       row.className = "folder-edit-row";
+      if (folder.archived_at) row.classList.add("muted-item");
       row.innerHTML = `
-        <label>${folder.id === "root" ? "根文件夹" : "文件夹"} <input data-folder-project="${escapeHtml(project.id)}" data-folder-id="${escapeHtml(folder.id)}" value="${escapeHtml(folder.name || folder.id)}" /></label>
+        <label>${folder.id === "root" ? "根文件夹" : "文件夹"} ${folder.archived_at ? "（已归档）" : ""}<input data-folder-project="${escapeHtml(project.id)}" data-folder-id="${escapeHtml(folder.id)}" value="${escapeHtml(folder.name || folder.id)}" ${project.archived_at || folder.archived_at ? "disabled" : ""} /></label>
       `;
       const folderActions = document.createElement("div");
       folderActions.className = "artifact-actions";
-      const saveFolderButton = document.createElement("button");
-      saveFolderButton.type = "button";
-      saveFolderButton.className = "secondary";
-      saveFolderButton.textContent = "保存文件夹";
-      saveFolderButton.addEventListener("click", () => saveFolderSettings(project.id, folder.id));
-      folderActions.appendChild(saveFolderButton);
-      if (folder.id !== "root") {
+      if (!project.archived_at && folder.archived_at && folder.id !== "root") {
+        const restoreFolderButton = document.createElement("button");
+        restoreFolderButton.type = "button";
+        restoreFolderButton.className = "secondary";
+        restoreFolderButton.textContent = "恢复文件夹";
+        restoreFolderButton.addEventListener("click", () => restoreFolder(project, folder));
+        folderActions.appendChild(restoreFolderButton);
+      } else if (!project.archived_at && !folder.archived_at) {
+        const saveFolderButton = document.createElement("button");
+        saveFolderButton.type = "button";
+        saveFolderButton.className = "secondary";
+        saveFolderButton.textContent = "保存文件夹";
+        saveFolderButton.addEventListener("click", () => saveFolderSettings(project.id, folder.id));
+        folderActions.appendChild(saveFolderButton);
+      }
+      if (!project.archived_at && !folder.archived_at && folder.id !== "root") {
         const folderButton = document.createElement("button");
         folderButton.type = "button";
         folderButton.className = "secondary";
@@ -717,6 +747,15 @@ function renderProjects() {
     item.appendChild(actions);
     list.appendChild(item);
   }
+}
+
+function activeProjects() {
+  return state.projects.filter((project) => !project.archived_at);
+}
+
+function activeFolders(project) {
+  const folders = (project?.folders || []).filter((folder) => !folder.archived_at);
+  return folders.length ? folders : [{ id: "root", name: "Root" }];
 }
 
 async function createProject(event) {
@@ -796,15 +835,21 @@ async function archiveProject(project) {
   const ok = window.confirm(`归档项目？\n${project.name}`);
   if (!ok) return;
   try {
-    const result = await api(`/api/projects/${encodeURIComponent(project.id)}`, { method: "DELETE" });
-    state.projects = result.projects || state.projects;
+    await api(`/api/projects/${encodeURIComponent(project.id)}`, { method: "DELETE" });
     toast("项目已归档");
-    renderProjectOptions();
-    renderFolderOptions();
-    renderJobFilterOptions();
-    renderProjects();
+    await loadProjects();
   } catch (error) {
     toast(`归档项目失败：${error.message}`);
+  }
+}
+
+async function restoreProject(project) {
+  try {
+    await api(`/api/projects/${encodeURIComponent(project.id)}/restore`, { method: "POST", body: "{}" });
+    toast("项目已恢复");
+    await loadProjects();
+  } catch (error) {
+    toast(`恢复项目失败：${error.message}`);
   }
 }
 
@@ -812,15 +857,21 @@ async function archiveFolder(project, folder) {
   const ok = window.confirm(`归档文件夹？\n${project.name} / ${folder.name || folder.id}`);
   if (!ok) return;
   try {
-    const result = await api(`/api/projects/${encodeURIComponent(project.id)}/folders/${encodeURIComponent(folder.id)}`, { method: "DELETE" });
-    state.projects = result.projects || state.projects;
+    await api(`/api/projects/${encodeURIComponent(project.id)}/folders/${encodeURIComponent(folder.id)}`, { method: "DELETE" });
     toast("文件夹已归档");
-    renderProjectOptions();
-    renderFolderOptions();
-    renderJobFilterOptions();
-    renderProjects();
+    await loadProjects();
   } catch (error) {
     toast(`归档文件夹失败：${error.message}`);
+  }
+}
+
+async function restoreFolder(project, folder) {
+  try {
+    await api(`/api/projects/${encodeURIComponent(project.id)}/folders/${encodeURIComponent(folder.id)}/restore`, { method: "POST", body: "{}" });
+    toast("文件夹已恢复");
+    await loadProjects();
+  } catch (error) {
+    toast(`恢复文件夹失败：${error.message}`);
   }
 }
 

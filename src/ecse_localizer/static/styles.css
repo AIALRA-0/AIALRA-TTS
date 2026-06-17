@@ -481,6 +481,11 @@ h2 {
   background: #f8fafc;
 }
 
+.muted-item {
+  background: #f8fafc;
+  color: #647181;
+}
+
 .job-title {
   display: flex;
   justify-content: space-between;

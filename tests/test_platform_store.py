@@ -231,6 +231,27 @@ def test_project_and_folder_archive_are_soft_hidden(tmp_path):
         raise AssertionError("last active project should not be archived")
 
 
+def test_project_and_folder_restore_make_archived_targets_active_again(tmp_path):
+    store = PlatformStore(make_config(tmp_path))
+    store.bootstrap()
+    store.create_project("admin", "Keep Active", quota_project_gb=2)
+    course = store.create_project("admin", "Course", quota_project_gb=2)
+    folder = store.create_folder("admin", course["id"], "Week 1")
+
+    store.archive_folder("admin", course["id"], folder["id"])
+    store.archive_project("admin", course["id"])
+    assert all(item["id"] != course["id"] for item in store.list_projects("admin"))
+
+    restored_project = store.restore_project("admin", course["id"])
+    restored_folder = store.restore_folder("admin", course["id"], folder["id"])
+
+    assert "archived_at" not in restored_project
+    assert "archived_at" not in restored_folder
+    store.validate_project_folder("admin", course["id"], folder["id"])
+    visible = next(item for item in store.list_projects("admin") if item["id"] == course["id"])
+    assert any(item["id"] == folder["id"] for item in visible["folders"])
+
+
 def test_parameter_templates_are_user_scoped_and_sanitized(tmp_path):
     store = PlatformStore(make_config(tmp_path))
     store.bootstrap()

@@ -86,12 +86,19 @@ def test_static_template_controls_have_save_update_and_delete_actions():
 
 
 def test_static_project_controls_have_update_actions():
-    js = (Path(__file__).parents[1] / "src" / "ecse_localizer" / "static" / "app.js").read_text(encoding="utf-8")
+    static_root = Path(__file__).parents[1] / "src" / "ecse_localizer" / "static"
+    html = (static_root / "index.html").read_text(encoding="utf-8")
+    js = (static_root / "app.js").read_text(encoding="utf-8")
 
+    assert 'id="showArchivedProjects"' in html
     assert "保存项目" in js
     assert "保存文件夹" in js
+    assert "恢复项目" in js
+    assert "恢复文件夹" in js
     assert "async function saveProjectSettings(projectId)" in js
     assert "async function saveFolderSettings(projectId, folderId)" in js
+    assert "async function restoreProject(project)" in js
+    assert "async function restoreFolder(project, folder)" in js
     assert 'method: "PATCH"' in js
 
 
@@ -288,6 +295,11 @@ def test_project_and_folder_archive_api_hides_targets(tmp_path):
 
     assert response.status_code == 200
     assert all(item["id"] != project["id"] for item in response.json()["projects"])
+    response = client.get("/api/projects?include_archived=true")
+    assert response.status_code == 200
+    archived_project = next(item for item in response.json()["projects"] if item["id"] == project["id"])
+    assert archived_project["archived_at"]
+    assert any(item["id"] == folder["id"] and item["archived_at"] for item in archived_project["folders"])
     response = client.post("/api/jobs", json={"type": "audit", "project_id": project["id"], "folder_id": "root"})
     assert response.status_code == 400
     assert "Project not found" in response.text
@@ -295,6 +307,16 @@ def test_project_and_folder_archive_api_hides_targets(tmp_path):
     response = client.delete(f"/api/projects/{default_project['id']}")
     assert response.status_code == 400
     assert "active project" in response.text
+
+    response = client.post(f"/api/projects/{project['id']}/restore", json={})
+    assert response.status_code == 200
+    assert any(item["id"] == project["id"] and not item.get("archived_at") for item in response.json()["projects"])
+    response = client.post(f"/api/projects/{project['id']}/folders/{folder['id']}/restore", json={})
+    assert response.status_code == 200
+    restored_project = next(item for item in response.json()["projects"] if item["id"] == project["id"])
+    assert any(item["id"] == folder["id"] and not item.get("archived_at") for item in restored_project["folders"])
+    response = client.post("/api/jobs", json={"type": "audit", "project_id": project["id"], "folder_id": folder["id"]})
+    assert response.status_code == 200
 
 
 def test_webui_secure_session_cookie_when_configured(tmp_path):

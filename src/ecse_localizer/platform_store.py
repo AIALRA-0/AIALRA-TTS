@@ -327,6 +327,25 @@ class PlatformStore:
         self._save(self.projects_path, data)
         return project_public_view(target, include_archived=True)
 
+    def restore_project(self, username: str, project_id: str, *, admin: bool = False) -> dict[str, Any]:
+        data = self._load(self.projects_path, {"projects": []})
+        for project in data.get("projects", []):
+            self._normalize_project(project)
+            if project.get("id") != project_id:
+                continue
+            if not admin and project.get("owner") != username:
+                raise ValueError("Project not found")
+            if not project.get("archived_at"):
+                return project_public_view(project, include_archived=True)
+            project.pop("archived_at", None)
+            project.pop("archived_by", None)
+            project["restored_at"] = iso_now()
+            project["restored_by"] = username
+            project["updated_at"] = iso_now()
+            self._save(self.projects_path, data)
+            return project_public_view(project, include_archived=True)
+        raise ValueError("Project not found")
+
     def archive_folder(self, username: str, project_id: str, folder_id: str, *, admin: bool = False) -> dict[str, Any]:
         if not folder_id or folder_id == "root":
             raise ValueError("Root folder cannot be archived")
@@ -350,6 +369,43 @@ class PlatformStore:
                 self._save(self.projects_path, data)
                 return dict(folder)
             raise ValueError("Folder not found")
+        raise ValueError("Project not found")
+
+    def restore_folder(self, username: str, project_id: str, folder_id: str, *, admin: bool = False) -> dict[str, Any]:
+        if not folder_id or folder_id == "root":
+            raise ValueError("Root folder cannot be restored")
+        data = self._load(self.projects_path, {"projects": []})
+        for project in data.get("projects", []):
+            self._normalize_project(project)
+            if project.get("id") != project_id:
+                continue
+            if not admin and project.get("owner") != username:
+                raise ValueError("Project not found")
+            if project.get("archived_at"):
+                raise ValueError("Project is archived")
+            folders = project.get("folders", [])
+            target = next((folder for folder in folders if folder.get("id") == folder_id), None)
+            if not target:
+                raise ValueError("Folder not found")
+            if not target.get("archived_at"):
+                return dict(target)
+            parent_id = target.get("parent_id", "root")
+            name = str(target.get("name") or "")
+            if any(
+                folder.get("id") != folder_id
+                and not folder.get("archived_at")
+                and folder.get("parent_id", "root") == parent_id
+                and str(folder.get("name", "")).lower() == name.lower()
+                for folder in folders
+            ):
+                raise ValueError(f"Folder already exists: {name}")
+            target.pop("archived_at", None)
+            target.pop("archived_by", None)
+            target["restored_at"] = iso_now()
+            target["restored_by"] = username
+            project["updated_at"] = iso_now()
+            self._save(self.projects_path, data)
+            return dict(target)
         raise ValueError("Project not found")
 
     def validate_project_folder(self, username: str, project_id: str, folder_id: str, *, admin: bool = False) -> None:

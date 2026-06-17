@@ -471,8 +471,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         return {"ok": True, "deleted": deleted, "templates": state.store.list_templates(user, admin=is_admin(state, user))}
 
     @app.get("/api/projects")
-    def projects(user: str = Depends(require_user)) -> dict[str, Any]:
-        return {"projects": projects_with_usage(state, user)}
+    def projects(include_archived: bool = False, user: str = Depends(require_user)) -> dict[str, Any]:
+        return {"projects": projects_with_usage(state, user, include_archived=include_archived)}
 
     @app.post("/api/projects")
     async def create_project(request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
@@ -512,6 +512,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"ok": True, "archived": archived, "projects": projects_with_usage(state, user)}
 
+    @app.post("/api/projects/{project_id}/restore")
+    def restore_project(project_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
+        try:
+            restored = state.store.restore_project(user, project_id, admin=is_admin(state, user))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "restored": restored, "projects": projects_with_usage(state, user, include_archived=True)}
+
     @app.post("/api/projects/{project_id}/folders")
     async def create_folder(project_id: str, request: Request, user: str = Depends(require_user)) -> dict[str, Any]:
         body = await request.json()
@@ -549,6 +557,14 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"ok": True, "archived": folder, "projects": projects_with_usage(state, user)}
+
+    @app.post("/api/projects/{project_id}/folders/{folder_id}/restore")
+    def restore_folder(project_id: str, folder_id: str, user: str = Depends(require_user)) -> dict[str, Any]:
+        try:
+            folder = state.store.restore_folder(user, project_id, folder_id, admin=is_admin(state, user))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "restored": folder, "projects": projects_with_usage(state, user, include_archived=True)}
 
     @app.get("/api/quota")
     def quota(user: str = Depends(require_user)) -> dict[str, Any]:
@@ -1801,9 +1817,9 @@ def enforce_storage_quota_before_job(state: WebState, user: str, metadata: dict[
         )
 
 
-def projects_with_usage(state: WebState, user: str) -> list[dict[str, Any]]:
+def projects_with_usage(state: WebState, user: str, *, include_archived: bool = False) -> list[dict[str, Any]]:
     admin = is_admin(state, user)
-    projects = state.store.list_projects(user, admin=admin)
+    projects = state.store.list_projects(user, admin=admin, include_archived=include_archived)
     usage = project_artifact_usage(state, user, admin=admin)
     rows = []
     for project in projects:

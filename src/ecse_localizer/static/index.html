@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-store" />
     <meta http-equiv="Pragma" content="no-cache" />
     <title>AIALRA Localizer</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260617-project-edit" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260617-project-restore" />
   </head>
   <body>
     <main id="loginView" class="login-view" hidden>
@@ -238,6 +238,10 @@
               </label>
               <button type="submit" class="secondary">创建文件夹</button>
             </form>
+            <label class="check-row">
+              <input id="showArchivedProjects" type="checkbox" />
+              <span>显示归档项目和文件夹</span>
+            </label>
             <div id="projectsList" class="job-list"></div>
           </div>
           <div>
@@ -378,6 +382,6 @@
     </div>
 
     <div id="toast" class="toast" hidden></div>
-    <script src="/assets/app.js?v=20260617-project-edit"></script>
+    <script src="/assets/app.js?v=20260617-project-restore"></script>
   </body>
 </html>
