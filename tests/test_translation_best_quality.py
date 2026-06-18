@@ -532,6 +532,17 @@ def test_known_spc_stewart_japanese_quality_context_is_corrected():
     assert "斯图尔特" not in corrected
 
 
+def test_known_spc_you_know_stewart_phrase_is_corrected():
+    corrected = apply_known_term_corrections(
+        "我认为这一切都来自他们。你知道斯图尔特，他们从那里开始并继续发展。",
+        "I think it all came from them and you know Stewart, they started from there and ran with it.",
+        {"translation": {"target_language": "zh-CN"}},
+    )
+
+    assert "Shewhart" in corrected
+    assert "斯图尔特" not in corrected
+
+
 def test_chinese_normalization_preserves_spaces_inside_latin_names():
     normalized = normalize_translation(
         "因此，在1938年，Shewhart 与 W. Edwards Deming 合作。",

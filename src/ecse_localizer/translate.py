@@ -1372,6 +1372,9 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
     if shewhart_quality_context and re.search(r"\b(?:Stuart|Stewart)\b|斯图尔特|斯图亚特|史都华", combined, flags=re.IGNORECASE):
         work = re.sub(ascii_left + r"(?:Stuart|Stewart)" + ascii_right, "Shewhart", work, flags=re.IGNORECASE)
         work = re.sub(r"斯图尔特|斯图亚特|史都华", "Shewhart", work)
+    if re.search(r"\byou\s+know\s+Stewart\b|\bStewart\b.{0,48}\bstarted\s+from\s+there\b", source, flags=re.IGNORECASE):
+        work = re.sub(ascii_left + r"Stewart" + ascii_right, "Shewhart", work, flags=re.IGNORECASE)
+        work = re.sub(r"斯图尔特|斯图亚特|史都华", "Shewhart", work)
 
     deming_context = re.search(
         r"Shewhart|statistical process control|SPC|control charts?|Western Electric|14\s*(?:points?|点)|quality product",
