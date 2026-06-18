@@ -1083,6 +1083,7 @@ def known_spc_asr_term_equivalent(term: str, source: str, zh: str) -> bool:
             r"\b(?:process|rules?|robust)\b.{0,64}\b(?:SBC|SVC)\b|\b(?:SBC|SVC)\b.{0,64}\b(?:process|rules?|robust)\b|"
             r"\badoption\s+of\s+this\s+(?:SBC|SVC)\s+strategy\b|"
             r"\bhaving\s+as\s+many\s+(?:SBC|SVC)\s+(?:charge|charts?)\b|"
+            r"\bthis\s+(?:SBC|SVC)\b.{0,40}\bprevention\b|"
             r"\b(?:implement\w*|key\s+performance\s+indicators?|KPIs?|PDK|process\s+design\s+kit)\b.{0,80}\b(?:SBC|SVC)\b|"
             r"\b(?:SBC|SVC)\b.{0,80}\b(?:implement\w*|key\s+performance\s+indicators?|KPIs?|PDK|process\s+design\s+kit)\b|"
             r"\bincorporat\w+\b.{0,48}\b(?:SBC|SVC)\b|\bmore\s+(?:SBC|SVC)\b|\bmanufacturers?\b.{0,64}\b(?:SBC|SVC)\b|"
@@ -1487,6 +1488,8 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         flags=re.IGNORECASE,
     ):
         work = "如果控制图落在三西格玛控制限以内，这一点我们稍后会讲，通常就足以生产出质量合格的产品。"
+    if re.search(r"\bthis\s+SBC\b.{0,40}\bprevention\b", source, flags=re.IGNORECASE):
+        work = "这里说的SPC，重点是预防。"
     if re.search(
         r"\bwhen\s+I\s+1st\s+started\s+in\s+the\s+industry\s+in\s+the\s+early\s+eighties\b.{0,120}\bJapanese\b.{0,80}\bkilling\s+us\b",
         source,
@@ -1508,13 +1511,7 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
     if re.search(r"\b90\s*%\s+yield\s+range\b.{0,120}\bSBC\s+controls?\b", source, flags=re.IGNORECASE):
         work = "当良率达到90%左右时，你就会开始减少一些SPC控制措施。"
     if re.search(r"\b(?:SBC|SVC)\b.{0,96}\bKPIs?\b.{0,96}\bPDK\b|\bPDK\b.{0,96}\bKPIs?\b.{0,96}\b(?:SBC|SVC)\b", source, flags=re.IGNORECASE):
-        work = re.sub(
-            r"[^。！？]*(?:SPC|SBC|SVC)\s*应该为[^。！？]*(?:(?:关键性能指标|KPIs?)[^。！？]*(?:PDK|工艺设计套件)|(?:PDK|工艺设计套件)[^。！？]*(?:关键性能指标|KPIs?))[^。！？]*实施[^。！？]*[。！？]?",
-            "对PDK中为设计定义的关键性能指标（KPI），也应该实施SPC。",
-            work,
-            count=1,
-            flags=re.IGNORECASE,
-        )
+        work = "对PDK中为设计定义的关键性能指标（KPI），也应该实施SPC。"
     work = remove_redundant_translated_ordinal_tokens(work, source)
 
     combined = work + " " + source

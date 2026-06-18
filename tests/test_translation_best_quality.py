@@ -662,6 +662,13 @@ def test_known_spc_control_variants_are_corrected_without_missing_term_flag():
     )
     assert natural_kpi_before_spc_fix == "对PDK中为设计定义的关键性能指标（KPI），也应该实施SPC。"
 
+    current_llm_variant = normalize_translation(
+        "SPC应该被实施在设计中建立的关键性能指标（KPIs），即PDK中的KPIs。",
+        {"translation": {"target_language": "zh-CN"}},
+        "SVC should be implemented for the key performance indicators, the KPIs of the design established in the PDK, the process design kit.",
+    )
+    assert current_llm_variant == "对PDK中为设计定义的关键性能指标（KPI），也应该实施SPC。"
+
 
 def test_us_manufacturer_spc_translation_does_not_keep_misplaced_us_parenthetical():
     source = "So, a lot of the US manufacturers started incorporating more SBC."
@@ -702,6 +709,15 @@ def test_spc_strategy_and_chart_asr_confusions_are_repaired():
         )
         == []
     )
+
+    prevention = normalize_translation(
+        "而这种SBC我们谈论的是预防。",
+        {"translation": {"target_language": "zh-CN"}},
+        "And this SBC we're talking prevention.",
+    )
+    assert prevention == "这里说的SPC，重点是预防。"
+    assert "SBC" not in prevention
+    assert protected_term_flags("And this SBC we're talking prevention.", prevention) == []
 
 
 def test_spc_control_chart_fragments_are_naturalized():
