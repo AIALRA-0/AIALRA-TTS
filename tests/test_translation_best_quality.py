@@ -635,6 +635,10 @@ def test_known_spc_control_variants_are_corrected_without_missing_term_flag():
         "A lot of the US manufacturers started incorporating more SBC.",
         "许多美国制造商开始采用更多统计过程控制方法（SPC）。",
     ) == []
+    assert protected_term_flags(
+        "SVC should be implemented for the key performance indicators, the KPIs of the design established in the PDK, the process design kit.",
+        "SPC图表应该针对设计中在PDK中建立的关键性能指标（KPIs）实施。",
+    ) == []
 
 
 def test_us_manufacturer_spc_translation_does_not_keep_misplaced_us_parenthetical():
