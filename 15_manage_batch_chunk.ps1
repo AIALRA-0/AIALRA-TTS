@@ -157,6 +157,61 @@ function Get-LogProgress($StdoutTail, $StderrTail) {
   return $progress
 }
 
+function Get-LatestCosyVoiceInputJson($StdoutTail) {
+  $lines = @($StdoutTail)
+  for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+    $line = [string]$lines[$i]
+    if ($line -match '--input-json\s+"([^"]+)"') {
+      return $matches[1]
+    }
+    if ($line -match "--input-json\s+'([^']+)'") {
+      return $matches[1]
+    }
+  }
+  return ""
+}
+
+function Add-TtsFileProgress($Progress, $StdoutTail) {
+  if (-not $Progress -or $Progress.phase -ne "tts") { return $Progress }
+  $inputJson = Get-LatestCosyVoiceInputJson $StdoutTail
+  if (-not $inputJson -or -not (Test-Path -LiteralPath $inputJson)) { return $Progress }
+  try {
+    $payload = Read-JsonFile $inputJson
+    $segments = @($payload.segments | Where-Object { ([string]$_.text).Trim().Length -gt 0 })
+    $total = $segments.Count
+    if ($total -le 0) { return $Progress }
+    $done = 0
+    $latest = $null
+    $earliest = $null
+    foreach ($segment in $segments) {
+      $wav = [string]$segment.out_wav
+      if ($wav -and (Test-Path -LiteralPath $wav)) {
+        $item = Get-Item -LiteralPath $wav -ErrorAction SilentlyContinue
+        if ($item -and $item.Length -gt 1000) {
+          $done += 1
+          if (-not $latest -or $item.LastWriteTime -gt $latest.LastWriteTime) { $latest = $item }
+          if (-not $earliest -or $item.LastWriteTime -lt $earliest.LastWriteTime) { $earliest = $item }
+        }
+      }
+    }
+    $Progress.current = $done
+    $Progress.total = $total
+    $Progress.percent = [math]::Round((100.0 * $done / $total), 2)
+    $latestText = if ($latest) { " latest=$($latest.Name)" } else { "" }
+    $Progress.message = "Synthesizing Chinese dubbed audio with CosyVoice ($done/$total segments)$latestText"
+    if ($done -gt 1 -and $earliest -and $latest -and $latest.LastWriteTime -gt $earliest.LastWriteTime) {
+      $elapsed = ($latest.LastWriteTime - $earliest.LastWriteTime).TotalSeconds
+      $rate = [double]($done - 1) / $elapsed
+      if ($rate -gt 0) {
+        $eta = [int][Math]::Round(([Math]::Max(0, $total - $done)) / $rate)
+        $Progress["eta_seconds"] = $eta
+        $Progress["eta_text"] = Format-Duration $eta
+      }
+    }
+  } catch {}
+  return $Progress
+}
+
 function Get-LogFreshness([string]$Path) {
   if (-not $Path -or -not (Test-Path -LiteralPath $Path)) {
     return [ordered]@{ last_write_time = ""; stale_seconds = $null }
@@ -170,6 +225,7 @@ function Get-LogFreshness([string]$Path) {
 
 function Add-ProgressEta($Progress, [string]$StartedAt) {
   if (-not $Progress -or -not $StartedAt) { return $Progress }
+  if ($Progress.Contains("eta_seconds")) { return $Progress }
   if ([int]$Progress.current -le 0 -or [int]$Progress.total -le 0) { return $Progress }
   try {
     $started = [DateTime]::Parse($StartedAt)
@@ -250,6 +306,7 @@ function Build-StatusPayload {
   $stdoutTail = @(if ($state) { Get-LogTail $state.stdout_log $TailLines })
   $stderrTail = @(if ($state) { Get-LogTail $state.stderr_log $TailLines })
   $progress = Get-LogProgress $stdoutTail $stderrTail
+  $progress = Add-TtsFileProgress $progress $stdoutTail
   if ($state) { $progress = Add-ProgressEta $progress $state.started_at }
   $freshness = if ($state) { Get-LogFreshness $state.stdout_log } else { [ordered]@{ last_write_time = ""; stale_seconds = $null } }
   $payload = [ordered]@{

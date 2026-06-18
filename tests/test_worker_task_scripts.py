@@ -44,3 +44,26 @@ def test_manage_worker_task_script_does_not_read_or_print_worker_secret():
     assert "Task command arguments are intentionally omitted" in text
     for action in ["Status", "Start", "Stop", "Restart", "Uninstall"]:
         assert f'"{action}"' in text
+
+
+def test_batch_chunk_status_reports_cosyvoice_file_progress():
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "15_manage_batch_chunk.ps1").read_text(encoding="utf-8")
+
+    assert "function Get-LatestCosyVoiceInputJson" in script
+    assert "function Add-TtsFileProgress" in script
+    assert "--input-json" in script
+    assert "latest=$($latest.Name)" in script
+    assert 'if ($Progress.Contains("eta_seconds"))' in script
+
+
+def test_cosyvoice_batch_writes_incremental_progress():
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "tools" / "cosyvoice_batch.py").read_text(encoding="utf-8")
+
+    assert 'parser.add_argument("--progress-json")' in script
+    assert "def write_progress" in script
+    assert "CosyVoice progress:" in script
+    assert '"status": "running"' in script
+    assert '"latest_segment_id": segment_id' in script
+    assert '"eta_seconds": eta' in script
