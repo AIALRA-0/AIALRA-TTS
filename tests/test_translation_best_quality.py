@@ -971,6 +971,17 @@ def test_ordinal_protected_token_not_appended_when_translated():
     )
     assert controlled == "首先，所有这些都必须严格控制。"
 
+    assert numbers_missing("from the 1st metal", "从第一层金属继续往后走") == []
+    assert protected_term_flags("from the 1st metal", "从第一层金属继续往后走") == []
+
+    first_metal = normalize_translation(
+        "所以随着工艺流程，产品晶圆从金属层移动过来，让我们看看我们是否已经过了这个阶段，是的，我们已经经历了这个阶段（1st）。",
+        {"translation": {"target_language": "zh-CN"}},
+        "So as the process, as the product wafers move from the 1st metal, let's see, do we get over this, yeah, we went through this.",
+    )
+    assert first_metal == "随着工艺推进，产品晶圆会从第一层金属继续往后走；这一点我们前面已经讲过。"
+    assert "1st" not in first_metal
+
 
 def test_yield_range_spc_controls_has_natural_percent_phrase():
     normalized = normalize_translation(
