@@ -1079,6 +1079,7 @@ def known_spc_asr_term_equivalent(term: str, source: str, zh: str) -> bool:
         re.search(
             r"\b(?:SBC|SVC)\s*(?:charts?|controls?)\b|(?:charts?|controls?)\s*(?:with|for|using|your)?\s*(?:SBC|SVC)\b|"
             r"\b(?:SBC|SVC)\b.{0,32}\bcharts?\b|\bcharts?\b.{0,32}\b(?:SBC|SVC)\b|"
+            r"\b(?:process|rules?|robust)\b.{0,64}\b(?:SBC|SVC)\b|\b(?:SBC|SVC)\b.{0,64}\b(?:process|rules?|robust)\b|"
             r"\bincorporat\w+\b.{0,48}\b(?:SBC|SVC)\b|\bmore\s+(?:SBC|SVC)\b|\bmanufacturers?\b.{0,64}\b(?:SBC|SVC)\b|"
             r"(?:SBC|SVC)\s*图表|(?:SBC|SVC)\s*控制",
             source or "",
@@ -1302,7 +1303,21 @@ def is_forbidden_non_translation(text: str) -> bool:
 def numbers_missing(source: str, translated: str) -> list[str]:
     original_nums = re.findall(r"\d+(?:\.\d+)?", source)
     translated_nums = re.findall(r"\d+(?:\.\d+)?", translated)
-    return [n for n in original_nums if n not in translated_nums and not decade_number_equivalent(n, source, translated)]
+    return [
+        n
+        for n in original_nums
+        if n not in translated_nums
+        and not decade_number_equivalent(n, source, translated)
+        and not leading_decimal_number_equivalent(n, source, translated)
+    ]
+
+
+def leading_decimal_number_equivalent(number: str, source: str, translated: str) -> bool:
+    if not re.fullmatch(r"\d+", number or ""):
+        return False
+    if not re.search(rf"(?<!\d)\.{re.escape(number)}\s*%?", source or ""):
+        return False
+    return bool(re.search(rf"(?<!\d)0\.{re.escape(number)}\s*%?", translated or ""))
 
 
 def decade_number_equivalent(number: str, source: str, translated: str) -> bool:
@@ -1416,7 +1431,7 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = re.sub(r"你知道\s*Shewhart|Shewhart\s*也知道", "比如Shewhart", work, flags=re.IGNORECASE)
 
     deming_context = re.search(
-        r"Shewhart|statistical process control|SPC|control charts?|Western Electric|14\s*(?:points?|点)|quality product",
+        r"Shewhart|statistical process control|SPC|control charts?|Western Electric|14\s*(?:points?|点)|quality product|three\s+sigma|3\s*sigma|sigma\s+limit",
         combined,
         flags=re.IGNORECASE,
     )

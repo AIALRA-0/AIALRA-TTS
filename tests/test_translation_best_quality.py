@@ -558,6 +558,17 @@ def test_known_spc_asr_deming_variants_are_corrected():
     assert "Dimming" not in corrected
 
 
+def test_known_spc_three_sigma_dimming_is_corrected():
+    corrected = apply_known_term_corrections(
+        "这是三个标准差范围，这是Dimming说的。",
+        "This is three Sigma, this is what Dimming said.",
+        {"translation": {"target_language": "zh-CN"}},
+    )
+
+    assert "Deming" in corrected
+    assert "Dimming" not in corrected
+
+
 def test_known_spc_stewart_japanese_quality_context_is_corrected():
     corrected = apply_known_term_corrections(
         "我认为这一切都来自他们。你知道斯图尔特，他们从那里开始并继续发展。",
@@ -615,6 +626,8 @@ def test_known_spc_control_variants_are_corrected_without_missing_term_flag():
     assert "SVC" not in corrected
     assert protected_term_flags("SBC control and SVC charts", "SPC控制和SPC图表") == []
     assert protected_term_flags("Start to eliminate some of the SBC controls.", "开始减少一些SPC控制措施。") == []
+    assert protected_term_flags("A robust process means less worry about the SVC.", "稳健工艺意味着不用太担心SPC。") == []
+    assert protected_term_flags("Their process rules and your SBC.", "它们的工艺规则和你的SPC。") == []
     assert protected_term_flags("That you're using for your SBC to do your charts.", "你用来做SPC图表。") == []
     assert protected_term_flags("That you're using for your SBC to do your charts.", "你用来做图表的SPC到实际硬件。") == []
     assert protected_term_flags(
@@ -662,6 +675,7 @@ def test_decade_numbers_do_not_trigger_missing_number_flags():
     assert numbers_missing("Back in the 1970s, quality improved.", "在20世纪70年代，质量提高了。") == []
     assert numbers_missing("So in the 1920s.", "所以到了20世纪20年代。") == []
     assert numbers_missing("In the 1980s, transistor counts grew.", "上世纪八十年代，晶体管数量增长。") == []
+    assert numbers_missing("There is a .3% chance.", "有0.3%的可能性。") == []
     assert numbers_missing("Use 3.3V.", "使用电压。") == ["3.3"]
 
 
