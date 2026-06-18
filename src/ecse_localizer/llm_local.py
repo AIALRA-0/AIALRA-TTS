@@ -29,12 +29,16 @@ class LocalLLMClient:
         self.endpoint = config.get("llm", {}).get("endpoint", "http://127.0.0.1:11434/v1").rstrip("/")
         assert_loopback(self.endpoint)
         self.model: str | None = None
+        self.session = requests.Session()
+        self._status_cache: LocalLLMStatus | None = None
 
-    def status(self) -> LocalLLMStatus:
+    def status(self, refresh: bool = False) -> LocalLLMStatus:
+        if self._status_cache is not None and self._status_cache.available and not refresh:
+            return self._status_cache
         try:
-            res = requests.get(f"{self.endpoint}/models", timeout=1.5)
-            res.raise_for_status()
-            data = res.json()
+            with self.session.get(f"{self.endpoint}/models", timeout=1.5) as res:
+                res.raise_for_status()
+                data = res.json()
         except Exception as exc:
             return LocalLLMStatus(False, "none", self.endpoint, None, f"local LLM unavailable: {exc}")
         models = [m.get("id") or m.get("name") for m in data.get("data", []) if isinstance(m, dict)]
@@ -42,7 +46,8 @@ class LocalLLMClient:
         self.model = next((m for m in candidates if m in models), models[0] if models else None)
         if not self.model:
             return LocalLLMStatus(False, "none", self.endpoint, None, "endpoint has no models")
-        return LocalLLMStatus(True, "openai_compatible_local", self.endpoint, self.model, "ready")
+        self._status_cache = LocalLLMStatus(True, "openai_compatible_local", self.endpoint, self.model, "ready")
+        return self._status_cache
 
     def json_chat(self, system: str, user: str, schema_hint: str) -> dict:
         status = self.status()
@@ -62,9 +67,9 @@ class LocalLLMClient:
         for _ in range(retries):
             try:
                 timeout = int(self.config.get("llm", {}).get("timeout_seconds", 120))
-                res = requests.post(f"{self.endpoint}/chat/completions", json=payload, timeout=timeout)
-                res.raise_for_status()
-                content = res.json()["choices"][0]["message"]["content"]
+                with self.session.post(f"{self.endpoint}/chat/completions", json=payload, timeout=timeout) as res:
+                    res.raise_for_status()
+                    content = res.json()["choices"][0]["message"]["content"]
                 return repair_json(content)
             except Exception as exc:
                 last_error = str(exc)
