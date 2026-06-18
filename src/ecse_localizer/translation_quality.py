@@ -104,6 +104,8 @@ def protected_source_terms(source: str) -> list[str]:
 
 def protected_term_present(term: str, translated: str) -> bool:
     text = translated or ""
+    if re.fullmatch(r"U\.?S\.?", term.strip(), flags=re.IGNORECASE) and re.search(r"美国|美國", text):
+        return True
     variants = protected_term_variants(term)
     compact_text_value = compact_protected_value(text)
     return any(variant in text or compact_protected_value(variant) in compact_text_value for variant in variants)

@@ -1462,6 +1462,10 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = re.sub(r"（\s*(?:SBC|SVC)\s*）", "（SPC）", work, flags=re.IGNORECASE)
         work = re.sub(ascii_left + r"(?:SBC|SVC)" + ascii_right, "SPC", work, flags=re.IGNORECASE)
 
+    if re.search(r"\b(?:U\.?\s*S\.?|US|United\s+States)\s+manufacturers?\b", source, flags=re.IGNORECASE) and re.search(r"美国|美國", work):
+        work = re.sub(r"（\s*U\.?\s*S\.?\s*）|\(\s*U\.?\s*S\.?\s*\)", "", work, flags=re.IGNORECASE)
+        work = re.sub(r"统计过程控制方法（SPC）", "统计过程控制（SPC）方法", work)
+
     return work
 
 

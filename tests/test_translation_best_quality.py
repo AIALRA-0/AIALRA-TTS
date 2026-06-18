@@ -632,8 +632,23 @@ def test_known_spc_control_variants_are_corrected_without_missing_term_flag():
     assert protected_term_flags("That you're using for your SBC to do your charts.", "你用来做图表的SPC到实际硬件。") == []
     assert protected_term_flags(
         "A lot of the US manufacturers started incorporating more SBC.",
-        "许多美国制造商开始采用更多统计过程控制方法（SPC）（US）。",
+        "许多美国制造商开始采用更多统计过程控制方法（SPC）。",
     ) == []
+
+
+def test_us_manufacturer_spc_translation_does_not_keep_misplaced_us_parenthetical():
+    source = "So, a lot of the US manufacturers started incorporating more SBC."
+    normalized = normalize_translation(
+        "因此，许多美国制造商开始采用更多的统计过程控制（US）方法（SPC）。",
+        {"translation": {"target_language": "zh-CN"}},
+        source,
+    )
+
+    assert "美国制造商" in normalized
+    assert "SPC" in normalized
+    assert "（US）" not in normalized
+    assert "(US)" not in normalized
+    assert protected_term_flags(source, normalized) == []
 
 
 def test_generated_spc_placeholder_is_repaired():
