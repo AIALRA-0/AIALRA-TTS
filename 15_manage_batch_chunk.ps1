@@ -7,6 +7,7 @@ param(
   [switch]$Force,
   [switch]$AllowParallel,
   [int]$TailLines = 80,
+  [switch]$NoChecklist,
   [switch]$Json
 )
 
@@ -21,6 +22,13 @@ $Py = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 
 New-Item -ItemType Directory -Force -Path $RunsDir | Out-Null
 New-Item -ItemType Directory -Force -Path $LogsDir | Out-Null
+$TracePath = Join-Path $LogsDir "batch_manager_trace.log"
+
+function Trace-Step([string]$Message) {
+  if (-not $env:AIALRA_BATCH_MANAGER_TRACE) { return }
+  $line = "{0} pid={1} action={2} {3}" -f (Get-Date).ToString("s"), $PID, $Action, $Message
+  Add-Content -LiteralPath $TracePath -Value $line -Encoding UTF8
+}
 
 function Escape-PowerShellSingleQuoted([string]$Value) {
   return $Value.Replace("'", "''")
@@ -64,24 +72,48 @@ function Get-LogTail([string]$Path, [int]$Lines) {
 }
 
 function Get-ChecklistSummary {
+  if ($NoChecklist) { return $null }
   if (-not (Test-Path -LiteralPath $Py)) { return $null }
-  $raw = & $Py -m ecse_localizer progress-checklist --json 2>$null
-  if ($LASTEXITCODE -ne 0 -or -not $raw) { return $null }
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $Py
+  $psi.Arguments = "-m ecse_localizer progress-checklist --json"
+  $psi.WorkingDirectory = $ProjectRoot
+  $psi.UseShellExecute = $false
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $psi.CreateNoWindow = $true
+  $psi.Environment["PYTHONIOENCODING"] = "utf-8"
+  $proc = New-Object System.Diagnostics.Process
+  $proc.StartInfo = $psi
+  [void]$proc.Start()
+  $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+  $stderrTask = $proc.StandardError.ReadToEndAsync()
+  if (-not $proc.WaitForExit(30000)) {
+    try { $proc.Kill() } catch {}
+    return $null
+  }
+  $raw = $stdoutTask.Result
+  if ($proc.ExitCode -ne 0 -or -not $raw) { return $null }
   try {
-    return ($raw | Out-String | ConvertFrom-Json)
+    return ($raw | ConvertFrom-Json)
   } catch {
     return $null
   }
 }
 
 function Build-StatusPayload {
+  Trace-Step "Build-StatusPayload:start"
   $state = Get-LatestState
+  Trace-Step "Build-StatusPayload:state"
   $done = $null
   $stop = $null
   $running = Test-StateRunning $state
+  Trace-Step "Build-StatusPayload:running=$running"
   if ($state -and $state.done_marker) { $done = Read-JsonFile $state.done_marker }
   if ($state -and $state.stop_marker) { $stop = Read-JsonFile $state.stop_marker }
+  Trace-Step "Build-StatusPayload:markers"
   $checklist = Get-ChecklistSummary
+  Trace-Step "Build-StatusPayload:checklist"
   $status = "not_started"
   if ($state) {
     if ($done) {
@@ -119,7 +151,32 @@ function Build-StatusPayload {
       }
     } else { $null }
   }
+  Trace-Step "Build-StatusPayload:done"
   return $payload
+}
+
+function Convert-ToStatusJson($Payload) {
+  $safe = [ordered]@{
+    status = [string]$Payload.status
+    running = [bool]$Payload.running
+    run_id = [string]$Payload.run_id
+    pid = $Payload.pid
+    started_at = [string]$Payload.started_at
+    completed_at = [string]$Payload.completed_at
+    exit_code = $Payload.exit_code
+    limit = [int]$Payload.limit
+    shortest_first = [bool]$Payload.shortest_first
+    state_path = [string]$Payload.state_path
+    stdout_log = [string]$Payload.stdout_log
+    stderr_log = [string]$Payload.stderr_log
+  }
+  if ($Payload.checklist) {
+    $readiness = $Payload.checklist.batch_readiness
+    $safe["batch_completed_count"] = [int]$readiness.completed_count
+    $safe["batch_video_count"] = [int]$readiness.video_count
+    $safe["batch_pending_count"] = [int]$readiness.pending_count
+  }
+  return ($safe | ConvertTo-Json -Depth 4)
 }
 
 if ($Action -eq "Start") {
@@ -127,7 +184,7 @@ if ($Action -eq "Start") {
   if ((Test-StateRunning $latest) -and -not $AllowParallel) {
     $payload = Build-StatusPayload
     if ($Json) {
-      $payload | ConvertTo-Json -Depth 8
+      Write-Output (Convert-ToStatusJson $payload)
     } else {
       Write-Host "A batch chunk is already running: $($payload.run_id) pid=$($payload.pid)"
       Write-Host "Use -Action Status to inspect it, or -AllowParallel if you intentionally want another chunk."
@@ -178,8 +235,9 @@ exit `$exitCode
 "@
   Set-Content -LiteralPath $RunnerPath -Value $runner -Encoding UTF8
 
+  $runnerArg = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}"' -f $RunnerPath.Replace('"', '\"')
   $proc = Start-Process -FilePath "powershell.exe" `
-    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $RunnerPath) `
+    -ArgumentList $runnerArg `
     -WindowStyle Hidden `
     -RedirectStandardOutput $StdoutLog `
     -RedirectStandardError $StderrLog `
@@ -206,7 +264,7 @@ exit `$exitCode
   Start-Sleep -Milliseconds 500
   $payload = Build-StatusPayload
   if ($Json) {
-    $payload | ConvertTo-Json -Depth 8
+    Write-Output (Convert-ToStatusJson $payload)
   } else {
     Write-Host "Started batch chunk: $RunId pid=$($proc.Id)"
     Write-Host "State: $StatePath"
@@ -220,7 +278,7 @@ exit `$exitCode
 if ($Action -eq "Stop") {
   $state = Get-LatestState
   if (-not $state) {
-    if ($Json) { @{ status = "not_started" } | ConvertTo-Json -Depth 4 } else { Write-Host "No batch chunk state found." }
+    if ($Json) { Write-Output (@{ status = "not_started" } | ConvertTo-Json -Depth 4) } else { Write-Host "No batch chunk state found." }
     exit 0
   }
   $running = Test-StateRunning $state
@@ -236,7 +294,7 @@ if ($Action -eq "Stop") {
   }
   $payload = Build-StatusPayload
   if ($Json) {
-    $payload | ConvertTo-Json -Depth 8
+    Write-Output (Convert-ToStatusJson $payload)
   } else {
     Write-Host "Stop requested for $($state.run_id)."
     Write-Host "Status: $($payload.status)"
@@ -245,8 +303,9 @@ if ($Action -eq "Stop") {
 }
 
 $payload = Build-StatusPayload
+Trace-Step "Status:payload-built"
 if ($Json) {
-  $payload | ConvertTo-Json -Depth 8
+  Write-Output (Convert-ToStatusJson $payload)
 } else {
   Write-Host "Batch chunk status: $($payload.status)"
   if ($payload.run_id) { Write-Host "Run: $($payload.run_id) pid=$($payload.pid) limit=$($payload.limit) shortest_first=$($payload.shortest_first)" }

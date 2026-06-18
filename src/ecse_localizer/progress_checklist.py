@@ -131,10 +131,8 @@ def latest_batch_report(config: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def latest_batch_background(config: dict[str, Any]) -> dict[str, Any]:
-    roots = [
-        Path(config.get("work_dir") or PROJECT_ROOT / "runs") / "batch_background",
-        PROJECT_ROOT / "runs" / "batch_background",
-    ]
+    configured_work_dir = config.get("work_dir")
+    roots = [Path(configured_work_dir) / "batch_background"] if configured_work_dir else [PROJECT_ROOT / "runs" / "batch_background"]
     candidates: list[Path] = []
     for root in roots:
         if not root.exists():
