@@ -704,6 +704,24 @@ def test_spc_strategy_and_chart_asr_confusions_are_repaired():
     )
 
 
+def test_spc_control_chart_fragments_are_naturalized():
+    fragment = normalize_translation(
+        "如果有的话。",
+        {"translation": {"target_language": "zh-CN"}},
+        "if there was.",
+    )
+    assert fragment == "也就是看是否存在这种情况。"
+    assert "如果有的话" not in fragment
+
+    sigma_limits = normalize_translation(
+        "如果控制图在三个信号限制内，并且我们稍后会讨论这一点，这通常足以生产出质量合格的产品。",
+        {"translation": {"target_language": "zh-CN"}},
+        "If the control charts were within the three signal limits, and we'll go over that in a minute, that typically was quality enough to make a quality product.",
+    )
+    assert sigma_limits == "如果控制图落在三西格玛控制限以内，这一点我们稍后会讲，通常就足以生产出质量合格的产品。"
+    assert "信号限制" not in sigma_limits
+
+
 def test_spc_chart_to_actual_hardware_phrase_is_rewritten_as_natural_lecture_zh():
     source = (
         "That you're using for your SBC to do your charts to the actual hardware "

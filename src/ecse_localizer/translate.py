@@ -1479,6 +1479,14 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = "因此，军方极大地推动了这种SPC策略的采用。"
     if re.search(r"\bhaving\s+as\s+many\s+SBC\s+(?:charge|charts?)\b", source, flags=re.IGNORECASE):
         work = "他们可能没有足够重视建立足够多的SPC图表，甚至根本没有使用这些图表。"
+    if re.fullmatch(r"\s*if\s+there\s+was\.?\s*", source, flags=re.IGNORECASE):
+        work = "也就是看是否存在这种情况。"
+    if re.search(
+        r"\bcontrol\s+charts?\b.{0,80}\bwithin\s+the\s+three\s+(?:signal|sigma)\s+limits\b.{0,160}\bquality\s+product\b",
+        source,
+        flags=re.IGNORECASE,
+    ):
+        work = "如果控制图落在三西格玛控制限以内，这一点我们稍后会讲，通常就足以生产出质量合格的产品。"
     if re.search(
         r"\bwhen\s+I\s+1st\s+started\s+in\s+the\s+industry\s+in\s+the\s+early\s+eighties\b.{0,120}\bJapanese\b.{0,80}\bkilling\s+us\b",
         source,
