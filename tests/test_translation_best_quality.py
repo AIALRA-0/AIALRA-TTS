@@ -848,6 +848,14 @@ def test_ordinal_protected_token_not_appended_when_translated():
     assert "1st" not in started
     assert "第一次" in started
 
+    just_entered_industry = normalize_translation(
+        "他们在半导体领域也做了同样的事情。当我八十年代初刚进入这个行业时，日本人在这方面把我们远远甩在后面了（1st）。",
+        {"translation": {"target_language": "zh-CN"}},
+        "They did it for semiconductors, and so when I 1st started in the industry in the early eighties, the Japanese were just killing us on.",
+    )
+    assert "1st" not in just_entered_industry
+    assert "刚进入这个行业" in just_entered_industry
+
     controlled = normalize_translation(
         "所有这些都必须严格控制（1st）。",
         {"translation": {"target_language": "zh-CN"}},
