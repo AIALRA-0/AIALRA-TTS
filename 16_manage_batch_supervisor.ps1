@@ -156,8 +156,8 @@ function ReadJson([string]`$Path) {
   if (-not (Test-Path -LiteralPath `$Path)) { return `$null }
   return Get-Content -LiteralPath `$Path -Raw -Encoding UTF8 | ConvertFrom-Json
 }
-function RunPythonJson([string[]]`$Args) {
-  `$raw = & '$((Escape-Single $Py))' @Args
+function RunPythonJson([string[]]`$CliArgs) {
+  `$raw = & '$((Escape-Single $Py))' @CliArgs
   if (`$LASTEXITCODE -ne 0 -or -not `$raw) { return `$null }
   return (`$raw | Out-String | ConvertFrom-Json)
 }
