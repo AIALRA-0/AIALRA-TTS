@@ -1488,6 +1488,12 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         flags=re.IGNORECASE,
     ):
         work = "如果控制图落在三西格玛控制限以内，这一点我们稍后会讲，通常就足以生产出质量合格的产品。"
+    if re.search(
+        r"\bmost\s+of\s+the\s+data\b.{0,80}\bwithin\b.{0,40}\bthree\s+(?:signal|sigma)\s+limits?\b",
+        source,
+        flags=re.IGNORECASE,
+    ):
+        work = "你可以看到，大多数数据都落在这里的三西格玛控制限以内。"
     if re.search(r"\bthis\s+SBC\b.{0,40}\bprevention\b", source, flags=re.IGNORECASE):
         work = "这里说的SPC，重点是预防。"
     if re.search(r"\bproduct\s+wafers?\s+move\b.{0,80}\bfrom\s+the\s+1st\s+metal\b", source, flags=re.IGNORECASE):

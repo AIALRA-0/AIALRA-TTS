@@ -737,6 +737,14 @@ def test_spc_control_chart_fragments_are_naturalized():
     assert sigma_limits == "如果控制图落在三西格玛控制限以内，这一点我们稍后会讲，通常就足以生产出质量合格的产品。"
     assert "信号限制" not in sigma_limits
 
+    data_within_limits = normalize_translation(
+        "你可以看到，大多数数据都在这个三信号限制内。",
+        {"translation": {"target_language": "zh-CN"}},
+        "This is, you can see that, you know, it's most of the data is within this, three signal limit right here.",
+    )
+    assert data_within_limits == "你可以看到，大多数数据都落在这里的三西格玛控制限以内。"
+    assert "信号限制" not in data_within_limits
+
 
 def test_beol_spc_chart_context_does_not_translate_as_roaming_process():
     normalized = normalize_translation(
