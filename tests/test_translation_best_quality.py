@@ -7,6 +7,7 @@ from ecse_localizer.translate import (
     coherence_rejection_flags,
     context_window,
     default_style_guide,
+    fallback_translate_text,
     normalize_translation,
     numbers_missing,
     paragraph_lookup,
@@ -599,6 +600,14 @@ def test_hundred_thousand_phrase_is_not_normalized_to_ten_thousand():
 
     assert "超过十万" in normalized
     assert "一万" not in normalized
+
+
+def test_rule_fallback_translates_data_sampling_phrase():
+    zh, flags = fallback_translate_text("So data, so data sampling.", {})
+
+    assert "数据采样" in zh
+    assert "data" not in zh.lower()
+    assert "HIGH_ASCII_RATIO_RULE_TRANSLATION" not in flags
 
 
 def test_decade_numbers_do_not_trigger_missing_number_flags():
