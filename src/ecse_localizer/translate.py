@@ -1118,7 +1118,7 @@ def protected_numeric_equivalent(wanted: str, restored: str) -> bool:
 def ordinal_number_text_equivalent(number_text: str, restored: str) -> bool:
     number = int(number_text)
     if number == 1:
-        return bool(re.search(r"首先|第\s*一\s*(?:次|个|位|部分|阶段|点|节|章|步)?|一\s*开始", restored or ""))
+        return bool(re.search(r"首先|最初|起初|初期|第\s*一\s*(?:次|个|位|部分|阶段|点|节|章|步)?|一\s*开始", restored or ""))
     chinese_digits = {
         2: "二",
         3: "三",
