@@ -341,9 +341,17 @@ def rescue_translate_single_segment(
             data = client.json_chat(SINGLE_SEGMENT_RESCUE_PROMPT, json.dumps(payload, ensure_ascii=False), schema)
             lit = restore_and_repair_protected_terms(str(data.get("zh_literal", "")), protected.mapping, seg.text)
             zh = restore_and_repair_protected_terms(str(data.get("zh_lecture", "")), protected.mapping, seg.text)
-            if not is_usable_translation(lit, config) or is_forbidden_non_translation(lit):
+            if (
+                not is_usable_translation(lit, config)
+                or is_forbidden_non_translation(lit)
+                or short_source_translation_overexpanded(seg.text, lit, config)
+            ):
                 continue
-            if not is_usable_translation(zh, config) or is_forbidden_non_translation(zh):
+            if (
+                not is_usable_translation(zh, config)
+                or is_forbidden_non_translation(zh)
+                or short_source_translation_overexpanded(seg.text, zh, config)
+            ):
                 continue
             flags = sanitize_flags(data.get("flags", [])) + ["LOCAL_LLM_SINGLE_RESCUE"]
             missing = numbers_missing(seg.text, zh)
@@ -443,7 +451,11 @@ def request_llm_chunk(
         flags.extend(sanitize_flags(literal_row.get("flags", [])) + sanitize_flags(rewrite_row.get("flags", [])))
         if low_capacity:
             flags.append("LOW_CAPACITY_LLM_REVIEW_REQUIRED")
-        if not is_usable_translation(lit, config) or is_forbidden_non_translation(lit):
+        if (
+            not is_usable_translation(lit, config)
+            or is_forbidden_non_translation(lit)
+            or short_source_translation_overexpanded(seg.text, lit, config)
+        ):
             if logger:
                 logger.warning("LLM row fallback for segment %s: unusable literal translation: %s", seg.id, lit[:80])
             results.append(
@@ -460,7 +472,11 @@ def request_llm_chunk(
                 )
             )
             continue
-        if not is_usable_translation(zh, config) or is_forbidden_non_translation(zh):
+        if (
+            not is_usable_translation(zh, config)
+            or is_forbidden_non_translation(zh)
+            or short_source_translation_overexpanded(seg.text, zh, config)
+        ):
             if logger:
                 logger.warning("LLM row fallback for segment %s: unusable lecture translation: %s", seg.id, zh[:80])
             results.append(
@@ -517,6 +533,17 @@ def fallback_or_rescue_segment(
     flags.extend(protected_term_flags(seg.text, lecture))
     flags.extend(assess_translation_quality(seg.text, lecture, literal, config))
     return (seg, normalize_translation(literal, config), lecture, flags, limit)
+
+
+def short_source_translation_overexpanded(source_text: str, candidate_zh: str, config: dict) -> bool:
+    if not target_uses_compact_script(config):
+        return False
+    units = re.findall(r"[A-Za-z0-9%.-]+", source_text or "")
+    if not units or len(units) > 5:
+        return False
+    candidate_len = target_meaningful_len(candidate_zh)
+    allowed = max(14, len(units) * 6)
+    return candidate_len > allowed
 
 
 def read_optional_prompt(path: Path) -> str:
@@ -960,6 +987,8 @@ def fallback_translate_text(text: str, glossary: dict[str, GlossaryTerm]) -> tup
 
 def rule_literal_cleanup(text: str) -> str:
     work = text.strip()
+    work = re.sub(r"\bover\s+(\d+)\s+years?\b", r"超过\1年", work, flags=re.IGNORECASE)
+    work = re.sub(r"\b(\d+)\s+years?\b", r"\1年", work, flags=re.IGNORECASE)
     replacements = [
         (r"\bso\b", "所以"),
         (r"\bokay\b|\bok\b", "好的"),
