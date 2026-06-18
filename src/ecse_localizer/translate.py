@@ -1057,7 +1057,7 @@ def protected_term_flags(source: str, zh: str) -> list[str]:
 def known_spc_asr_term_equivalent(term: str, source: str, zh: str) -> bool:
     if term.upper() not in {"SBC", "SVC"}:
         return False
-    if not re.search(r"\bSPC\b|SPC图表|SPC控制", zh or "", flags=re.IGNORECASE):
+    if not re.search(r"(?<![A-Za-z0-9])SPC(?![A-Za-z0-9])|SPC图表|SPC控制", zh or "", flags=re.IGNORECASE):
         return False
     return bool(
         re.search(
@@ -1304,6 +1304,28 @@ def decade_number_equivalent(number: str, source: str, translated: str) -> bool:
         rf"{century}\s*世纪\s*{decade}\s*年代",
         rf"{century}世纪{decade}年代",
     ]
+    chinese_decade = {
+        0: "零",
+        10: "十",
+        20: "二十",
+        30: "三十",
+        40: "四十",
+        50: "五十",
+        60: "六十",
+        70: "七十",
+        80: "八十",
+        90: "九十",
+    }.get(decade)
+    if chinese_decade:
+        patterns.extend(
+            [
+                rf"{chinese_decade}\s*年代",
+                rf"{century}\s*世纪\s*{chinese_decade}\s*年代",
+                rf"{century}世纪{chinese_decade}年代",
+            ]
+        )
+        if 1900 <= year < 2000:
+            patterns.extend([rf"上\s*世纪\s*{chinese_decade}\s*年代", rf"上世纪{chinese_decade}年代"])
     return any(re.search(pattern, translated or "") for pattern in patterns)
 
 

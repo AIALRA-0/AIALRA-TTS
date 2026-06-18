@@ -567,6 +567,7 @@ def test_known_spc_control_variants_are_corrected_without_missing_term_flag():
     assert "SVC" not in corrected
     assert protected_term_flags("SBC control and SVC charts", "SPC控制和SPC图表") == []
     assert protected_term_flags("That you're using for your SBC to do your charts.", "你用来做SPC图表。") == []
+    assert protected_term_flags("That you're using for your SBC to do your charts.", "你用来做图表的SPC到实际硬件。") == []
     assert protected_term_flags(
         "A lot of the US manufacturers started incorporating more SBC.",
         "许多美国制造商开始采用更多统计过程控制方法（SPC）（US）。",
@@ -602,6 +603,7 @@ def test_hundred_thousand_phrase_is_not_normalized_to_ten_thousand():
 def test_decade_numbers_do_not_trigger_missing_number_flags():
     assert numbers_missing("Back in the 1970s, quality improved.", "在20世纪70年代，质量提高了。") == []
     assert numbers_missing("So in the 1920s.", "所以到了20世纪20年代。") == []
+    assert numbers_missing("In the 1980s, transistor counts grew.", "上世纪八十年代，晶体管数量增长。") == []
     assert numbers_missing("Use 3.3V.", "使用电压。") == ["3.3"]
 
 
