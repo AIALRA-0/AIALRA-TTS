@@ -738,6 +738,19 @@ def test_spc_control_chart_fragments_are_naturalized():
     assert "信号限制" not in sigma_limits
 
 
+def test_beol_spc_chart_context_does_not_translate_as_roaming_process():
+    normalized = normalize_translation(
+        "所以这里我刚才说的就是，在后端工艺的漫游过程中，它是在金属一和金属二之间，有200 SPC图表。",
+        {"translation": {"target_language": "zh-CN"}},
+        "So right here I had just, just exactly what I was saying, I had in roam process back end of line, it was between metal one and metal two where there were 200 SBC charts on it.",
+    )
+
+    assert normalized == "这里正是我刚才说的例子：在后端制程（BEOL）中，金属一和金属二之间就有200张SPC图表。"
+    assert "漫游" not in normalized
+    assert "200" in normalized
+    assert "SPC图表" in normalized
+
+
 def test_spc_chart_to_actual_hardware_phrase_is_rewritten_as_natural_lecture_zh():
     source = (
         "That you're using for your SBC to do your charts to the actual hardware "

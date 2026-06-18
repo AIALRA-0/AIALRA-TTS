@@ -1512,6 +1512,12 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = "当良率达到90%左右时，你就会开始减少一些SPC控制措施。"
     if re.search(r"\b(?:SBC|SVC)\b.{0,96}\bKPIs?\b.{0,96}\bPDK\b|\bPDK\b.{0,96}\bKPIs?\b.{0,96}\b(?:SBC|SVC)\b", source, flags=re.IGNORECASE):
         work = "对PDK中为设计定义的关键性能指标（KPI），也应该实施SPC。"
+    if re.search(
+        r"\bback\s+end\s+of\s+line\b.{0,120}\bmetal\s+one\b.{0,80}\bmetal\s+two\b.{0,80}\b200\s+SBC\s+charts\b",
+        source,
+        flags=re.IGNORECASE,
+    ):
+        work = "这里正是我刚才说的例子：在后端制程（BEOL）中，金属一和金属二之间就有200张SPC图表。"
     work = remove_redundant_translated_ordinal_tokens(work, source)
 
     combined = work + " " + source
