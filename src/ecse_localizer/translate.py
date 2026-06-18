@@ -1406,6 +1406,8 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = re.sub(r"W[·\.]?\s*爱德华[·\.]?\s*戴明", "W. Edwards Deming", work)
     if re.search(r"\b(?:over\s+)?a\s+hundred\s+thousand\b|\b(?:over\s+)?one\s+hundred\s+thousand\b", source, flags=re.IGNORECASE):
         work = re.sub(r"超过了?一万", "超过十万", work)
+        work = re.sub(r"超过了?一十万", "超过十万", work)
+        work = re.sub(r"一十万", "十万", work)
         work = re.sub(r"一万", "十万", work)
 
     combined = work + " " + source

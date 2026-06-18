@@ -698,6 +698,15 @@ def test_hundred_thousand_phrase_is_not_normalized_to_ten_thousand():
     assert "超过十万" in normalized
     assert "一万" not in normalized
 
+    awkward = normalize_translation(
+        "晶体管数量超过了一十万。",
+        {"translation": {"target_language": "zh-CN"}},
+        "By then the transistor count was over a hundred thousand.",
+    )
+
+    assert "超过十万" in awkward
+    assert "一十万" not in awkward
+
 
 def test_rule_fallback_translates_data_sampling_phrase():
     zh, flags = fallback_translate_text("So data, so data sampling.", {})
