@@ -1123,7 +1123,7 @@ def ordinal_number_text_equivalent(number_text: str, restored: str) -> bool:
     if number == 1:
         return bool(
             re.search(
-                r"首先|首次|最初|起初|初期|初次|先|"
+                r"首先|首次|最初|最早|起初|初期|初次|先|"
                 r"第\s*一\s*(?:次|个|位|部分|阶段|层|点|节|章|步)?|"
                 r"[一刚]\s*开始|刚\s*(?:进入|入行|从事)|初\s*(?:入|进入)",
                 restored or "",
@@ -1492,6 +1492,8 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = "这里说的SPC，重点是预防。"
     if re.search(r"\bproduct\s+wafers?\s+move\b.{0,80}\bfrom\s+the\s+1st\s+metal\b", source, flags=re.IGNORECASE):
         work = "随着工艺推进，产品晶圆会从第一层金属继续往后走；这一点我们前面已经讲过。"
+    if re.search(r"\b1st\s+adopter\b.{0,40}\bJapanese\b.{0,120}\beverybody\s+in\s+the\s+world\b", source, flags=re.IGNORECASE):
+        work = "所以你能看出来，这件事非常重要；日本人是最早采用这套方法的一方，如今全世界都在用。"
     if re.search(
         r"\bwhen\s+I\s+1st\s+started\s+in\s+the\s+industry\s+in\s+the\s+early\s+eighties\b.{0,120}\bJapanese\b.{0,80}\bkilling\s+us\b",
         source,

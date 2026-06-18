@@ -982,6 +982,23 @@ def test_ordinal_protected_token_not_appended_when_translated():
     assert first_metal == "随着工艺推进，产品晶圆会从第一层金属继续往后走；这一点我们前面已经讲过。"
     assert "1st" not in first_metal
 
+    assert numbers_missing(
+        "it was the 1st adopter of the Japanese and now everybody in the world's using it",
+        "日本人是最早采用这套方法的一方，如今全世界都在用",
+    ) == []
+    assert protected_term_flags(
+        "it was the 1st adopter of the Japanese and now everybody in the world's using it",
+        "日本人是最早采用这套方法的一方，如今全世界都在用",
+    ) == []
+
+    first_adopter = normalize_translation(
+        "所以你可以看出它非常重要，现在全世界都在使用这项技术（1st）。",
+        {"translation": {"target_language": "zh-CN"}},
+        "So you could tell that it was really important and it was the 1st adopter of the Japanese and now everybody in the world's using it.",
+    )
+    assert first_adopter == "所以你能看出来，这件事非常重要；日本人是最早采用这套方法的一方，如今全世界都在用。"
+    assert "1st" not in first_adopter
+
 
 def test_yield_range_spc_controls_has_natural_percent_phrase():
     normalized = normalize_translation(
