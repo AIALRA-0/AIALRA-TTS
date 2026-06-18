@@ -1598,13 +1598,8 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         r"using\s+for\s+your\s+(?:SBC|SPC)\s+to\s+do\s+your\s+charts?.{0,80}actual\s+hardware.{0,80}wafers?.{0,80}(?:seeing|see).{0,80}actual\s+process",
         source,
         flags=re.IGNORECASE,
-    ) and re.search(r"(?:SPC\s*图表|图表的SPC).{0,16}到.{0,16}晶圆实际(?:看到|看见|接触|经过)的(?:实际)?硬件", work):
-        work = re.sub(
-            r"[^。！？]*(?:SPC\s*图表|图表的SPC).{0,16}到.{0,16}晶圆实际(?:看到|看见|接触|经过)的(?:实际)?硬件[^。！？]*[。！？]?",
-            "也就是把你用于制作SPC图表的内容，对应到晶圆实际经过的硬件和真实工艺。",
-            work,
-            count=1,
-        )
+    ):
+        work = "也就是把你用于制作SPC图表的内容，对应到晶圆实际经过的硬件和真实工艺。"
 
     if re.search(r"western\s+Electric.{0,80}process\s+rules.{0,80}\byour\b.{0,16}\b(?:SBC|SPC)\b", source, flags=re.IGNORECASE):
         work = re.sub(r"你的(?:你的){1,4}\s*SPC", "你的SPC", work, flags=re.IGNORECASE)
