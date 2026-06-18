@@ -896,6 +896,8 @@ def test_ordinal_protected_token_not_appended_when_translated():
     assert protected_term_flags("at 1st when you're starting off", "在新产品初期") == []
     assert numbers_missing("at 1st when you're starting off", "在刚开始新产品时") == []
     assert protected_term_flags("at 1st when you're starting off", "在刚开始新产品时") == []
+    assert numbers_missing("you can't get to production without 1st", "如果不先完成研发，就无法进入量产。") == []
+    assert protected_term_flags("you can't get to production without 1st", "如果不先完成研发，就无法进入量产。") == []
 
     initial_phase = restore_and_repair_protected_terms(
         "但是，在刚开始新产品时，你想要看看是否可以坚持单一供应商。",
@@ -945,6 +947,22 @@ def test_ordinal_protected_token_not_appended_when_translated():
     )
     assert "1st" not in r_and_d_start
     assert "研发、预生产以及转入量产" in r_and_d_start
+
+    production_start = normalize_translation(
+        "没有研发就无法进入量产（1st）",
+        {"translation": {"target_language": "zh-CN"}},
+        "you can't get to production without 1st,",
+    )
+    assert production_start == "如果不先完成研发，就无法进入量产。"
+    assert "1st" not in production_start
+
+    research_first = normalize_translation(
+        "一切都要从研发开始（1st）",
+        {"translation": {"target_language": "zh-CN"}},
+        "everything has to start is starting at R and D and research it 1st,",
+    )
+    assert research_first == "一切都必须先从研发开始。"
+    assert "1st" not in research_first
 
     controlled = normalize_translation(
         "所有这些都必须严格控制（1st）。",

@@ -1123,7 +1123,7 @@ def ordinal_number_text_equivalent(number_text: str, restored: str) -> bool:
     if number == 1:
         return bool(
             re.search(
-                r"首先|首次|最初|起初|初期|初次|"
+                r"首先|首次|最初|起初|初期|初次|先|"
                 r"第\s*一\s*(?:次|个|位|部分|阶段|点|节|章|步)?|"
                 r"[一刚]\s*开始|刚\s*(?:进入|入行|从事)|初\s*(?:入|进入)",
                 restored or "",
@@ -1508,6 +1508,10 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         flags=re.IGNORECASE,
     ):
         work = "工艺越成熟，所需晶圆数量就越少；但一开始在研发、预生产以及转入量产之前，通常需要更多晶圆，后面我们会讨论为什么要转入量产。"
+    if re.search(r"\byou\s+can't\s+get\s+to\s+production\s+without\s+1st\b", source, flags=re.IGNORECASE):
+        work = "如果不先完成研发，就无法进入量产。"
+    if re.search(r"\beverything\s+has\s+to\s+start\b.{0,80}\bR\s+and\s+D\b.{0,80}\b1st\b", source, flags=re.IGNORECASE):
+        work = "一切都必须先从研发开始。"
     if re.search(r"\b90\s*%\s+yield\s+range\b.{0,120}\bSBC\s+controls?\b", source, flags=re.IGNORECASE):
         work = "当良率达到90%左右时，你就会开始减少一些SPC控制措施。"
     if re.search(r"\b(?:SBC|SVC)\b.{0,96}\bKPIs?\b.{0,96}\bPDK\b|\bPDK\b.{0,96}\bKPIs?\b.{0,96}\b(?:SBC|SVC)\b", source, flags=re.IGNORECASE):
