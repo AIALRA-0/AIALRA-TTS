@@ -218,6 +218,20 @@ def test_coherence_rejects_neighbor_literal_leak():
     assert "COHERENCE_INCLUDED_NEIGHBOR_LITERAL" in flags
 
 
+def test_coherence_rejects_partial_neighbor_literal_leak():
+    flags = coherence_rejection_flags(
+        "A guidebook that was in the industry and people started using and cause he used,",
+        "一本行业内的指南书，人们开始使用，并且因为他用了它。",
+        "一本行业内的指南书，人们开始使用，并且因为他用了它。他注意到他在这一阶段收集了大量这些数据。",
+        {"translation": {"target_language": "zh-CN"}},
+        literal_zh="一本行业内的指南书，人们开始使用，并且因为他用了它。",
+        neighbor_literal_zh=["他注意到他在这一阶段收集了大量这些数据，并且他发现有。"],
+    )
+
+    assert "COHERENCE_REJECTED_NEIGHBOR_LEAK" in flags
+    assert "COHERENCE_INCLUDED_NEIGHBOR_LITERAL" in flags
+
+
 def test_coherence_allows_normal_short_source_polish():
     flags = coherence_rejection_flags(
         "Okay, let's start.",
@@ -364,6 +378,39 @@ def test_llm_chunk_rejects_neighbor_leak_after_protected_terms_restore():
     assert results[0][2] == "我当时在IBM处理图表。"
     assert "LLM_ROW_UNUSABLE_LECTURE_FALLBACK" in results[0][3]
     assert results[1][2] == "下一份工作使用MRAM工具。"
+
+
+def test_llm_chunk_rejects_partial_neighbor_literal_leak():
+    config = {
+        "translation": {
+            "target_language": "zh-CN",
+            "max_zh_chars_per_second": 80,
+            "max_zh_chars_per_subtitle_line": 80,
+        }
+    }
+    segments = [
+        Segment(33, 0.0, 3.0, "A guidebook that was in the industry and people started using and cause he used,"),
+        Segment(34, 3.0, 6.0, "he noticed that he he was collecting a lot of this data during his 1st part of this and he noticed there was,"),
+    ]
+    fake = FakePartialNeighborLeakRewriteClient()
+
+    results = request_llm_chunk(
+        segments,
+        0,
+        segments,
+        "",
+        config,
+        fake,
+        "literal",
+        "rewrite",
+        "style",
+        "",
+        {},
+    )
+
+    assert results[0][2] == "一本行业内的指南书，人们开始使用，并且因为他用了它。"
+    assert "LLM_ROW_UNUSABLE_LECTURE_FALLBACK" in results[0][3]
+    assert results[1][2] == "他注意到自己在这一阶段收集了大量数据，并且发现了一个现象（1st）。"
 
 
 def test_non_chinese_target_translation_is_accepted_and_keeps_spaces():
@@ -822,6 +869,37 @@ class FakeProtectedNeighborLeakRewriteClient:
                 {
                     "id": sid,
                     "zh_lecture": "我当时在<KEEP_001>处理图表。下一份工作使用MRAM工具。" if sid == 1 else literals[2],
+                    "flags": [],
+                }
+                for sid in ids
+            ]
+        }
+
+
+class FakePartialNeighborLeakRewriteClient:
+    model = "qwen2.5:14b-instruct"
+
+    def json_chat(self, _system, user, schema):
+        payload = json.loads(user)
+        literals = {
+            33: "一本行业内的指南书，人们开始使用，并且因为他用了它。",
+            34: "他注意到自己在这一阶段收集了大量数据，并且发现了一个现象。",
+        }
+        if "segments" not in payload:
+            sid = int(payload.get("segment", {}).get("id", 33))
+            return {"id": sid, "zh_literal": literals[sid], "zh_lecture": literals[sid], "flags": []}
+        ids = [int(row["id"]) for row in payload["segments"]]
+        if "zh_literal" in schema:
+            return {"segments": [{"id": sid, "zh_literal": literals[sid], "flags": []} for sid in ids]}
+        return {
+            "segments": [
+                {
+                    "id": sid,
+                    "zh_lecture": (
+                        literals[33] + "他注意到自己在这一阶段收集了大量数据。"
+                        if sid == 33
+                        else literals[34]
+                    ),
                     "flags": [],
                 }
                 for sid in ids

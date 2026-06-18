@@ -943,11 +943,38 @@ def coherence_contains_neighbor_literal(candidate_zh: str, literal_zh: str, neig
         neighbor_norm = normalize_coherence_text(neighbor)
         if len(neighbor_norm) >= 6 and neighbor_norm in candidate_norm:
             return True
+        overlap = longest_common_substring_len(candidate_norm, neighbor_norm)
+        if overlap >= neighbor_literal_partial_leak_threshold(neighbor_norm):
+            literal_overlap = longest_common_substring_len(literal_norm, neighbor_norm)
+            if literal_overlap + 4 < overlap:
+                return True
     return False
 
 
 def normalize_coherence_text(text: str) -> str:
     return re.sub(r"[\s\u3000，。！？、；：,.!?;:'\"“”‘’()（）\[\]【】]+", "", text or "")
+
+
+def neighbor_literal_partial_leak_threshold(neighbor_norm: str) -> int:
+    if len(neighbor_norm or "") < 18:
+        return 10**9
+    return max(12, min(24, int(len(neighbor_norm) * 0.45)))
+
+
+def longest_common_substring_len(left: str, right: str) -> int:
+    if not left or not right:
+        return 0
+    previous = [0] * (len(right) + 1)
+    best = 0
+    for left_char in left:
+        current = [0] * (len(right) + 1)
+        for index, right_char in enumerate(right, start=1):
+            if left_char == right_char:
+                current[index] = previous[index - 1] + 1
+                if current[index] > best:
+                    best = current[index]
+        previous = current
+    return best
 
 
 def restore_and_repair_protected_terms(text: str, mapping: dict[str, str], source: str) -> str:
