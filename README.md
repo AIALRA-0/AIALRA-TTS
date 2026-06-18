@@ -27,6 +27,25 @@ Batch processing:
 
 `process-all` skips videos that already have a PASS report and all required outputs. Use `.\03_process_all.ps1 -Force` only when you intentionally want to regenerate.
 
+For long courses, prefer resumable background chunks so progress is visible and failures stay isolated:
+
+```powershell
+.\15_manage_batch_chunk.ps1 -Action Start -Limit 1 -ShortestFirst
+.\15_manage_batch_chunk.ps1 -Action Status
+```
+
+This writes state under `runs\batch_background\` and stdout/stderr logs under `logs\`. Increase `-Limit` when one-video chunks are stable. Stop only the latest background chunk with:
+
+```powershell
+.\15_manage_batch_chunk.ps1 -Action Stop
+```
+
+Refresh the consolidated objective checklist at any time:
+
+```powershell
+.\.venv\Scripts\python.exe -m ecse_localizer progress-checklist --json
+```
+
 ## Local WebUI
 
 Start the local control panel:

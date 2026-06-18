@@ -10,6 +10,7 @@ from ecse_localizer.progress_checklist import (
     STATUS_IN_PROGRESS,
     STATUS_NEEDS_VALIDATION,
     build_progress_checklist,
+    latest_batch_background,
     write_progress_checklist,
 )
 from ecse_localizer.utils import read_json
@@ -159,6 +160,36 @@ def write_batch_report(tmp_path: Path, *, passed: bool = True) -> Path:
     return path
 
 
+def write_batch_background_state(tmp_path: Path, *, done: bool = False, exit_code: int = 0) -> Path:
+    run_dir = tmp_path / "runs" / "batch_background"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    run_id = "batch_chunk_20260617_200000"
+    state_path = run_dir / f"{run_id}.json"
+    done_path = run_dir / f"{run_id}_done.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "kind": "batch_chunk",
+                "run_id": run_id,
+                "pid": 12345,
+                "started_at": "2026-06-17T20:00:00",
+                "limit": 1,
+                "shortest_first": True,
+                "stdout_log": str(tmp_path / "logs" / f"{run_id}.out.log"),
+                "stderr_log": str(tmp_path / "logs" / f"{run_id}.err.log"),
+                "done_marker": str(done_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    if done:
+        done_path.write_text(
+            json.dumps({"run_id": run_id, "exit_code": exit_code, "completed_at": "2026-06-17T21:00:00"}),
+            encoding="utf-8",
+        )
+    return state_path
+
+
 def test_progress_checklist_tracks_objective_and_latest_platform_gate(tmp_path):
     write_platform_report(tmp_path, passed=True)
 
@@ -268,6 +299,34 @@ def test_progress_checklist_does_not_mark_partial_batch_done(tmp_path):
     assert checklist["latest_batch_process"]["deferred"] == 1
     rows = {item["id"]: item for item in checklist["items"]}
     assert rows["validation.batch_all"]["status"] == STATUS_NEEDS_VALIDATION
+
+
+def test_progress_checklist_marks_background_batch_in_progress(tmp_path):
+    write_platform_report(tmp_path, passed=True)
+    write_smoke_report(tmp_path, passed=True)
+    write_full_report(tmp_path, passed=True)
+    state_path = write_batch_background_state(tmp_path, done=False)
+
+    checklist = build_progress_checklist(config(tmp_path))
+
+    background = checklist["latest_batch_background"]
+    assert background["available"] is True
+    assert background["status"] == "running_or_unknown"
+    assert background["path"] == str(state_path)
+    rows = {item["id"]: item for item in checklist["items"]}
+    assert rows["validation.batch_all"]["status"] == STATUS_IN_PROGRESS
+    assert "Background batch chunk" in rows["validation.batch_all"]["evidence"]
+
+
+def test_latest_batch_background_reads_done_marker(tmp_path):
+    state_path = write_batch_background_state(tmp_path, done=True, exit_code=0)
+
+    background = latest_batch_background(config(tmp_path))
+
+    assert background["available"] is True
+    assert background["status"] == "completed"
+    assert background["exit_code"] == 0
+    assert background["path"] == str(state_path)
 
 
 def test_progress_checklist_reports_batch_readiness_counts(tmp_path):

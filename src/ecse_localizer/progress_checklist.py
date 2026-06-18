@@ -22,7 +22,8 @@ def build_progress_checklist(config: dict[str, Any]) -> dict[str, Any]:
     full_report = latest_full_video_report(config)
     batch_report = latest_batch_report(config)
     batch_readiness = batch_readiness_summary(config)
-    items = checklist_items(platform_report, smoke_report, full_report, batch_report, batch_readiness)
+    batch_background = latest_batch_background(config)
+    items = checklist_items(platform_report, smoke_report, full_report, batch_report, batch_readiness, batch_background)
     counts = Counter(str(item["status"]) for item in items)
     return {
         "mode": "aialra_progress_checklist",
@@ -38,6 +39,7 @@ def build_progress_checklist(config: dict[str, Any]) -> dict[str, Any]:
         "latest_real_video_smoke": smoke_report_summary(smoke_report),
         "latest_full_lecture": video_report_summary(full_report),
         "latest_batch_process": batch_report_summary(batch_report),
+        "latest_batch_background": batch_background,
         "batch_readiness": batch_readiness,
         "items": items,
     }
@@ -126,6 +128,72 @@ def latest_batch_report(config: dict[str, Any]) -> dict[str, Any] | None:
         data["_path"] = str(path)
         return data
     return None
+
+
+def latest_batch_background(config: dict[str, Any]) -> dict[str, Any]:
+    roots = [
+        Path(config.get("work_dir") or PROJECT_ROOT / "runs") / "batch_background",
+        PROJECT_ROOT / "runs" / "batch_background",
+    ]
+    candidates: list[Path] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in root.glob("batch_chunk_*.json"):
+            name = path.name.lower()
+            if name.endswith("_done.json") or name.endswith("_stop.json"):
+                continue
+            candidates.append(path)
+    if not candidates:
+        return {"available": False, "status": "not_started", "path": ""}
+    state_path = max(candidates, key=lambda path: path.stat().st_mtime)
+    try:
+        state = read_json(state_path)
+    except Exception as exc:
+        return {"available": True, "status": "unreadable", "path": str(state_path), "error": str(exc)}
+    if not isinstance(state, dict):
+        return {"available": True, "status": "unreadable", "path": str(state_path), "error": "state is not an object"}
+
+    done_path = Path(str(state.get("done_marker") or state_path.with_name(f"{state_path.stem}_done.json")))
+    stop_path = Path(str(state.get("stop_marker") or state_path.with_name(f"{state_path.stem}_stop.json")))
+    done: dict[str, Any] = {}
+    if done_path.exists():
+        try:
+            loaded = read_json(done_path)
+            if isinstance(loaded, dict):
+                done = loaded
+        except Exception as exc:
+            done = {"error": str(exc)}
+
+    if done:
+        try:
+            exit_code = int(done.get("exit_code"))
+        except (TypeError, ValueError):
+            exit_code = None
+        status = "completed" if exit_code == 0 else "failed"
+    elif stop_path.exists():
+        status = "stop_requested"
+        exit_code = None
+    else:
+        status = "running_or_unknown"
+        exit_code = None
+
+    return {
+        "available": True,
+        "status": status,
+        "path": str(state_path),
+        "run_id": str(state.get("run_id") or state_path.stem),
+        "pid": state.get("pid"),
+        "started_at": str(state.get("started_at") or ""),
+        "completed_at": str(done.get("completed_at") or ""),
+        "exit_code": exit_code,
+        "limit": int(state.get("limit") or 0),
+        "shortest_first": bool(state.get("shortest_first")),
+        "stdout_log": str(state.get("stdout_log") or ""),
+        "stderr_log": str(state.get("stderr_log") or ""),
+        "done_marker": str(done_path),
+        "stop_marker": str(stop_path),
+    }
 
 
 def platform_report_summary(report: dict[str, Any] | None) -> dict[str, Any]:
@@ -307,7 +375,9 @@ def full_video_status(report: dict[str, Any] | None) -> str:
     return STATUS_DONE if video_report_summary(report).get("pass") else STATUS_NEEDS_VALIDATION
 
 
-def batch_status(report: dict[str, Any] | None) -> str:
+def batch_status(report: dict[str, Any] | None, background: dict[str, Any] | None = None) -> str:
+    if background and background.get("status") == "running_or_unknown":
+        return STATUS_IN_PROGRESS
     return STATUS_DONE if batch_report_summary(report).get("pass") else STATUS_NEEDS_VALIDATION
 
 
@@ -317,11 +387,13 @@ def checklist_items(
     full_report: dict[str, Any] | None,
     batch_report: dict[str, Any] | None,
     batch_readiness: dict[str, Any] | None = None,
+    batch_background: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     smoke = smoke_report_summary(smoke_report)
     full = video_report_summary(full_report)
     batch = batch_report_summary(batch_report)
     readiness = batch_readiness or {"available": False, "video_count": 0, "completed_count": 0, "pending_count": 0}
+    background = batch_background or {"available": False, "status": "not_started"}
     smoke_evidence = (
         f"Latest smoke PASS: {smoke.get('name')} ({smoke.get('segment_count')} segments, "
         f"ASR={smoke.get('asr_backend')}, LLM={smoke.get('translation_backend')}, "
@@ -337,10 +409,18 @@ def checklist_items(
         if full.get("pass")
         else "No passing full-lecture report found in output_dir."
     )
-    batch_evidence = (
-        f"Latest batch PASS: {batch.get('total')} jobs, skipped={batch.get('skipped')}; report: {batch.get('path')}"
-        if batch.get("pass")
-        else (
+    if batch.get("pass"):
+        batch_evidence = f"Latest batch PASS: {batch.get('total')} jobs, skipped={batch.get('skipped')}; report: {batch.get('path')}"
+    elif background.get("status") == "running_or_unknown":
+        batch_evidence = (
+            f"Background batch chunk is running or awaiting completion marker: "
+            f"{background.get('run_id')} pid={background.get('pid')} limit={background.get('limit')} "
+            f"shortest_first={background.get('shortest_first')}; current completed videos: "
+            f"{readiness.get('completed_count', 0)}/{readiness.get('video_count', 0)}, "
+            f"pending={readiness.get('pending_count', 0)}."
+        )
+    else:
+        batch_evidence = (
             f"No complete passing batch_report.json found; current completed videos: "
             f"{readiness.get('completed_count', 0)}/{readiness.get('video_count', 0)}, "
             f"pending={readiness.get('pending_count', 0)}, "
@@ -348,7 +428,6 @@ def checklist_items(
             if readiness.get("available")
             else "No passing batch_report.json found in output_dir."
         )
-    )
     return [
         item(
             "core.scan",
@@ -530,9 +609,9 @@ def checklist_items(
             "validation.batch_all",
             "Final Validation",
             "Process all detected lectures with resumable jobs and confirm failures are isolated, logged, and recoverable.",
-            batch_status(batch_report),
+            batch_status(batch_report, batch_background),
             batch_evidence,
-            "Run: .\\03_process_all.ps1 after the first full lecture is accepted.",
+            "Run in chunks: .\\15_manage_batch_chunk.ps1 -Action Start -Limit 1 -ShortestFirst, then .\\15_manage_batch_chunk.ps1 -Action Status.",
         ),
         item(
             "validation.real_video",
@@ -570,6 +649,7 @@ def render_progress_markdown(checklist: dict[str, Any]) -> str:
     smoke = checklist.get("latest_real_video_smoke", {})
     full = checklist.get("latest_full_lecture", {})
     batch = checklist.get("latest_batch_process", {})
+    background = checklist.get("latest_batch_background", {})
     readiness = checklist.get("batch_readiness", {})
     lines = [
         "# AIALRA Local Video Localizer Progress Checklist",
@@ -591,6 +671,7 @@ def render_progress_markdown(checklist: dict[str, Any]) -> str:
         f"- Full lecture report: {full.get('path') or 'not found'}",
         f"- Latest batch process: {'PASS' if batch.get('pass') else 'not passing or unavailable'}",
         f"- Batch report: {batch.get('path') or 'not found'}",
+        f"- Latest background batch: {background.get('status', 'not_started')} {background.get('run_id', '')}".rstrip(),
         f"- Batch readiness: {readiness.get('completed_count', 0)}/{readiness.get('video_count', 0)} videos complete; pending {readiness.get('pending_count', 0)}",
         "",
         "## Checklist",
