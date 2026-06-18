@@ -64,6 +64,12 @@ function Get-LogTail([string]$Path, [int]$Lines) {
   return @(Get-Content -LiteralPath $Path -Tail $Lines -Encoding UTF8 -ErrorAction SilentlyContinue)
 }
 
+function Get-StartedChunkCountFromLog([string]$Path) {
+  if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return 0 }
+  $matches = Select-String -LiteralPath $Path -Pattern "Started chunk batch_chunk_" -Encoding UTF8 -ErrorAction SilentlyContinue
+  return @($matches).Count
+}
+
 function Build-StatusPayload {
   $state = Get-LatestState
   $done = $null
@@ -91,7 +97,7 @@ function Build-StatusPayload {
     started_at = if ($state) { $state.started_at } else { "" }
     completed_at = if ($done) { $done.completed_at } else { "" }
     exit_code = if ($done) { $done.exit_code } else { $null }
-    chunks_started = if ($done) { $done.chunks_started } elseif ($state) { $state.chunks_started } else { 0 }
+    chunks_started = if ($done) { $done.chunks_started } elseif ($state) { [Math]::Max([int]$state.chunks_started, (Get-StartedChunkCountFromLog $state.stdout_log)) } else { 0 }
     max_chunks = if ($state) { $state.max_chunks } else { 0 }
     limit = if ($state) { $state.limit } else { 0 }
     shortest_first = if ($state) { [bool]$state.shortest_first } else { $false }

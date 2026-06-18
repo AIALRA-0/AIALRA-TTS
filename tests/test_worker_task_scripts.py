@@ -72,6 +72,15 @@ def test_batch_chunk_stop_kills_process_tree_not_only_parent():
     assert "Stop-Process -Id ([int]$state.pid) -Force" not in script
 
 
+def test_batch_supervisor_status_counts_started_chunks_from_log():
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "16_manage_batch_supervisor.ps1").read_text(encoding="utf-8")
+
+    assert "function Get-StartedChunkCountFromLog" in script
+    assert 'Select-String -LiteralPath $Path -Pattern "Started chunk batch_chunk_"' in script
+    assert "[Math]::Max([int]$state.chunks_started, (Get-StartedChunkCountFromLog $state.stdout_log))" in script
+
+
 def test_cosyvoice_batch_writes_incremental_progress():
     root = Path(__file__).resolve().parents[1]
     script = (root / "tools" / "cosyvoice_batch.py").read_text(encoding="utf-8")
