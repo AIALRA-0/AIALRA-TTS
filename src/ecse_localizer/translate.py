@@ -1061,7 +1061,7 @@ def known_spc_asr_term_equivalent(term: str, source: str, zh: str) -> bool:
         return False
     return bool(
         re.search(
-            r"\b(?:SBC|SVC)\s*(?:charts?|control)\b|(?:charts?|control)\s*(?:with|for|using|your)?\s*(?:SBC|SVC)\b|"
+            r"\b(?:SBC|SVC)\s*(?:charts?|controls?)\b|(?:charts?|controls?)\s*(?:with|for|using|your)?\s*(?:SBC|SVC)\b|"
             r"\b(?:SBC|SVC)\b.{0,32}\bcharts?\b|\bcharts?\b.{0,32}\b(?:SBC|SVC)\b|"
             r"\bincorporat\w+\b.{0,48}\b(?:SBC|SVC)\b|\bmore\s+(?:SBC|SVC)\b|\bmanufacturers?\b.{0,64}\b(?:SBC|SVC)\b|"
             r"(?:SBC|SVC)\s*图表|(?:SBC|SVC)\s*控制",
@@ -1408,7 +1408,7 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = re.sub(r"迪明|戴明", "Deming", work)
 
     spc_chart_context = re.search(
-        r"\b(?:SBC|SVC)\s*(?:charts?|control)\b|(?:SBC|SVC)\s*图表|(?:SBC|SVC)\s*控制|"
+        r"\b(?:SBC|SVC)\s*(?:charts?|controls?)\b|(?:SBC|SVC)\s*图表|(?:SBC|SVC)\s*控制|"
         r"(?:statistical|quality|process|control|charts?|semiconductor).{0,48}\b(?:SBC|SVC)\b|"
         r"\b(?:SBC|SVC)\b.{0,48}(?:statistical|quality|process|control|charts?|semiconductor)|"
         r"(?:统计过程控制|统计|质量|控制|图表|半导体).{0,48}\b(?:SBC|SVC)\b|"
@@ -1419,7 +1419,7 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
     if spc_chart_context:
         work = re.sub(r"<\s*(?:SPC|SBC|SVC)_\d{3}\s*>", "SPC", work, flags=re.IGNORECASE)
         work = re.sub(r"\b(?:SBC|SVC)\s*(charts?)\b", r"SPC \1", work, flags=re.IGNORECASE)
-        work = re.sub(r"\b(?:SBC|SVC)\s*(control)\b", r"SPC \1", work, flags=re.IGNORECASE)
+        work = re.sub(r"\b(?:SBC|SVC)\s*(controls?)\b", r"SPC \1", work, flags=re.IGNORECASE)
         work = re.sub(r"\b(?:SBC|SVC)\s*图表", "SPC图表", work, flags=re.IGNORECASE)
         work = re.sub(r"(?:SBC|SVC)图表", "SPC图表", work, flags=re.IGNORECASE)
         work = re.sub(r"\b(?:SBC|SVC)\s*控制", "SPC控制", work, flags=re.IGNORECASE)

@@ -566,6 +566,7 @@ def test_known_spc_control_variants_are_corrected_without_missing_term_flag():
     assert "SBC" not in corrected
     assert "SVC" not in corrected
     assert protected_term_flags("SBC control and SVC charts", "SPC控制和SPC图表") == []
+    assert protected_term_flags("Start to eliminate some of the SBC controls.", "开始减少一些SPC控制措施。") == []
     assert protected_term_flags("That you're using for your SBC to do your charts.", "你用来做SPC图表。") == []
     assert protected_term_flags("That you're using for your SBC to do your charts.", "你用来做图表的SPC到实际硬件。") == []
     assert protected_term_flags(
