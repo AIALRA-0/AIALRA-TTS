@@ -1030,6 +1030,14 @@ def test_ordinal_protected_token_not_appended_when_translated():
     assert first_adopter == "所以你能看出来，这件事非常重要；日本人是最早采用这套方法的一方，如今全世界都在用。"
     assert "1st" not in first_adopter
 
+    first_measurement = normalize_translation(
+        "开始这个测量是在这里进行的，然后他们会在一天、一周或一个月内取另一个样本进行测量，并收集这些数据（1st）。",
+        {"translation": {"target_language": "zh-CN"}},
+        "Started the, this 1st measurement that they took occurred here, and then they take another measurement, you know, during a sample during the day or during a week or a month, and then, you know, they, you collect this data.",
+    )
+    assert first_measurement == "第一次测量是在这里开始的；之后，他们会按一天、一周或一个月这样的采样周期再做一次测量，并把这些数据收集起来。"
+    assert "1st" not in first_measurement
+
 
 def test_yield_range_spc_controls_has_natural_percent_phrase():
     normalized = normalize_translation(

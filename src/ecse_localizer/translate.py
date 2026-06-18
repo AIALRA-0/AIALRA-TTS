@@ -1512,6 +1512,12 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = "他们在半导体领域也这样做；我在八十年代初刚进入这个行业时，日本人在这方面已经把我们远远甩在后面。"
     if re.search(r"\bcollecting\s+a\s+lot\s+of\s+this\s+data\b.{0,80}\bduring\s+his\s+1st\s+part\b", source, flags=re.IGNORECASE):
         work = "他注意到，自己在第一阶段收集了大量这类数据，并且发现..."
+    if re.search(
+        r"\bthis\s+1st\s+measurement\b.{0,120}\banother\s+measurement\b.{0,120}\bday\b.{0,80}\bweek\b.{0,80}\bmonth\b.{0,120}\bcollect\s+this\s+data\b",
+        source,
+        flags=re.IGNORECASE,
+    ):
+        work = "第一次测量是在这里开始的；之后，他们会按一天、一周或一个月这样的采样周期再做一次测量，并把这些数据收集起来。"
     if re.search(r"\ball\s+of\s+this\s+is\s+1st\s+is\s+really\s+controlled\b", source, flags=re.IGNORECASE):
         work = "首先，所有这些都必须严格控制。"
     if re.search(r"\bso\s+data\s*,?\s+so\s+data\s+sampling\b", source, flags=re.IGNORECASE):
