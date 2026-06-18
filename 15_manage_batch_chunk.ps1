@@ -71,6 +71,82 @@ function Get-LogTail([string]$Path, [int]$Lines) {
   return @(Get-Content -LiteralPath $Path -Tail $Lines -Encoding UTF8 -ErrorAction SilentlyContinue)
 }
 
+function Get-LogProgress($StdoutTail, $StderrTail) {
+  $lines = @($StdoutTail)
+  $progress = [ordered]@{
+    phase = "unknown"
+    current = 0
+    total = 0
+    percent = $null
+    message = ""
+    last_log_time = ""
+    latest_warning = ""
+  }
+  for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+    $line = [string]$lines[$i]
+    if (-not $progress.last_log_time -and $line -match '^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})') {
+      $progress.last_log_time = $matches[1]
+    }
+    if (-not $progress.latest_warning -and $line -match '\[WARNING\]\s*(.+)$') {
+      $progress.latest_warning = $matches[1]
+    }
+    if ($line -match 'Translating segments\s+(\d+)-(\d+)\s*/\s*(\d+)') {
+      $progress.phase = "translation"
+      $progress.current = [int]$matches[2]
+      $progress.total = [int]$matches[3]
+      if ($progress.total -gt 0) { $progress.percent = [math]::Round((100.0 * $progress.current / $progress.total), 2) }
+      $progress.message = "Translating subtitle segments $($matches[1])-$($matches[2]) / $($matches[3])"
+      return $progress
+    }
+    if ($line -match 'Using existing subtitles:.*\((\d+)\s+segments\)') {
+      $progress.phase = "subtitles"
+      $progress.current = 0
+      $progress.total = [int]$matches[1]
+      $progress.percent = 0
+      $progress.message = "Loaded existing subtitles: $($matches[1]) segments"
+      return $progress
+    }
+    if ($line -match 'ASR produced\s+(\d+)\s+segments') {
+      $progress.phase = "asr"
+      $progress.current = [int]$matches[1]
+      $progress.total = [int]$matches[1]
+      $progress.percent = 100
+      $progress.message = "ASR produced $($matches[1]) segments"
+      return $progress
+    }
+    if ($line -match 'LLM status:') {
+      $progress.phase = "llm_ready"
+      $progress.message = "Local LLM is ready"
+      return $progress
+    }
+    if ($line -match 'RUN ffmpeg.*_enhanced\.wav') {
+      $progress.phase = "audio_enhance"
+      $progress.message = "Enhancing and normalizing audio"
+      return $progress
+    }
+    if ($line -match 'RUN ffmpeg.*_raw\.wav') {
+      $progress.phase = "audio_extract"
+      $progress.message = "Extracting audio"
+      return $progress
+    }
+    if ($line -match 'RUN ffmpeg.*_zh_dub\.mp4') {
+      $progress.phase = "mux"
+      $progress.message = "Muxing dubbed audio into MP4"
+      return $progress
+    }
+    if ($line -match 'RUN ffmpeg.*hardsub') {
+      $progress.phase = "hardsub"
+      $progress.message = "Rendering hard subtitles"
+      return $progress
+    }
+  }
+  if (@($StderrTail).Count -gt 0) {
+    $progress.phase = "stderr"
+    $progress.message = [string](@($StderrTail)[-1])
+  }
+  return $progress
+}
+
 function Get-ChecklistSummary {
   if ($NoChecklist) { return $null }
   if (-not (Test-Path -LiteralPath $Py)) { return $null }
@@ -127,6 +203,9 @@ function Build-StatusPayload {
     }
   }
 
+  $stdoutTail = @(if ($state) { Get-LogTail $state.stdout_log $TailLines })
+  $stderrTail = @(if ($state) { Get-LogTail $state.stderr_log $TailLines })
+  $progress = Get-LogProgress $stdoutTail $stderrTail
   $payload = [ordered]@{
     status = $status
     running = $running
@@ -140,8 +219,9 @@ function Build-StatusPayload {
     state_path = if ($state) { $state.state_path } else { "" }
     stdout_log = if ($state) { $state.stdout_log } else { "" }
     stderr_log = if ($state) { $state.stderr_log } else { "" }
-    stdout_tail = @(if ($state) { Get-LogTail $state.stdout_log $TailLines })
-    stderr_tail = @(if ($state) { Get-LogTail $state.stderr_log $TailLines })
+    progress = $progress
+    stdout_tail = $stdoutTail
+    stderr_tail = $stderrTail
     checklist = if ($checklist) {
       [ordered]@{
         summary = $checklist.summary
@@ -169,6 +249,7 @@ function Convert-ToStatusJson($Payload) {
     state_path = [string]$Payload.state_path
     stdout_log = [string]$Payload.stdout_log
     stderr_log = [string]$Payload.stderr_log
+    progress = $Payload.progress
   }
   if ($Payload.checklist) {
     $readiness = $Payload.checklist.batch_readiness
@@ -312,6 +393,12 @@ if ($Json) {
   if ($payload.state_path) { Write-Host "State: $($payload.state_path)" }
   if ($payload.stdout_log) { Write-Host "Stdout log: $($payload.stdout_log)" }
   if ($payload.stderr_log) { Write-Host "Stderr log: $($payload.stderr_log)" }
+  if ($payload.progress) {
+    $p = $payload.progress
+    $percentText = if ($null -ne $p.percent) { " $($p.percent)%" } else { "" }
+    Write-Host "Progress: $($p.phase)$percentText $($p.message)"
+    if ($p.latest_warning) { Write-Host "Latest warning: $($p.latest_warning)" }
+  }
   if ($payload.checklist) {
     $readiness = $payload.checklist.batch_readiness
     Write-Host "Batch readiness: $($readiness.completed_count)/$($readiness.video_count) complete; pending $($readiness.pending_count)"
