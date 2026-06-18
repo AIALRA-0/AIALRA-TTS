@@ -344,12 +344,14 @@ def rescue_translate_single_segment(
             if (
                 not is_usable_translation(lit, config)
                 or is_forbidden_non_translation(lit)
+                or has_unresolved_keep_placeholder(lit)
                 or short_source_translation_overexpanded(seg.text, lit, config)
             ):
                 continue
             if (
                 not is_usable_translation(zh, config)
                 or is_forbidden_non_translation(zh)
+                or has_unresolved_keep_placeholder(zh)
                 or short_source_translation_overexpanded(seg.text, zh, config)
             ):
                 continue
@@ -458,6 +460,7 @@ def request_llm_chunk(
         if (
             not is_usable_translation(lit, config)
             or is_forbidden_non_translation(lit)
+            or has_unresolved_keep_placeholder(lit)
             or short_source_translation_overexpanded(seg.text, lit, config)
         ):
             if logger:
@@ -479,6 +482,7 @@ def request_llm_chunk(
         if (
             not is_usable_translation(zh, config)
             or is_forbidden_non_translation(zh)
+            or has_unresolved_keep_placeholder(zh)
             or short_source_translation_overexpanded(seg.text, zh, config)
             or coherence_contains_neighbor_literal(zh, lit, neighbor_literal_zh)
         ):
@@ -827,6 +831,10 @@ def coherence_rejection_flags(
         if dropped and source_placeholders.issubset(previous_placeholders):
             flags.append("COHERENCE_REJECTED_FIDELITY_GUARD")
             flags.append("COHERENCE_DROPPED_PROTECTED_PLACEHOLDER:" + ",".join(dropped[:6]))
+    extra_placeholders = sorted(placeholder_tokens(candidate_zh) - source_placeholders - placeholder_tokens(literal_zh))
+    if extra_placeholders:
+        flags.append("COHERENCE_REJECTED_FIDELITY_GUARD")
+        flags.append("COHERENCE_EXTRA_PROTECTED_PLACEHOLDER:" + ",".join(extra_placeholders[:6]))
     previous_quality = set(assess_translation_quality(source_text, previous_zh, previous_zh, config))
     candidate_quality = set(assess_translation_quality(source_text, candidate_zh, previous_zh, config))
     high_candidate = candidate_quality & {"SUMMARY_STYLE_TRANSLATION", "REVIEW_COMMENTARY_LEAK"}
@@ -844,6 +852,10 @@ def coherence_rejection_flags(
 
 def placeholder_tokens(text: str) -> set[str]:
     return set(re.findall(r"<KEEP_\d{3}>", text or ""))
+
+
+def has_unresolved_keep_placeholder(text: str) -> bool:
+    return bool(re.search(r"<KEEP_\d{3}>", text or ""))
 
 
 def coherence_short_source_overexpanded(source_text: str, previous_zh: str, candidate_zh: str, config: dict) -> bool:
@@ -1213,7 +1225,9 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
     work = re.sub(ascii_left + r"WEdwardDimming" + ascii_right, "W. Edwards Deming", work, flags=re.IGNORECASE)
     work = re.sub(ascii_left + r"WEdwardDeming" + ascii_right, "W. Edwards Deming", work, flags=re.IGNORECASE)
     work = re.sub(ascii_left + r"W\s*\.?\s*Edward\s*Deming" + ascii_right, "W. Edwards Deming", work, flags=re.IGNORECASE)
+    work = re.sub(ascii_left + r"W\s*\.?\s*Edwards\s*Deming" + ascii_right, "W. Edwards Deming", work, flags=re.IGNORECASE)
     work = re.sub(ascii_left + r"W\.?EdwardDeming" + ascii_right, "W. Edwards Deming", work, flags=re.IGNORECASE)
+    work = re.sub(ascii_left + r"W\.?EdwardsDeming" + ascii_right, "W. Edwards Deming", work, flags=re.IGNORECASE)
     work = re.sub(ascii_left + r"(?:Sue\s*hart|Suehart|Shuhart|Schuhart)" + ascii_right, "Shewhart", work, flags=re.IGNORECASE)
 
     combined = work + " " + source

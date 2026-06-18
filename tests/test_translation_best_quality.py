@@ -424,12 +424,13 @@ def test_known_spc_asr_name_confusions_are_corrected():
 
 def test_known_spc_asr_deming_variants_are_corrected():
     corrected = apply_known_term_corrections(
-        "Shewhart与W.EdwardDeming合作。作为Dimming的14点之一。",
+        "Shewhart与W.EdwardDeming合作。后面写成W.EdwardsDeming。作为Dimming的14点之一。",
         "So in 1938, Shewhart collaborated with W Edward Dimming. Dimming's 14 points.",
         {"translation": {"target_language": "zh-CN"}},
     )
 
     assert "W. Edwards Deming" in corrected
+    assert "W.EdwardsDeming" not in corrected
     assert "Deming的14点" in corrected
     assert "Dimming" not in corrected
 
@@ -457,6 +458,37 @@ def test_restore_repairs_unresolved_keep_placeholders_from_source_mapping():
     assert "<KEEP_" not in restored
     assert "30" in restored
     assert "70%" in restored
+
+
+def test_llm_chunk_rejects_extra_unresolved_keep_placeholder_leak():
+    config = {
+        "translation": {
+            "target_language": "zh-CN",
+            "max_zh_chars_per_second": 80,
+            "max_zh_chars_per_subtitle_line": 80,
+        }
+    }
+    segments = [Segment(27, 0.0, 1.0, "back in the twenties, there was,")]
+    fake = FakeExtraPlaceholderLeakClient()
+
+    results = request_llm_chunk(
+        segments,
+        0,
+        segments,
+        "",
+        config,
+        fake,
+        "literal",
+        "rewrite",
+        "style",
+        "",
+        {},
+    )
+
+    _, _, lecture, flags, _ = results[0]
+    assert "<KEEP_" not in lecture
+    assert lecture == "在二十年代，有过。"
+    assert "LLM_ROW_UNUSABLE_LECTURE_FALLBACK" in flags
 
 
 def test_sanitize_flags_drops_protected_placeholder_flags():
@@ -515,6 +547,27 @@ class FakeSpanishLLMClient:
                 {
                     "id": sid,
                     "zh_lecture": "Primero usamos <KEEP_001> y luego ejecutamos <KEEP_002>.",
+                    "flags": [],
+                }
+            ]
+        }
+
+
+class FakeExtraPlaceholderLeakClient:
+    model = "qwen2.5:14b-instruct"
+
+    def json_chat(self, _system, user, schema):
+        payload = json.loads(user)
+        if "segments" not in payload:
+            return {"id": 27, "zh_literal": "在二十年代，有过。", "zh_lecture": "在二十年代，有过。", "flags": []}
+        sid = int(payload["segments"][0]["id"])
+        if "zh_literal" in schema:
+            return {"segments": [{"id": sid, "zh_literal": "在二十年代，有过。", "flags": []}]}
+        return {
+            "segments": [
+                {
+                    "id": sid,
+                    "zh_lecture": "在二十年代的时候，有接近<KEEP_001>百万电话。",
                     "flags": [],
                 }
             ]
