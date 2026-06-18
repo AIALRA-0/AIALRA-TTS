@@ -673,6 +673,7 @@ def test_rule_fallback_translates_data_sampling_phrase():
 
 def test_decade_numbers_do_not_trigger_missing_number_flags():
     assert numbers_missing("Back in the 1970s, quality improved.", "在20世纪70年代，质量提高了。") == []
+    assert numbers_missing("Back in the 1970s, quality improved.", "上世纪70年代，质量提高了。") == []
     assert numbers_missing("So in the 1920s.", "所以到了20世纪20年代。") == []
     assert numbers_missing("In the 1980s, transistor counts grew.", "上世纪八十年代，晶体管数量增长。") == []
     assert numbers_missing("There is a .3% chance.", "有0.3%的可能性。") == []

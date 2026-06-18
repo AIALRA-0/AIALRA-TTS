@@ -1332,9 +1332,12 @@ def decade_number_equivalent(number: str, source: str, translated: str) -> bool:
     decade = year % 100
     patterns = [
         rf"{number}\s*年代",
+        rf"{decade}\s*年代",
         rf"{century}\s*世纪\s*{decade}\s*年代",
         rf"{century}世纪{decade}年代",
     ]
+    if 1900 <= year < 2000:
+        patterns.extend([rf"上\s*世纪\s*{decade}\s*年代", rf"上世纪{decade}年代"])
     chinese_decade = {
         0: "零",
         10: "十",
