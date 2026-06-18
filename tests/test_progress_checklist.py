@@ -190,6 +190,26 @@ def write_batch_background_state(tmp_path: Path, *, done: bool = False, exit_cod
     return state_path
 
 
+def write_visual_ui_report(tmp_path: Path) -> Path:
+    path = tmp_path / "runs" / "visual_ui_check" / "visual_ui_check.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "local_browser_opened": True,
+                "login_pass": True,
+                "desktop_layout_pass": True,
+                "no_console_errors": True,
+                "no_horizontal_overflow": True,
+                "reference_style_checked": False,
+                "responsive_checked": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_progress_checklist_tracks_objective_and_latest_platform_gate(tmp_path):
     write_platform_report(tmp_path, passed=True)
 
@@ -211,6 +231,24 @@ def test_progress_checklist_tracks_objective_and_latest_platform_gate(tmp_path):
     assert rows["validation.first_full_lecture"]["status"] == STATUS_NEEDS_VALIDATION
     assert rows["validation.batch_all"]["status"] == STATUS_NEEDS_VALIDATION
     assert rows["validation.real_video"]["status"] == STATUS_NEEDS_VALIDATION
+
+
+def test_progress_checklist_tracks_partial_visual_ui_browser_validation(tmp_path):
+    write_platform_report(tmp_path, passed=True)
+    visual_path = write_visual_ui_report(tmp_path)
+
+    checklist = build_progress_checklist(config(tmp_path))
+
+    assert checklist["latest_visual_ui_check"]["available"] is True
+    assert checklist["latest_visual_ui_check"]["path"] == str(visual_path)
+    detailed = {item["id"]: item for item in checklist["detailed_items"]}
+    assert detailed["validation.visual_ui.01"]["status"] == STATUS_DONE
+    assert detailed["validation.visual_ui.02"]["status"] == STATUS_DONE
+    assert detailed["validation.visual_ui.03"]["status"] == STATUS_DONE
+    assert detailed["validation.visual_ui.04"]["status"] == STATUS_NEEDS_VALIDATION
+    assert detailed["validation.visual_ui.05"]["status"] == STATUS_NEEDS_VALIDATION
+    rows = {item["id"]: item for item in checklist["items"]}
+    assert rows["validation.visual_ui"]["status"] == STATUS_NEEDS_VALIDATION
 
 
 def test_progress_checklist_marks_real_smoke_done_but_full_validation_in_progress(tmp_path):

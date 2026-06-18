@@ -214,9 +214,18 @@ def build_progress_checklist(config: dict[str, Any]) -> dict[str, Any]:
     batch_report = latest_batch_report(config)
     batch_readiness = batch_readiness_summary(config)
     batch_background = latest_batch_background(config)
-    items = checklist_items(platform_report, smoke_report, full_report, batch_report, batch_readiness, batch_background)
+    visual_ui_report = latest_visual_ui_report(config)
+    items = checklist_items(
+        platform_report,
+        smoke_report,
+        full_report,
+        batch_report,
+        batch_readiness,
+        batch_background,
+        visual_ui_report,
+    )
     counts = Counter(str(item["status"]) for item in items)
-    detailed_items = expand_detailed_items(items)
+    detailed_items = expand_detailed_items(items, detail_status_overrides(visual_ui_report), detail_evidence_overrides(visual_ui_report))
     detail_counts = Counter(str(item["status"]) for item in detailed_items)
     return {
         "mode": "aialra_progress_checklist",
@@ -240,6 +249,7 @@ def build_progress_checklist(config: dict[str, Any]) -> dict[str, Any]:
         "latest_full_lecture": video_report_summary(full_report),
         "latest_batch_process": batch_report_summary(batch_report),
         "latest_batch_background": batch_background,
+        "latest_visual_ui_check": visual_ui_report_summary(visual_ui_report),
         "batch_readiness": batch_readiness,
         "items": items,
         "detailed_items": detailed_items,
@@ -395,6 +405,25 @@ def latest_batch_background(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def latest_visual_ui_report(config: dict[str, Any]) -> dict[str, Any] | None:
+    configured_work_dir = config.get("work_dir")
+    candidates = []
+    if configured_work_dir:
+        candidates.append(Path(configured_work_dir) / "visual_ui_check" / "visual_ui_check.json")
+    candidates.append(PROJECT_ROOT / "runs" / "visual_ui_check" / "visual_ui_check.json")
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            data = read_json(path)
+        except Exception:
+            continue
+        if isinstance(data, dict):
+            data["_path"] = str(path)
+            return data
+    return None
+
+
 def platform_report_summary(report: dict[str, Any] | None) -> dict[str, Any]:
     if not report:
         return {"available": False, "pass": None, "path": "", "failed_gates": []}
@@ -523,6 +552,30 @@ def batch_report_summary(report: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def visual_ui_report_summary(report: dict[str, Any] | None) -> dict[str, Any]:
+    if not report:
+        return {
+            "available": False,
+            "path": "",
+            "local_browser_opened": False,
+            "login_pass": False,
+            "desktop_layout_pass": False,
+            "reference_style_checked": False,
+            "responsive_checked": False,
+        }
+    return {
+        "available": True,
+        "path": str(report.get("_path") or ""),
+        "local_browser_opened": bool(report.get("local_browser_opened")),
+        "login_pass": bool(report.get("login_pass")),
+        "desktop_layout_pass": bool(report.get("desktop_layout_pass")),
+        "no_console_errors": bool(report.get("no_console_errors")),
+        "no_horizontal_overflow": bool(report.get("no_horizontal_overflow")),
+        "reference_style_checked": bool(report.get("reference_style_checked")),
+        "responsive_checked": bool(report.get("responsive_checked")),
+    }
+
+
 def batch_readiness_summary(config: dict[str, Any]) -> dict[str, Any]:
     input_dir = config.get("input_dir")
     output_dir = Path(config.get("output_dir") or PROJECT_ROOT.parent / "_localizer_output")
@@ -587,10 +640,12 @@ def checklist_items(
     batch_report: dict[str, Any] | None,
     batch_readiness: dict[str, Any] | None = None,
     batch_background: dict[str, Any] | None = None,
+    visual_ui_report: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     smoke = smoke_report_summary(smoke_report)
     full = video_report_summary(full_report)
     batch = batch_report_summary(batch_report)
+    visual = visual_ui_report_summary(visual_ui_report)
     readiness = batch_readiness or {"available": False, "video_count": 0, "completed_count": 0, "pending_count": 0}
     background = batch_background or {"available": False, "status": "not_started"}
     smoke_evidence = (
@@ -627,6 +682,14 @@ def checklist_items(
             if readiness.get("available")
             else "No passing batch_report.json found in output_dir."
         )
+    visual_evidence = (
+        "Local browser check recorded: "
+        f"login={visual.get('login_pass')}, desktop_layout={visual.get('desktop_layout_pass')}, "
+        f"no_console_errors={visual.get('no_console_errors')}, no_horizontal_overflow={visual.get('no_horizontal_overflow')}; "
+        "remaining validation needs Contabo deployment, reference-style calibration, and responsive/mobile review."
+        if visual.get("available")
+        else "Static UI exists; final visual calibration needs browser screenshots or reachable reference pages."
+    )
     return [
         item(
             "core.scan",
@@ -825,7 +888,7 @@ def checklist_items(
             "Final Validation",
             "Compare the WebUI visually against the intended deeeeepwiki/readlayer-style layout and fix any usability issues.",
             STATUS_NEEDS_VALIDATION,
-            "Static UI exists; final visual calibration needs browser screenshots or reachable reference pages.",
+            visual_evidence,
             "Open the local/remote WebUI in a browser and capture desktop/mobile screenshots.",
         ),
     ]
@@ -843,31 +906,69 @@ def item(identifier: str, area: str, requirement: str, status: str, evidence: st
     }
 
 
-def expand_detailed_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def detail_status_overrides(visual_ui_report: dict[str, Any] | None = None) -> dict[str, str]:
+    overrides: dict[str, str] = {}
+    visual = visual_ui_report_summary(visual_ui_report)
+    if not visual.get("available"):
+        return overrides
+    if visual.get("local_browser_opened"):
+        overrides["validation.visual_ui.01"] = STATUS_DONE
+    if visual.get("login_pass"):
+        overrides["validation.visual_ui.02"] = STATUS_DONE
+    if visual.get("desktop_layout_pass") and visual.get("no_console_errors") and visual.get("no_horizontal_overflow"):
+        overrides["validation.visual_ui.03"] = STATUS_DONE
+    if visual.get("reference_style_checked"):
+        overrides["validation.visual_ui.04"] = STATUS_DONE
+    if visual.get("responsive_checked"):
+        overrides["validation.visual_ui.05"] = STATUS_DONE
+    return overrides
+
+
+def detail_evidence_overrides(visual_ui_report: dict[str, Any] | None = None) -> dict[str, str]:
+    visual = visual_ui_report_summary(visual_ui_report)
+    if not visual.get("available"):
+        return {}
+    evidence = (
+        f"Visual UI browser check: {visual.get('path')}; "
+        f"login={visual.get('login_pass')}, desktop_layout={visual.get('desktop_layout_pass')}, "
+        f"no_console_errors={visual.get('no_console_errors')}, no_horizontal_overflow={visual.get('no_horizontal_overflow')}."
+    )
+    return {key: evidence for key in detail_status_overrides(visual_ui_report)}
+
+
+def expand_detailed_items(
+    items: list[dict[str, Any]],
+    status_overrides: dict[str, str] | None = None,
+    evidence_overrides: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
     detailed: list[dict[str, Any]] = []
+    status_overrides = status_overrides or {}
+    evidence_overrides = evidence_overrides or {}
     for row in items:
         subgoals = row.get("subgoals") if isinstance(row.get("subgoals"), list) else []
         if not subgoals:
+            identifier = str(row.get("id") or "")
             detailed.append(
                 {
-                    "id": str(row.get("id") or ""),
-                    "parent_id": str(row.get("id") or ""),
+                    "id": identifier,
+                    "parent_id": identifier,
                     "area": str(row.get("area") or ""),
                     "requirement": str(row.get("requirement") or ""),
-                    "status": str(row.get("status") or STATUS_PENDING),
-                    "evidence": str(row.get("evidence") or ""),
+                    "status": status_overrides.get(identifier, str(row.get("status") or STATUS_PENDING)),
+                    "evidence": evidence_overrides.get(identifier, str(row.get("evidence") or "")),
                 }
             )
             continue
         for index, subgoal in enumerate(subgoals, start=1):
+            identifier = f"{row.get('id')}.{index:02d}"
             detailed.append(
                 {
-                    "id": f"{row.get('id')}.{index:02d}",
+                    "id": identifier,
                     "parent_id": str(row.get("id") or ""),
                     "area": str(row.get("area") or ""),
                     "requirement": str(subgoal),
-                    "status": str(row.get("status") or STATUS_PENDING),
-                    "evidence": str(row.get("evidence") or ""),
+                    "status": status_overrides.get(identifier, str(row.get("status") or STATUS_PENDING)),
+                    "evidence": evidence_overrides.get(identifier, str(row.get("evidence") or "")),
                 }
             )
     return detailed
@@ -881,7 +982,9 @@ def render_progress_markdown(checklist: dict[str, Any]) -> str:
     full = checklist.get("latest_full_lecture", {})
     batch = checklist.get("latest_batch_process", {})
     background = checklist.get("latest_batch_background", {})
+    visual = checklist.get("latest_visual_ui_check", {})
     readiness = checklist.get("batch_readiness", {})
+    detailed_by_id = {str(row.get("id")): row for row in checklist.get("detailed_items", []) if isinstance(row, dict)}
     lines = [
         "# AIALRA Local Video Localizer Progress Checklist",
         "",
@@ -908,6 +1011,8 @@ def render_progress_markdown(checklist: dict[str, Any]) -> str:
         f"- Latest batch process: {'PASS' if batch.get('pass') else 'not passing or unavailable'}",
         f"- Batch report: {batch.get('path') or 'not found'}",
         f"- Latest background batch: {background.get('status', 'not_started')} {background.get('run_id', '')}".rstrip(),
+        f"- Latest visual UI check: {'local browser verified' if visual.get('available') else 'not recorded'}",
+        f"- Visual UI check report: {visual.get('path') or 'not found'}",
         f"- Batch readiness: {readiness.get('completed_count', 0)}/{readiness.get('video_count', 0)} videos complete; pending {readiness.get('pending_count', 0)}",
         "",
         "## Checklist",
@@ -929,7 +1034,11 @@ def render_progress_markdown(checklist: dict[str, Any]) -> str:
         if subgoals:
             lines.append("  - Detailed acceptance:")
             for index, subgoal in enumerate(subgoals, start=1):
-                lines.append(f"    - {mark} {index}. {subgoal}")
+                detail = detailed_by_id.get(f"{row.get('id')}.{index:02d}", {})
+                detail_status = str(detail.get("status") or status)
+                detail_mark = status_mark(detail_status)
+                suffix = "" if detail_status == status else f" (`{detail_status}`)"
+                lines.append(f"    - {detail_mark} {index}. {subgoal}{suffix}")
     return "\n".join(lines).rstrip() + "\n"
 
 
