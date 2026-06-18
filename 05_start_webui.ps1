@@ -31,4 +31,5 @@ if ($Background) {
   Write-Host ("WebUI started: PID {0}. Logs: {1}, {2}" -f $proc.Id, $OutLog, $ErrLog)
 } else {
   & $Py @PyArgs
+  exit $LASTEXITCODE
 }

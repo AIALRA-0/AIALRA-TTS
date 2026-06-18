@@ -6,5 +6,8 @@ $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Py = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $Py)) { & (Join-Path $ProjectRoot "setup.ps1") }
 & $Py -m ecse_localizer report --output $OutputDir
+$Code = $LASTEXITCODE
+if ($Code -ne 0) { exit $Code }
 $Report = Join-Path $OutputDir "audit_report.md"
 if (Test-Path -LiteralPath $Report) { Invoke-Item -LiteralPath $Report }
+exit 0

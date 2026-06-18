@@ -9,3 +9,4 @@ if (-not (Test-Path -LiteralPath $Py)) { & (Join-Path $ProjectRoot "setup.ps1") 
 $Args = @("-m", "ecse_localizer", "process-all", "--input", $InputDir)
 if ($Force) { $Args += "--force" }
 & $Py @Args
+exit $LASTEXITCODE

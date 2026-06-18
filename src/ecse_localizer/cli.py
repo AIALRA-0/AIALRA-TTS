@@ -16,9 +16,10 @@ from .asr import asr_language_label, transcribe_audio_with_metadata
 from .audio_enhance import enhance_audio
 from .capabilities import language_capabilities
 from .compact import compact_rerender_from_report
+from .completion import completed_report_for
 from .config import load_config, privacy_guard
 from .deploy_check import check_deploy_config
-from .ffmpeg_utils import cut_video, extract_audio, media_duration
+from .ffmpeg_utils import create_silence_wav, cut_video, extract_audio, media_duration
 from .fidelity import run_fidelity_audit
 from .glossary import GlossaryTerm, extract_from_title, extract_glossary, write_glossary_json, write_glossary_tsv
 from .llm_local import LocalLLMClient
@@ -263,41 +264,6 @@ def cmd_process_all(args: argparse.Namespace, config: dict[str, Any]) -> int:
         )
     )
     return 0 if not failed else 2
-
-
-def completed_report_for(video: Path, output_dir: Path) -> Path | None:
-    canonical = output_dir / f"{slugify(video.name)}_report.json"
-    candidates = sorted(
-        {canonical, *output_dir.glob("*_report.json")},
-        key=lambda p: p.stat().st_mtime if p.exists() else 0,
-        reverse=True,
-    )
-    seen: set[Path] = set()
-    for report in candidates:
-        if report in seen or not report.exists():
-            continue
-        seen.add(report)
-        try:
-            data = json.loads(report.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        mode = str(data.get("mode") or "").lower()
-        if mode == "smoke" or "_smoke" in report.stem.lower():
-            continue
-        source_raw = str(data.get("source_video", ""))
-        if source_raw:
-            if Path(source_raw).resolve() != video.resolve():
-                continue
-        elif report != canonical:
-            continue
-        if not data.get("qa", {}).get("pass"):
-            continue
-        outputs = data.get("outputs", {})
-        required = ["en_srt", "zh_srt", "bilingual_srt", "bilingual_ass", "zh_dub_wav", "zh_dub_mp4"]
-        if not all(outputs.get(k) and Path(outputs[k]).exists() for k in required):
-            continue
-        return report
-    return None
 
 
 def cmd_resume(args: argparse.Namespace, config: dict[str, Any]) -> int:
@@ -721,7 +687,22 @@ def process_video(
         en_segments = split_long_segments(en_segments)
         subtitle_source = Path("ASR")
     if not en_segments:
-        raise RuntimeError(f"No usable English subtitle/ASR segments for {video}")
+        logger.warning("No usable speech/subtitle segments detected for %s; writing no-speech outputs.", video)
+        return write_no_speech_result(
+            video=video,
+            work_video=work_video,
+            base=base,
+            run_id=run_id,
+            run_dir=run_dir,
+            mode=mode,
+            subtitle_source=subtitle_source,
+            asr_backend=asr_backend,
+            asr_metadata=asr_metadata,
+            enhancement_backend=enhancement_backend,
+            process_duration=process_duration,
+            config=config,
+            logger=logger,
+        )
 
     glossary = build_course_glossary(input_dir or str(video.parent), output_dir, logger)
     glossary = extract_from_title(video.stem, video.name, glossary)
@@ -783,6 +764,108 @@ def process_video(
         "asr_backend": asr_backend,
         "asr": asr_metadata,
         "translation_backend": translation_backend,
+        "audio_enhancement": enhancement_backend,
+        "tts": tts_info,
+        "outputs": outputs,
+        "qa": qa,
+        "report_md": str(report_md),
+        "report_json": str(report_json),
+        "segments": {"en": to_dicts(en_segments), "zh": to_dicts(zh_segments)},
+    }
+    write_video_report(report_md, report_json, result)
+    write_json(run_dir / "result.json", result)
+    refresh_license_report(output_dir)
+    return result
+
+
+def write_no_speech_result(
+    *,
+    video: Path,
+    work_video: Path,
+    base: str,
+    run_id: str,
+    run_dir: Path,
+    mode: str,
+    subtitle_source: Path,
+    asr_backend: str,
+    asr_metadata: dict[str, Any],
+    enhancement_backend: str,
+    process_duration: float,
+    config: dict[str, Any],
+    logger,
+) -> dict[str, Any]:
+    output_dir = ensure_dir(config["output_dir"])
+    glossary = build_course_glossary(str(video.parent), output_dir, logger)
+    glossary = extract_from_title(video.stem, video.name, glossary)
+    write_glossary_tsv(output_dir / "glossary.tsv", glossary)
+    write_glossary_json(output_dir / "glossary.json", glossary)
+
+    en_segments: list[Segment] = []
+    zh_segments: list[Segment] = []
+    traces: list[dict[str, Any]] = []
+
+    en_srt = output_dir / f"{base}_en.srt"
+    en_vtt = output_dir / f"{base}_en.vtt"
+    zh_srt = output_dir / f"{base}_zh.srt"
+    zh_vtt = output_dir / f"{base}_zh.vtt"
+    bilingual_srt = output_dir / f"{base}_bilingual.srt"
+    bilingual_ass = output_dir / f"{base}_bilingual.ass"
+    write_srt(en_srt, en_segments)
+    write_vtt(en_vtt, en_segments)
+    write_srt(zh_srt, zh_segments, cjk=True, line_limit=int(config["translation"]["max_zh_chars_per_subtitle_line"]))
+    write_vtt(zh_vtt, zh_segments, cjk=True, line_limit=int(config["translation"]["max_zh_chars_per_subtitle_line"]))
+    write_srt(bilingual_srt, [])
+    write_bilingual_ass(bilingual_ass, en_segments, zh_segments)
+
+    zh_wav = output_dir / f"{base}_zh_dub.wav"
+    create_silence_wav(zh_wav, process_duration, logger)
+    tts_info = {
+        "backend": "silence_no_speech",
+        "duration": media_duration(zh_wav),
+        "segment_count": 0,
+        "utterance_count": 0,
+        "alignment_mode": "no_speech",
+        "flags": [],
+        "note": "No speech/subtitle segments were detected; generated silent dub audio.",
+    }
+
+    zh_mp4 = output_dir / f"{base}_zh_dub.mp4"
+    mux_video(work_video, zh_wav, zh_mp4, config, logger)
+
+    hard_mp4 = output_dir / f"{base}_zh_dub_bilingual_hardsub.mp4"
+    hard_ok = False
+    if config.get("mux", {}).get("hard_subtitle", True):
+        hard_ok = hardsub_video(zh_mp4, bilingual_ass, hard_mp4, logger)
+
+    outputs = {
+        "en_srt": str(en_srt),
+        "en_vtt": str(en_vtt),
+        "zh_srt": str(zh_srt),
+        "zh_vtt": str(zh_vtt),
+        "bilingual_srt": str(bilingual_srt),
+        "bilingual_ass": str(bilingual_ass),
+        "zh_dub_wav": str(zh_wav),
+        "zh_dub_mp4": str(zh_mp4),
+    }
+    if hard_ok:
+        outputs["zh_dub_bilingual_hardsub_mp4"] = str(hard_mp4)
+
+    qa = run_qa(outputs, en_segments, zh_segments, glossary, traces, tts_info, process_duration, config)
+    qa["issues"].append({"type": "no_speech_detected", "severity": "medium", "asr_backend": asr_backend})
+    qa["pass"] = not any(i.get("severity") == "high" for i in qa["issues"])
+
+    report_md = output_dir / f"{base}_report.md"
+    report_json = output_dir / f"{base}_report.json"
+    result = {
+        "name": base,
+        "run_id": run_id,
+        "mode": mode,
+        "source_video": str(video),
+        "work_video": str(work_video),
+        "subtitle_source": str(subtitle_source),
+        "asr_backend": asr_backend,
+        "asr": {**asr_metadata, "no_speech_detected": True},
+        "translation_backend": "none_no_speech",
         "audio_enhancement": enhancement_backend,
         "tts": tts_info,
         "outputs": outputs,

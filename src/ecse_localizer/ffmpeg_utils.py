@@ -85,6 +85,34 @@ def extract_audio(src: str | Path, dst_wav: str | Path, logger: logging.Logger |
     )
 
 
+def create_silence_wav(dst_wav: str | Path, duration: float, logger: logging.Logger | None = None) -> None:
+    run_cmd(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-nostdin",
+            "-nostats",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=22050:cl=mono",
+            "-t",
+            f"{max(0.05, float(duration)):.3f}",
+            "-ac",
+            "1",
+            "-ar",
+            "22050",
+            "-sample_fmt",
+            "s16",
+            str(dst_wav),
+        ],
+        logger=logger,
+    )
+
+
 def audio_duration(path: str | Path) -> float:
     return media_duration(path)
 
