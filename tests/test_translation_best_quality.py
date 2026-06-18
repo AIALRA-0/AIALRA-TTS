@@ -840,6 +840,21 @@ def test_ordinal_protected_token_not_appended_when_translated():
     assert first_part == "他注意到，自己在第一阶段收集了大量这类数据，并且发现..."
     assert "1st" not in first_part
 
+    started = normalize_translation(
+        "他们在半导体领域也这样做，并且当我第一次在上世纪八十年代进入这个行业时，日本人在这方面把我们远远甩在后面。1st",
+        {"translation": {"target_language": "zh-CN"}},
+        "They did it for semiconductors, and so when I 1st started in the industry in the early eighties, the Japanese were just killing us on.",
+    )
+    assert "1st" not in started
+    assert "第一次" in started
+
+    controlled = normalize_translation(
+        "所有这些都必须严格控制（1st）。",
+        {"translation": {"target_language": "zh-CN"}},
+        "All of this is 1st is really controlled, you have to.",
+    )
+    assert controlled == "首先，所有这些都必须严格控制。"
+
 
 def test_yield_range_spc_controls_has_natural_percent_phrase():
     normalized = normalize_translation(

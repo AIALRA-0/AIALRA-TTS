@@ -1468,6 +1468,8 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
     work = normalize_source_million_quantity_phrasing(work, source)
     if re.search(r"\bcollecting\s+a\s+lot\s+of\s+this\s+data\b.{0,80}\bduring\s+his\s+1st\s+part\b", source, flags=re.IGNORECASE):
         work = "他注意到，自己在第一阶段收集了大量这类数据，并且发现..."
+    if re.search(r"\ball\s+of\s+this\s+is\s+1st\s+is\s+really\s+controlled\b", source, flags=re.IGNORECASE):
+        work = "首先，所有这些都必须严格控制。"
     if re.search(r"\bso\s+data\s*,?\s+so\s+data\s+sampling\b", source, flags=re.IGNORECASE):
         work = "所以，也就是数据采样。"
     if re.search(r"\b90\s*%\s+yield\s+range\b.{0,120}\bSBC\s+controls?\b", source, flags=re.IGNORECASE):
@@ -1480,6 +1482,7 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
             count=1,
             flags=re.IGNORECASE,
         )
+    work = remove_redundant_translated_ordinal_tokens(work, source)
 
     combined = work + " " + source
     near_deming_confusion = re.search(
@@ -1558,6 +1561,17 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = re.sub(r"工艺规则和你的SPC", "工艺规则，也有你的SPC", work)
 
     return work
+
+
+def remove_redundant_translated_ordinal_tokens(text: str, source_text: str) -> str:
+    work = text or ""
+    for match in re.finditer(r"\b(\d+)(st|nd|rd|th)\b", source_text or "", flags=re.IGNORECASE):
+        token = re.escape(match.group(0))
+        if not ordinal_number_text_equivalent(match.group(1), work):
+            continue
+        work = re.sub(rf"（\s*{token}\s*）|\(\s*{token}\s*\)", "", work, flags=re.IGNORECASE)
+        work = re.sub(rf"(?<=[。！？!?；;，,\s]){token}(?=$|[。！？!?；;，,\s])", "", work, flags=re.IGNORECASE)
+    return work.replace("。。", "。").replace("，。", "。").strip()
 
 
 def normalize_source_million_quantity_phrasing(text: str, source_text: str) -> str:
