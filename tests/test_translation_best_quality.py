@@ -512,6 +512,25 @@ def test_known_spc_control_variants_are_corrected_without_missing_term_flag():
     assert "SVC" not in corrected
     assert protected_term_flags("SBC control and SVC charts", "SPC控制和SPC图表") == []
     assert protected_term_flags("That you're using for your SBC to do your charts.", "你用来做SPC图表。") == []
+    assert protected_term_flags(
+        "A lot of the US manufacturers started incorporating more SBC.",
+        "许多美国制造商开始采用更多统计过程控制方法（SPC）（US）。",
+    ) == []
+
+
+def test_generated_spc_placeholder_is_repaired():
+    normalized = normalize_translation(
+        "你必须要有<SPC_003>控制和关键参数指标KPI。",
+        {"translation": {"target_language": "zh-CN"}},
+        "You absolutely have to have SBC control and the key parameter indicators, a KPI.",
+    )
+
+    assert "<SPC_" not in normalized
+    assert "SPC控制" in normalized
+    assert protected_term_flags(
+        "You absolutely have to have SBC control and the key parameter indicators, a KPI.",
+        normalized,
+    ) == []
 
 
 def test_hundred_thousand_phrase_is_not_normalized_to_ten_thousand():

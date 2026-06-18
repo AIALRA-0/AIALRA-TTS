@@ -876,7 +876,7 @@ def placeholder_tokens(text: str) -> set[str]:
 
 
 def has_unresolved_keep_placeholder(text: str) -> bool:
-    return bool(re.search(r"<KEEP_\d{3}>", text or ""))
+    return bool(re.search(r"<(?:KEEP|[A-Z][A-Z0-9]+)_\d{3}>", text or ""))
 
 
 def contains_context_only_known_term(candidate_zh: str, source_text: str, all_segments: list[Segment], absolute_index: int) -> bool:
@@ -980,6 +980,7 @@ def longest_common_substring_len(left: str, right: str) -> int:
 def restore_and_repair_protected_terms(text: str, mapping: dict[str, str], source: str) -> str:
     restored = restore_text(text, mapping)
     restored = repair_unresolved_keep_placeholders(restored, mapping, source)
+    restored = repair_generated_domain_placeholders(restored, source)
     protected_acronyms = [value for value in mapping.values() if is_acronym(value)]
     original_acronyms = set(extract_acronyms(source))
     for wanted in protected_acronyms:
@@ -1001,6 +1002,13 @@ def restore_and_repair_protected_terms(text: str, mapping: dict[str, str], sourc
         if compact_wanted not in compact_restored:
             restored = append_before_sentence_punctuation(restored, f"（{wanted}）")
     return restored
+
+
+def repair_generated_domain_placeholders(text: str, source: str) -> str:
+    work = text or ""
+    if re.search(r"\b(?:SPC|SBC|SVC)\b|statistical process control|control charts?", source or "", flags=re.IGNORECASE):
+        work = re.sub(r"<\s*(?:SPC|SBC|SVC)_\d{3}\s*>", "SPC", work, flags=re.IGNORECASE)
+    return work
 
 
 def repair_unresolved_keep_placeholders(text: str, mapping: dict[str, str], source: str) -> str:
@@ -1055,6 +1063,7 @@ def known_spc_asr_term_equivalent(term: str, source: str, zh: str) -> bool:
         re.search(
             r"\b(?:SBC|SVC)\s*(?:charts?|control)\b|(?:charts?|control)\s*(?:with|for|using|your)?\s*(?:SBC|SVC)\b|"
             r"\b(?:SBC|SVC)\b.{0,32}\bcharts?\b|\bcharts?\b.{0,32}\b(?:SBC|SVC)\b|"
+            r"\bincorporat\w+\b.{0,48}\b(?:SBC|SVC)\b|\bmore\s+(?:SBC|SVC)\b|\bmanufacturers?\b.{0,64}\b(?:SBC|SVC)\b|"
             r"(?:SBC|SVC)\s*图表|(?:SBC|SVC)\s*控制",
             source or "",
             flags=re.IGNORECASE,
@@ -1374,6 +1383,7 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         flags=re.IGNORECASE,
     )
     if spc_chart_context:
+        work = re.sub(r"<\s*(?:SPC|SBC|SVC)_\d{3}\s*>", "SPC", work, flags=re.IGNORECASE)
         work = re.sub(r"\b(?:SBC|SVC)\s*(charts?)\b", r"SPC \1", work, flags=re.IGNORECASE)
         work = re.sub(r"\b(?:SBC|SVC)\s*(control)\b", r"SPC \1", work, flags=re.IGNORECASE)
         work = re.sub(r"\b(?:SBC|SVC)\s*图表", "SPC图表", work, flags=re.IGNORECASE)
