@@ -147,6 +147,40 @@ function Get-LogProgress($StdoutTail, $StderrTail) {
   return $progress
 }
 
+function Get-LogFreshness([string]$Path) {
+  if (-not $Path -or -not (Test-Path -LiteralPath $Path)) {
+    return [ordered]@{ last_write_time = ""; stale_seconds = $null }
+  }
+  $item = Get-Item -LiteralPath $Path
+  return [ordered]@{
+    last_write_time = $item.LastWriteTime.ToString("s")
+    stale_seconds = [int]([DateTime]::Now - $item.LastWriteTime).TotalSeconds
+  }
+}
+
+function Add-ProgressEta($Progress, [string]$StartedAt) {
+  if (-not $Progress -or -not $StartedAt) { return $Progress }
+  if ([int]$Progress.current -le 0 -or [int]$Progress.total -le 0) { return $Progress }
+  try {
+    $started = [DateTime]::Parse($StartedAt)
+    $elapsed = ([DateTime]::Now - $started).TotalSeconds
+    if ($elapsed -le 0) { return $Progress }
+    $rate = [double]$Progress.current / $elapsed
+    if ($rate -le 0) { return $Progress }
+    $remaining = [Math]::Max(0, [int]$Progress.total - [int]$Progress.current)
+    $eta = [int][Math]::Round($remaining / $rate)
+    $Progress["eta_seconds"] = $eta
+    $Progress["eta_text"] = Format-Duration $eta
+  } catch {}
+  return $Progress
+}
+
+function Format-Duration([int]$Seconds) {
+  if ($Seconds -lt 60) { return "$Seconds sec" }
+  if ($Seconds -lt 3600) { return ("{0} min {1} sec" -f [int]($Seconds / 60), ($Seconds % 60)) }
+  return ("{0} hr {1} min" -f [int]($Seconds / 3600), [int](($Seconds % 3600) / 60))
+}
+
 function Get-ChecklistSummary {
   if ($NoChecklist) { return $null }
   if (-not (Test-Path -LiteralPath $Py)) { return $null }
@@ -206,6 +240,8 @@ function Build-StatusPayload {
   $stdoutTail = @(if ($state) { Get-LogTail $state.stdout_log $TailLines })
   $stderrTail = @(if ($state) { Get-LogTail $state.stderr_log $TailLines })
   $progress = Get-LogProgress $stdoutTail $stderrTail
+  if ($state) { $progress = Add-ProgressEta $progress $state.started_at }
+  $freshness = if ($state) { Get-LogFreshness $state.stdout_log } else { [ordered]@{ last_write_time = ""; stale_seconds = $null } }
   $payload = [ordered]@{
     status = $status
     running = $running
@@ -219,6 +255,8 @@ function Build-StatusPayload {
     state_path = if ($state) { $state.state_path } else { "" }
     stdout_log = if ($state) { $state.stdout_log } else { "" }
     stderr_log = if ($state) { $state.stderr_log } else { "" }
+    log_last_write_time = $freshness.last_write_time
+    log_stale_seconds = $freshness.stale_seconds
     progress = $progress
     stdout_tail = $stdoutTail
     stderr_tail = $stderrTail
@@ -249,6 +287,8 @@ function Convert-ToStatusJson($Payload) {
     state_path = [string]$Payload.state_path
     stdout_log = [string]$Payload.stdout_log
     stderr_log = [string]$Payload.stderr_log
+    log_last_write_time = [string]$Payload.log_last_write_time
+    log_stale_seconds = $Payload.log_stale_seconds
     progress = $Payload.progress
   }
   if ($Payload.checklist) {
@@ -393,10 +433,12 @@ if ($Json) {
   if ($payload.state_path) { Write-Host "State: $($payload.state_path)" }
   if ($payload.stdout_log) { Write-Host "Stdout log: $($payload.stdout_log)" }
   if ($payload.stderr_log) { Write-Host "Stderr log: $($payload.stderr_log)" }
+  if ($payload.log_last_write_time) { Write-Host "Log updated: $($payload.log_last_write_time) stale=$($payload.log_stale_seconds)s" }
   if ($payload.progress) {
     $p = $payload.progress
     $percentText = if ($null -ne $p.percent) { " $($p.percent)%" } else { "" }
-    Write-Host "Progress: $($p.phase)$percentText $($p.message)"
+    $etaText = if ($p.eta_text) { " ETA $($p.eta_text)" } else { "" }
+    Write-Host "Progress: $($p.phase)$percentText $($p.message)$etaText"
     if ($p.latest_warning) { Write-Host "Latest warning: $($p.latest_warning)" }
   }
   if ($payload.checklist) {
