@@ -34,3 +34,57 @@ def test_completed_report_for_rejects_failed_report(tmp_path):
     report = output / f"{slugify(video.name)}_report.json"
     report.write_text(json.dumps({"mode": "full", "qa": {"pass": False}, "outputs": {}}), encoding="utf-8")
     assert completed_report_for(video, output) is None
+
+
+def test_completed_report_for_rejects_smoke_even_when_newer_than_full(tmp_path):
+    video = tmp_path / "Lecture One.mp4"
+    video.write_bytes(b"placeholder")
+    output = tmp_path / "out"
+    output.mkdir()
+    files = {}
+    for key, suffix in {
+        "en_srt": "_en.srt",
+        "zh_srt": "_zh.srt",
+        "bilingual_srt": "_bilingual.srt",
+        "bilingual_ass": "_bilingual.ass",
+        "zh_dub_wav": "_zh_dub.wav",
+        "zh_dub_mp4": "_zh_dub.mp4",
+    }.items():
+        path = output / f"Lecture_One{suffix}"
+        path.write_text("ok", encoding="utf-8")
+        files[key] = str(path)
+    full_report = output / f"{slugify(video.name)}_report.json"
+    full_report.write_text(json.dumps({"mode": "full", "qa": {"pass": True}, "outputs": files}), encoding="utf-8")
+    smoke_report = output / f"{slugify(video.name)}_smoke_90s_report.json"
+    smoke_report.write_text(
+        json.dumps({"mode": "smoke", "source_video": str(video), "qa": {"pass": True}, "outputs": files}),
+        encoding="utf-8",
+    )
+
+    assert completed_report_for(video, output) == full_report
+
+
+def test_completed_report_for_does_not_accept_smoke_as_full_completion(tmp_path):
+    video = tmp_path / "Lecture One.mp4"
+    video.write_bytes(b"placeholder")
+    output = tmp_path / "out"
+    output.mkdir()
+    files = {}
+    for key, suffix in {
+        "en_srt": "_en.srt",
+        "zh_srt": "_zh.srt",
+        "bilingual_srt": "_bilingual.srt",
+        "bilingual_ass": "_bilingual.ass",
+        "zh_dub_wav": "_zh_dub.wav",
+        "zh_dub_mp4": "_zh_dub.mp4",
+    }.items():
+        path = output / f"Lecture_One{suffix}"
+        path.write_text("ok", encoding="utf-8")
+        files[key] = str(path)
+    smoke_report = output / f"{slugify(video.name)}_smoke_90s_report.json"
+    smoke_report.write_text(
+        json.dumps({"mode": "smoke", "source_video": str(video), "qa": {"pass": True}, "outputs": files}),
+        encoding="utf-8",
+    )
+
+    assert completed_report_for(video, output) is None

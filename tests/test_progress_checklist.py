@@ -81,6 +81,49 @@ def write_smoke_report(tmp_path: Path, *, passed: bool = True) -> Path:
     return path
 
 
+def write_full_report(tmp_path: Path, *, passed: bool = True) -> Path:
+    output = tmp_path / "output"
+    output.mkdir(parents=True, exist_ok=True)
+    paths = {
+        "en_srt": output / "sample_full_en.srt",
+        "zh_srt": output / "sample_full_zh.srt",
+        "bilingual_srt": output / "sample_full_bilingual.srt",
+        "bilingual_ass": output / "sample_full_bilingual.ass",
+        "zh_dub_wav": output / "sample_full_zh_dub.wav",
+        "zh_dub_mp4": output / "sample_full_zh_dub.mp4",
+    }
+    for path in paths.values():
+        path.write_text("ok", encoding="utf-8")
+    path = output / "sample_full_report.json"
+    path.write_text(
+        json.dumps(
+            {
+                "name": "sample_full",
+                "mode": "compact_timeline_rerender",
+                "source_video": str(tmp_path / "input" / "sample.mp4"),
+                "asr_backend": "existing_subtitle",
+                "translation_backend": "local_llm",
+                "tts": {"backend": "cosyvoice_sft", "duration": 5316.7, "segment_count": 949},
+                "outputs": {key: str(value) for key, value in paths.items()},
+                "qa": {"pass": passed, "issues": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def write_batch_report(tmp_path: Path, *, passed: bool = True) -> Path:
+    output = tmp_path / "output"
+    output.mkdir(parents=True, exist_ok=True)
+    path = output / "batch_report.json"
+    results = [{"video": "one.mp4", "pass": True, "skipped": False}]
+    if not passed:
+        results.append({"video": "two.mp4", "pass": False, "error": "failed"})
+    path.write_text(json.dumps({"results": results}), encoding="utf-8")
+    return path
+
+
 def test_progress_checklist_tracks_objective_and_latest_platform_gate(tmp_path):
     write_platform_report(tmp_path, passed=True)
 
@@ -112,6 +155,36 @@ def test_progress_checklist_marks_real_smoke_done_but_full_validation_in_progres
     assert rows["validation.real_video"]["status"] == STATUS_IN_PROGRESS
     assert rows["validation.first_full_lecture"]["status"] == STATUS_NEEDS_VALIDATION
     assert rows["validation.batch_all"]["status"] == STATUS_NEEDS_VALIDATION
+
+
+def test_progress_checklist_marks_full_lecture_done_when_report_outputs_exist(tmp_path):
+    write_platform_report(tmp_path, passed=True)
+    write_smoke_report(tmp_path, passed=True)
+    full_path = write_full_report(tmp_path, passed=True)
+
+    checklist = build_progress_checklist(config(tmp_path))
+
+    assert checklist["latest_full_lecture"]["pass"] is True
+    assert checklist["latest_full_lecture"]["path"] == str(full_path)
+    rows = {item["id"]: item for item in checklist["items"]}
+    assert rows["validation.smoke_90s"]["status"] == STATUS_DONE
+    assert rows["validation.first_full_lecture"]["status"] == STATUS_DONE
+    assert rows["validation.real_video"]["status"] == STATUS_DONE
+    assert rows["validation.batch_all"]["status"] == STATUS_NEEDS_VALIDATION
+
+
+def test_progress_checklist_marks_batch_done_from_batch_report(tmp_path):
+    write_platform_report(tmp_path, passed=True)
+    write_smoke_report(tmp_path, passed=True)
+    write_full_report(tmp_path, passed=True)
+    batch_path = write_batch_report(tmp_path, passed=True)
+
+    checklist = build_progress_checklist(config(tmp_path))
+
+    assert checklist["latest_batch_process"]["pass"] is True
+    assert checklist["latest_batch_process"]["path"] == str(batch_path)
+    rows = {item["id"]: item for item in checklist["items"]}
+    assert rows["validation.batch_all"]["status"] == STATUS_DONE
 
 
 def test_write_progress_checklist_creates_markdown_and_json(tmp_path):

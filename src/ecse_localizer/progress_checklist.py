@@ -17,7 +17,9 @@ STATUS_PENDING = "pending"
 def build_progress_checklist(config: dict[str, Any]) -> dict[str, Any]:
     platform_report = latest_platform_report(config)
     smoke_report = latest_smoke_report(config)
-    items = checklist_items(platform_report, smoke_report)
+    full_report = latest_full_video_report(config)
+    batch_report = latest_batch_report(config)
+    items = checklist_items(platform_report, smoke_report, full_report, batch_report)
     counts = Counter(str(item["status"]) for item in items)
     return {
         "mode": "aialra_progress_checklist",
@@ -31,6 +33,8 @@ def build_progress_checklist(config: dict[str, Any]) -> dict[str, Any]:
         },
         "latest_platform_check": platform_report_summary(platform_report),
         "latest_real_video_smoke": smoke_report_summary(smoke_report),
+        "latest_full_lecture": video_report_summary(full_report),
+        "latest_batch_process": batch_report_summary(batch_report),
         "items": items,
     }
 
@@ -80,6 +84,44 @@ def latest_smoke_report(config: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def latest_full_video_report(config: dict[str, Any]) -> dict[str, Any] | None:
+    output_dir = Path(config.get("output_dir") or PROJECT_ROOT.parent / "_localizer_output")
+    if not output_dir.exists():
+        return None
+    candidates = sorted(output_dir.glob("*_report.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+    for path in candidates:
+        if "_smoke" in path.stem.lower():
+            continue
+        try:
+            data = read_json(path)
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        if str(data.get("mode") or "").lower() == "smoke":
+            continue
+        data["_path"] = str(path)
+        summary = video_report_summary(data)
+        if summary.get("pass"):
+            return data
+    return None
+
+
+def latest_batch_report(config: dict[str, Any]) -> dict[str, Any] | None:
+    output_dir = Path(config.get("output_dir") or PROJECT_ROOT.parent / "_localizer_output")
+    path = output_dir / "batch_report.json"
+    if not path.exists():
+        return None
+    try:
+        data = read_json(path)
+    except Exception:
+        return None
+    if isinstance(data, dict):
+        data["_path"] = str(path)
+        return data
+    return None
+
+
 def platform_report_summary(report: dict[str, Any] | None) -> dict[str, Any]:
     if not report:
         return {"available": False, "pass": None, "path": "", "failed_gates": []}
@@ -93,6 +135,15 @@ def platform_report_summary(report: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def required_video_outputs() -> list[str]:
+    return ["en_srt", "zh_srt", "bilingual_srt", "bilingual_ass", "zh_dub_wav", "zh_dub_mp4"]
+
+
+def missing_video_outputs(report: dict[str, Any]) -> list[str]:
+    outputs = report.get("outputs") if isinstance(report.get("outputs"), dict) else {}
+    return [key for key in required_video_outputs() if not outputs.get(key) or not Path(str(outputs.get(key))).exists()]
+
+
 def smoke_report_summary(report: dict[str, Any] | None) -> dict[str, Any]:
     if not report:
         return {
@@ -104,16 +155,7 @@ def smoke_report_summary(report: dict[str, Any] | None) -> dict[str, Any]:
             "issue_count": 0,
             "outputs_present": False,
         }
-    outputs = report.get("outputs") if isinstance(report.get("outputs"), dict) else {}
-    required = [
-        "en_srt",
-        "zh_srt",
-        "bilingual_srt",
-        "bilingual_ass",
-        "zh_dub_wav",
-        "zh_dub_mp4",
-    ]
-    missing_outputs = [key for key in required if not outputs.get(key) or not Path(str(outputs.get(key))).exists()]
+    missing_outputs = missing_video_outputs(report)
     qa = report.get("qa") if isinstance(report.get("qa"), dict) else {}
     tts = report.get("tts") if isinstance(report.get("tts"), dict) else {}
     return {
@@ -133,6 +175,54 @@ def smoke_report_summary(report: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def video_report_summary(report: dict[str, Any] | None) -> dict[str, Any]:
+    if not report:
+        return {
+            "available": False,
+            "pass": None,
+            "path": "",
+            "mode": "",
+            "segment_count": 0,
+            "issue_count": 0,
+            "outputs_present": False,
+        }
+    missing_outputs = missing_video_outputs(report)
+    qa = report.get("qa") if isinstance(report.get("qa"), dict) else {}
+    tts = report.get("tts") if isinstance(report.get("tts"), dict) else {}
+    return {
+        "available": True,
+        "pass": bool(qa.get("pass")) and not missing_outputs,
+        "path": str(report.get("_path") or ""),
+        "mode": str(report.get("mode") or ""),
+        "name": str(report.get("name") or ""),
+        "source_video": str(report.get("source_video") or ""),
+        "asr_backend": str(report.get("asr_backend") or ""),
+        "translation_backend": str(report.get("translation_backend") or ""),
+        "tts_backend": str(tts.get("backend") or ""),
+        "duration": float(tts.get("duration") or 0),
+        "segment_count": int(tts.get("segment_count") or len(report.get("segments") or [])),
+        "issue_count": len(qa.get("issues") or []),
+        "missing_outputs": missing_outputs,
+        "outputs_present": not missing_outputs,
+    }
+
+
+def batch_report_summary(report: dict[str, Any] | None) -> dict[str, Any]:
+    if not report:
+        return {"available": False, "pass": None, "path": "", "total": 0, "failed": 0, "skipped": 0}
+    results = report.get("results") if isinstance(report.get("results"), list) else []
+    failed = [row for row in results if not row.get("pass")]
+    skipped = [row for row in results if row.get("skipped")]
+    return {
+        "available": True,
+        "pass": bool(results) and not failed,
+        "path": str(report.get("_path") or ""),
+        "total": len(results),
+        "failed": len(failed),
+        "skipped": len(skipped),
+    }
+
+
 def gate_status(report: dict[str, Any] | None, gate: str) -> str:
     if not report:
         return STATUS_NEEDS_VALIDATION
@@ -149,14 +239,42 @@ def real_video_status(report: dict[str, Any] | None) -> str:
     return STATUS_IN_PROGRESS if smoke_status(report) == STATUS_DONE else STATUS_NEEDS_VALIDATION
 
 
-def checklist_items(platform_report: dict[str, Any] | None, smoke_report: dict[str, Any] | None) -> list[dict[str, Any]]:
+def full_video_status(report: dict[str, Any] | None) -> str:
+    return STATUS_DONE if video_report_summary(report).get("pass") else STATUS_NEEDS_VALIDATION
+
+
+def batch_status(report: dict[str, Any] | None) -> str:
+    return STATUS_DONE if batch_report_summary(report).get("pass") else STATUS_NEEDS_VALIDATION
+
+
+def checklist_items(
+    platform_report: dict[str, Any] | None,
+    smoke_report: dict[str, Any] | None,
+    full_report: dict[str, Any] | None,
+    batch_report: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
     smoke = smoke_report_summary(smoke_report)
+    full = video_report_summary(full_report)
+    batch = batch_report_summary(batch_report)
     smoke_evidence = (
         f"Latest smoke PASS: {smoke.get('name')} ({smoke.get('segment_count')} segments, "
         f"ASR={smoke.get('asr_backend')}, LLM={smoke.get('translation_backend')}, "
         f"TTS={smoke.get('tts_backend')}); report: {smoke.get('path')}"
         if smoke.get("pass")
         else "No passing real-video smoke report found in output_dir."
+    )
+    full_evidence = (
+        f"Latest full lecture PASS: {full.get('name')} ({full.get('duration'):.1f}s, "
+        f"{full.get('segment_count')} segments, ASR={full.get('asr_backend')}, "
+        f"LLM={full.get('translation_backend')}, TTS={full.get('tts_backend')}); "
+        f"report: {full.get('path')}"
+        if full.get("pass")
+        else "No passing full-lecture report found in output_dir."
+    )
+    batch_evidence = (
+        f"Latest batch PASS: {batch.get('total')} jobs, skipped={batch.get('skipped')}; report: {batch.get('path')}"
+        if batch.get("pass")
+        else "No passing batch_report.json found in output_dir."
     )
     return [
         item(
@@ -331,24 +449,24 @@ def checklist_items(platform_report: dict[str, Any] | None, smoke_report: dict[s
             "validation.first_full_lecture",
             "Final Validation",
             "Process the first complete lecture end to end, then inspect subtitle timing, TTS overlap, voice clarity, QA report, and ffprobe readability.",
-            STATUS_NEEDS_VALIDATION,
-            "Not completed in the current verified run.",
+            full_video_status(full_report),
+            full_evidence,
             "Run: .\\02_process_one.ps1, then review the generated report and first 10 subtitles.",
         ),
         item(
             "validation.batch_all",
             "Final Validation",
             "Process all detected lectures with resumable jobs and confirm failures are isolated, logged, and recoverable.",
-            STATUS_NEEDS_VALIDATION,
-            "Not completed in the current verified run.",
+            batch_status(batch_report),
+            batch_evidence,
             "Run: .\\03_process_all.ps1 after the first full lecture is accepted.",
         ),
         item(
             "validation.real_video",
             "Final Validation",
             "Run latest code on a real lecture smoke/full render and inspect subtitles, TTS timing, voice clarity, muxed MP4, reports, and glossary.",
-            real_video_status(smoke_report),
-            smoke_evidence if smoke.get("pass") else "Code gates pass, but current final acceptance still needs fresh real media output review.",
+            STATUS_DONE if full.get("pass") else real_video_status(smoke_report),
+            full_evidence if full.get("pass") else smoke_evidence if smoke.get("pass") else "Code gates pass, but current final acceptance still needs fresh real media output review.",
             "Run 01_smoke_test.ps1, then 02_process_one.ps1 on the first lecture, then inspect outputs.",
         ),
         item(
@@ -377,6 +495,8 @@ def render_progress_markdown(checklist: dict[str, Any]) -> str:
     summary = checklist.get("summary", {})
     platform = checklist.get("latest_platform_check", {})
     smoke = checklist.get("latest_real_video_smoke", {})
+    full = checklist.get("latest_full_lecture", {})
+    batch = checklist.get("latest_batch_process", {})
     lines = [
         "# AIALRA Local Video Localizer Progress Checklist",
         "",
@@ -393,6 +513,10 @@ def render_progress_markdown(checklist: dict[str, Any]) -> str:
         f"- Platform-check report: {platform.get('path') or 'not found'}",
         f"- Latest real-video smoke: {'PASS' if smoke.get('pass') else 'not passing or unavailable'}",
         f"- Smoke report: {smoke.get('path') or 'not found'}",
+        f"- Latest full lecture: {'PASS' if full.get('pass') else 'not passing or unavailable'}",
+        f"- Full lecture report: {full.get('path') or 'not found'}",
+        f"- Latest batch process: {'PASS' if batch.get('pass') else 'not passing or unavailable'}",
+        f"- Batch report: {batch.get('path') or 'not found'}",
         "",
         "## Checklist",
         "",

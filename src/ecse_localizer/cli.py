@@ -281,6 +281,9 @@ def completed_report_for(video: Path, output_dir: Path) -> Path | None:
             data = json.loads(report.read_text(encoding="utf-8"))
         except Exception:
             continue
+        mode = str(data.get("mode") or "").lower()
+        if mode == "smoke" or "_smoke" in report.stem.lower():
+            continue
         source_raw = str(data.get("source_video", ""))
         if source_raw:
             if Path(source_raw).resolve() != video.resolve():
