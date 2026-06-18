@@ -686,6 +686,7 @@ def test_spc_strategy_and_chart_asr_confusions_are_repaired():
     )
     assert strategy == "因此，军方极大地推动了这种SPC策略的采用。"
     assert "SBC" not in strategy
+    assert protected_term_flags("So the military greatly influenced the adoption of this SBC strategy.", strategy) == []
 
     charts = normalize_translation(
         "SBC的充电量可能没有他们需要的那么多，或者根本就没有使用。",
@@ -694,6 +695,13 @@ def test_spc_strategy_and_chart_asr_confusions_are_repaired():
     )
     assert charts == "他们可能没有足够重视建立足够多的SPC图表，甚至根本没有使用这些图表。"
     assert "SBC" not in charts
+    assert (
+        protected_term_flags(
+            "They weren't focused as much on having as many SBC charge maybe as they needed or maybe they weren't using them at all.",
+            charts,
+        )
+        == []
+    )
 
 
 def test_spc_chart_to_actual_hardware_phrase_is_rewritten_as_natural_lecture_zh():

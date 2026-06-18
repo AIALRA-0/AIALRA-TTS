@@ -1081,6 +1081,8 @@ def known_spc_asr_term_equivalent(term: str, source: str, zh: str) -> bool:
             r"\b(?:SBC|SVC)\s*(?:charts?|controls?)\b|(?:charts?|controls?)\s*(?:with|for|using|your)?\s*(?:SBC|SVC)\b|"
             r"\b(?:SBC|SVC)\b.{0,32}\bcharts?\b|\bcharts?\b.{0,32}\b(?:SBC|SVC)\b|"
             r"\b(?:process|rules?|robust)\b.{0,64}\b(?:SBC|SVC)\b|\b(?:SBC|SVC)\b.{0,64}\b(?:process|rules?|robust)\b|"
+            r"\badoption\s+of\s+this\s+(?:SBC|SVC)\s+strategy\b|"
+            r"\bhaving\s+as\s+many\s+(?:SBC|SVC)\s+(?:charge|charts?)\b|"
             r"\b(?:implement\w*|key\s+performance\s+indicators?|KPIs?|PDK|process\s+design\s+kit)\b.{0,80}\b(?:SBC|SVC)\b|"
             r"\b(?:SBC|SVC)\b.{0,80}\b(?:implement\w*|key\s+performance\s+indicators?|KPIs?|PDK|process\s+design\s+kit)\b|"
             r"\bincorporat\w+\b.{0,48}\b(?:SBC|SVC)\b|\bmore\s+(?:SBC|SVC)\b|\bmanufacturers?\b.{0,64}\b(?:SBC|SVC)\b|"
