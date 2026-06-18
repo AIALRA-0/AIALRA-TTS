@@ -95,6 +95,16 @@ function Get-LogProgress($StdoutTail, $StderrTail) {
       $progress.message = "Synthesizing Chinese dubbed audio with CosyVoice"
       return $progress
     }
+    if ($line -match '_zh_dub_rawmix\.wav.*_zh_dub\.wav') {
+      $progress.phase = "tts_mix"
+      $progress.message = "Mixing and loudness-normalizing final dubbed WAV"
+      return $progress
+    }
+    if ($line -match 'tts_segments.*seg_\d+_(pcm|speed|slow|slot)\.wav') {
+      $progress.phase = "tts_postprocess"
+      $progress.message = "Post-processing TTS segments with ffmpeg"
+      return $progress
+    }
     if ($line -match 'speaker_gender_sample\.wav') {
       $progress.phase = "speaker_analysis"
       $progress.message = "Analyzing speaker gender sample"
@@ -139,14 +149,14 @@ function Get-LogProgress($StdoutTail, $StderrTail) {
       $progress.message = "Extracting audio"
       return $progress
     }
-    if ($line -match 'RUN ffmpeg.*_zh_dub\.mp4') {
-      $progress.phase = "mux"
-      $progress.message = "Muxing dubbed audio into MP4"
-      return $progress
-    }
     if ($line -match 'RUN ffmpeg.*hardsub') {
       $progress.phase = "hardsub"
       $progress.message = "Rendering hard subtitles"
+      return $progress
+    }
+    if ($line -match 'RUN ffmpeg.*_zh_dub\.mp4') {
+      $progress.phase = "mux"
+      $progress.message = "Muxing dubbed audio into MP4"
       return $progress
     }
   }
@@ -199,6 +209,59 @@ function Add-TtsFileProgress($Progress, $StdoutTail) {
     $Progress.percent = [math]::Round((100.0 * $done / $total), 2)
     $latestText = if ($latest) { " latest=$($latest.Name)" } else { "" }
     $Progress.message = "Synthesizing Chinese dubbed audio with CosyVoice ($done/$total segments)$latestText"
+    if ($done -gt 1 -and $earliest -and $latest -and $latest.LastWriteTime -gt $earliest.LastWriteTime) {
+      $elapsed = ($latest.LastWriteTime - $earliest.LastWriteTime).TotalSeconds
+      $rate = [double]($done - 1) / $elapsed
+      if ($rate -gt 0) {
+        $eta = [int][Math]::Round(([Math]::Max(0, $total - $done)) / $rate)
+        $Progress["eta_seconds"] = $eta
+        $Progress["eta_text"] = Format-Duration $eta
+      }
+    }
+  } catch {}
+  return $Progress
+}
+
+function Get-LatestTtsSegmentsDir($StdoutTail) {
+  $lines = @($StdoutTail)
+  for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+    $line = [string]$lines[$i]
+    if ($line -match '"([^"]*[\\/]tts_segments[\\/]seg_\d+_(pcm|speed|slow|slot|cosy)\.wav)"') {
+      return (Split-Path -Parent $matches[1])
+    }
+  }
+  return ""
+}
+
+function Add-TtsPostprocessProgress($Progress, $StdoutTail) {
+  if (-not $Progress -or $Progress.phase -ne "tts_postprocess") { return $Progress }
+  $ttsDir = Get-LatestTtsSegmentsDir $StdoutTail
+  if (-not $ttsDir -or -not (Test-Path -LiteralPath $ttsDir)) { return $Progress }
+  try {
+    $inputJson = Join-Path $ttsDir "cosyvoice_batch_cosy.json"
+    $total = 0
+    if (Test-Path -LiteralPath $inputJson) {
+      $payload = Read-JsonFile $inputJson
+      $segments = @($payload.segments | Where-Object { ([string]$_.text).Trim().Length -gt 0 })
+      $total = $segments.Count
+    }
+    if ($total -le 0) {
+      $resultJson = Join-Path $ttsDir "cosyvoice_batch_cosy_result.json"
+      if (Test-Path -LiteralPath $resultJson) {
+        $result = Read-JsonFile $resultJson
+        $total = @($result.results).Count
+      }
+    }
+    if ($total -le 0) { return $Progress }
+    $items = @(Get-ChildItem -LiteralPath $ttsDir -Filter "seg_*_pcm.wav" -File -ErrorAction SilentlyContinue | Where-Object { $_.Length -gt 1000 })
+    $done = $items.Count
+    $latest = $items | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    $earliest = $items | Sort-Object LastWriteTime | Select-Object -First 1
+    $Progress.current = $done
+    $Progress.total = $total
+    $Progress.percent = [math]::Round((100.0 * $done / $total), 2)
+    $latestText = if ($latest) { " latest=$($latest.Name)" } else { "" }
+    $Progress.message = "Post-processing TTS segments with ffmpeg ($done/$total segments)$latestText"
     if ($done -gt 1 -and $earliest -and $latest -and $latest.LastWriteTime -gt $earliest.LastWriteTime) {
       $elapsed = ($latest.LastWriteTime - $earliest.LastWriteTime).TotalSeconds
       $rate = [double]($done - 1) / $elapsed
@@ -307,6 +370,7 @@ function Build-StatusPayload {
   $stderrTail = @(if ($state) { Get-LogTail $state.stderr_log $TailLines })
   $progress = Get-LogProgress $stdoutTail $stderrTail
   $progress = Add-TtsFileProgress $progress $stdoutTail
+  $progress = Add-TtsPostprocessProgress $progress $stdoutTail
   if ($state) { $progress = Add-ProgressEta $progress $state.started_at }
   $freshness = if ($state) { Get-LogFreshness $state.stdout_log } else { [ordered]@{ last_write_time = ""; stale_seconds = $null } }
   $payload = [ordered]@{

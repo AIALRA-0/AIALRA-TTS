@@ -442,6 +442,37 @@ def batch_background_progress(state: dict[str, Any]) -> dict[str, Any]:
                 "message": "Synthesizing Chinese dubbed audio with CosyVoice",
                 "latest_warning": progress["latest_warning"],
             }
+        if re.search(r"_zh_dub_rawmix\.wav.*_zh_dub\.wav", line):
+            return {
+                "phase": "tts_mix",
+                "current": 0,
+                "total": 0,
+                "percent": None,
+                "message": "Mixing and loudness-normalizing final dubbed WAV",
+                "latest_warning": progress["latest_warning"],
+            }
+        if "hardsub" in line and "RUN ffmpeg" in line:
+            return {
+                "phase": "hardsub",
+                "current": 0,
+                "total": 0,
+                "percent": None,
+                "message": "Rendering hard subtitles",
+                "latest_warning": progress["latest_warning"],
+            }
+        tts_dir = latest_tts_segments_dir_from_line(line)
+        if tts_dir:
+            post = tts_postprocess_progress(Path(tts_dir))
+            if post:
+                return post | {"latest_warning": progress["latest_warning"]}
+            return {
+                "phase": "tts_postprocess",
+                "current": 0,
+                "total": 0,
+                "percent": None,
+                "message": "Post-processing TTS segments with ffmpeg",
+                "latest_warning": progress["latest_warning"],
+            }
         translated = re.search(r"Translating segments\s+(\d+)-(\d+)\s*/\s*(\d+)", line)
         if translated:
             current = int(translated.group(2))
@@ -471,6 +502,13 @@ def latest_cosyvoice_input_json_from_line(line: str) -> str:
         match = re.search(pattern, line)
         if match:
             return match.group(1)
+    return ""
+
+
+def latest_tts_segments_dir_from_line(line: str) -> str:
+    match = re.search(r'"([^"]*[\\/]tts_segments[\\/]seg_\d+_(?:pcm|speed|slow|slot|cosy)\.wav)"', line)
+    if match:
+        return str(Path(match.group(1)).parent)
     return ""
 
 
@@ -515,6 +553,59 @@ def cosyvoice_file_progress(input_json: Path) -> dict[str, Any]:
         "total": total,
         "percent": round(100.0 * done / total, 2),
         "message": f"Synthesizing Chinese dubbed audio with CosyVoice ({done}/{total} segments)",
+        "latest_wav": latest.name if latest else "",
+    }
+    if eta_seconds is not None:
+        result["eta_seconds"] = eta_seconds
+        result["eta_text"] = format_duration(eta_seconds)
+    return result
+
+
+def tts_postprocess_progress(tts_dir: Path) -> dict[str, Any]:
+    if not tts_dir.exists():
+        return {}
+    total = 0
+    input_json = tts_dir / "cosyvoice_batch_cosy.json"
+    if input_json.exists():
+        try:
+            payload = read_json(input_json)
+            total = len(
+                [
+                    segment
+                    for segment in payload.get("segments", [])
+                    if isinstance(segment, dict) and str(segment.get("text") or "").strip()
+                ]
+            )
+        except Exception:
+            total = 0
+    if total <= 0:
+        result_json = tts_dir / "cosyvoice_batch_cosy_result.json"
+        if result_json.exists():
+            try:
+                result = read_json(result_json)
+                results = result.get("results", []) if isinstance(result, dict) else []
+                total = len(results) if isinstance(results, list) else 0
+            except Exception:
+                total = 0
+    if total <= 0:
+        return {}
+    pcm_files = [path for path in tts_dir.glob("seg_*_pcm.wav") if path.stat().st_size > 1000]
+    done = len(pcm_files)
+    latest = max(pcm_files, key=lambda path: path.stat().st_mtime) if pcm_files else None
+    eta_seconds = None
+    if len(pcm_files) > 1:
+        earliest_mtime = min(path.stat().st_mtime for path in pcm_files)
+        latest_mtime = max(path.stat().st_mtime for path in pcm_files)
+        if latest_mtime > earliest_mtime:
+            rate = (done - 1) / (latest_mtime - earliest_mtime)
+            if rate > 0:
+                eta_seconds = int(round(max(0, total - done) / rate))
+    result: dict[str, Any] = {
+        "phase": "tts_postprocess",
+        "current": done,
+        "total": total,
+        "percent": round(100.0 * done / total, 2),
+        "message": f"Post-processing TTS segments with ffmpeg ({done}/{total} segments)",
         "latest_wav": latest.name if latest else "",
     }
     if eta_seconds is not None:

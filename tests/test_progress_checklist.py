@@ -406,6 +406,47 @@ def test_progress_checklist_reports_background_tts_segment_progress(tmp_path):
     assert "progress=2/3" in rows["validation.batch_all"]["evidence"]
 
 
+def test_progress_checklist_reports_background_tts_postprocess_progress(tmp_path):
+    write_platform_report(tmp_path, passed=True)
+    write_smoke_report(tmp_path, passed=True)
+    write_full_report(tmp_path, passed=True)
+    write_batch_background_state(tmp_path, done=False)
+    tts_dir = tmp_path / "runs" / "one_video" / "tts_segments"
+    tts_dir.mkdir(parents=True, exist_ok=True)
+    for name in ["seg_00001_pcm.wav", "seg_00002_pcm.wav"]:
+        (tts_dir / name).write_bytes(b"0" * 2000)
+    input_json = tts_dir / "cosyvoice_batch_cosy.json"
+    input_json.write_text(
+        json.dumps(
+            {
+                "segments": [
+                    {"id": 1, "text": "你好", "out_wav": str(tts_dir / "seg_00001_cosy.wav")},
+                    {"id": 2, "text": "继续", "out_wav": str(tts_dir / "seg_00002_cosy.wav")},
+                    {"id": 3, "text": "最后", "out_wav": str(tts_dir / "seg_00003_cosy.wav")},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "batch_chunk_20260617_200000.out.log"
+    log_path.write_text(
+        f'2026-06-17 22:57:00 [INFO] RUN ffmpeg -i "{tts_dir / "seg_00002_speed.wav"}" "{tts_dir / "seg_00002_pcm.wav"}"\n',
+        encoding="utf-8",
+    )
+
+    checklist = build_progress_checklist(config(tmp_path))
+
+    background = checklist["latest_batch_background"]
+    assert background["progress"]["phase"] == "tts_postprocess"
+    assert background["progress"]["current"] == 2
+    assert background["progress"]["total"] == 3
+    rows = {item["id"]: item for item in checklist["items"]}
+    assert "Current phase=tts_postprocess" in rows["validation.batch_all"]["evidence"]
+    assert "progress=2/3" in rows["validation.batch_all"]["evidence"]
+
+
 def test_latest_batch_background_reads_done_marker(tmp_path):
     state_path = write_batch_background_state(tmp_path, done=True, exit_code=0)
 

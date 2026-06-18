@@ -52,7 +52,11 @@ def test_batch_chunk_status_reports_cosyvoice_file_progress():
 
     assert "function Get-LatestCosyVoiceInputJson" in script
     assert "function Add-TtsFileProgress" in script
+    assert "function Add-TtsPostprocessProgress" in script
     assert "--input-json" in script
+    assert "seg_*_pcm.wav" in script
+    assert "tts_mix" in script
+    assert "Rendering hard subtitles" in script
     assert "latest=$($latest.Name)" in script
     assert 'if ($Progress.Contains("eta_seconds"))' in script
 
