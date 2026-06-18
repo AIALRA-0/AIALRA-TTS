@@ -177,7 +177,7 @@ def test_static_ui_has_sidebar_and_status_rail_layout():
     assert 'class="sidebar"' in html
     assert 'class="content-shell"' in html
     assert 'class="status-rail"' in html
-    assert "layout-rail" in html
+    assert "hidden-fix" in html
     for element_id in [
         "statusWorker",
         "statusQueue",
@@ -197,6 +197,10 @@ def test_static_ui_has_sidebar_and_status_rail_layout():
     ]:
         assert f'id="{element_id}"' in html
     assert "grid-template-columns: 248px minmax(0, 1fr) 304px;" in css
+    assert "[hidden]" in css
+    assert "display: none !important;" in css
+    assert "overflow-x: hidden;" in css
+    assert "max-width: 100%;" in css
     assert ".status-rail" in css
     assert ".rail-progress" in css
     assert ".job-item.selected" in css
