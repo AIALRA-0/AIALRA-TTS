@@ -1227,7 +1227,10 @@ def numbers_missing(source: str, translated: str) -> list[str]:
 
 
 def normalize_zh(text: str) -> str:
-    text = re.sub(r"\s+", "", text or "")
+    sentinel = "\uE000"
+    text = re.sub(r"(?<=[A-Za-z0-9.])\s+(?=[A-Za-z0-9])", sentinel, text or "")
+    text = re.sub(r"\s+", "", text)
+    text = text.replace(sentinel, " ")
     text = text.replace("，。", "。").replace("。。", "。")
     return text
 

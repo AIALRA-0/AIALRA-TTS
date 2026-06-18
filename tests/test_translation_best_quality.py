@@ -7,6 +7,7 @@ from ecse_localizer.translate import (
     coherence_rejection_flags,
     context_window,
     default_style_guide,
+    normalize_translation,
     paragraph_lookup,
     protected_term_flags,
     quality_requirements,
@@ -433,6 +434,18 @@ def test_known_spc_asr_deming_variants_are_corrected():
     assert "W.EdwardsDeming" not in corrected
     assert "Deming的14点" in corrected
     assert "Dimming" not in corrected
+
+
+def test_chinese_normalization_preserves_spaces_inside_latin_names():
+    normalized = normalize_translation(
+        "因此，在1938年，Shewhart 与 W. Edwards Deming 合作。",
+        {"translation": {"target_language": "zh-CN"}},
+        "So in 1938, Suehart collaborated with W Edward Dimming.",
+    )
+
+    assert "W. Edwards Deming" in normalized
+    assert "W.EdwardsDeming" not in normalized
+    assert "Shewhart与" in normalized
 
 
 def test_known_spc_control_variants_are_corrected_without_missing_term_flag():
