@@ -1118,7 +1118,7 @@ def protected_numeric_equivalent(wanted: str, restored: str) -> bool:
 def ordinal_number_text_equivalent(number_text: str, restored: str) -> bool:
     number = int(number_text)
     if number == 1:
-        return bool(re.search(r"首先|第\s*一\s*(?:次|个|位|部分|点|节|章|步)?|一\s*开始", restored or ""))
+        return bool(re.search(r"首先|第\s*一\s*(?:次|个|位|部分|阶段|点|节|章|步)?|一\s*开始", restored or ""))
     chinese_digits = {
         2: "二",
         3: "三",
@@ -1466,6 +1466,8 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
     if re.search(r"(?<!\d)\.\s*3\s*%", source):
         work = re.sub(r"(?<!\d)[.．]\s*3\s*%", "0.3%", work)
     work = normalize_source_million_quantity_phrasing(work, source)
+    if re.search(r"\bcollecting\s+a\s+lot\s+of\s+this\s+data\b.{0,80}\bduring\s+his\s+1st\s+part\b", source, flags=re.IGNORECASE):
+        work = "他注意到，自己在第一阶段收集了大量这类数据，并且发现..."
     if re.search(r"\bso\s+data\s*,?\s+so\s+data\s+sampling\b", source, flags=re.IGNORECASE):
         work = "所以，也就是数据采样。"
     if re.search(r"\b90\s*%\s+yield\s+range\b.{0,120}\bSBC\s+controls?\b", source, flags=re.IGNORECASE):

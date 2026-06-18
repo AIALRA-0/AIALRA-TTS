@@ -412,7 +412,7 @@ def test_llm_chunk_rejects_partial_neighbor_literal_leak():
 
     assert results[0][2] == "一本行业内的指南书，人们开始使用，并且因为他用了它。"
     assert "LLM_ROW_UNUSABLE_LECTURE_FALLBACK" in results[0][3]
-    assert results[1][2] == "他注意到自己在这一阶段收集了大量数据，并且发现了一个现象（1st）。"
+    assert results[1][2] == "他注意到，自己在第一阶段收集了大量这类数据，并且发现..."
 
 
 def test_llm_chunk_rejects_short_source_with_next_two_segment_leak():
@@ -815,8 +815,19 @@ def test_ordinal_protected_token_not_appended_when_translated():
 
     assert numbers_missing("during his 1st part of this", "在他的第一部分工作中") == []
     assert protected_term_flags("during his 1st part of this", "在他的第一部分工作中") == []
+    assert numbers_missing("during his 1st part of this", "在第一阶段收集了大量数据") == []
+    assert protected_term_flags("during his 1st part of this", "在第一阶段收集了大量数据") == []
     assert numbers_missing("Put your customers 1st.", "把客户放在第一位。") == []
     assert protected_term_flags("Put your customers 1st.", "把客户放在第一位。") == []
+
+    first_part = normalize_translation(
+        "如果有的话（1st）。",
+        {"translation": {"target_language": "zh-CN"}},
+        "he noticed that he he was collecting a lot of this data during his 1st part of this and he noticed there was,",
+    )
+
+    assert first_part == "他注意到，自己在第一阶段收集了大量这类数据，并且发现..."
+    assert "1st" not in first_part
 
 
 def test_yield_range_spc_controls_has_natural_percent_phrase():
