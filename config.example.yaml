@@ -42,7 +42,7 @@ llm:
   max_retries: 5
   timeout_seconds: 300
   json_repair: true
-  translation_chunk_size: 8
+  translation_chunk_size: 4
   fidelity_chunk_size: 6
   repair_chunk_size: 6
   low_capacity_models: ["0.5b", "1b"]
