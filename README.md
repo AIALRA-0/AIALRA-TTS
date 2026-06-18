@@ -40,6 +40,21 @@ This writes state under `runs\batch_background\` and stdout/stderr logs under `l
 .\15_manage_batch_chunk.ps1 -Action Stop
 ```
 
+To keep the whole course moving automatically, start the supervisor after the first chunk is running or whenever no chunk is running:
+
+```powershell
+.\16_manage_batch_supervisor.ps1 -Action Start -Limit 1 -ShortestFirst
+.\16_manage_batch_supervisor.ps1 -Action Status
+```
+
+The supervisor waits for the active chunk, starts the next shortest pending video when the previous chunk completes, and stops on the first failed chunk so the failure can be inspected before continuing. Stop only the supervisor with:
+
+```powershell
+.\16_manage_batch_supervisor.ps1 -Action Stop
+```
+
+Add `-StopActiveChunk` only when you intentionally want to stop the currently running video job too.
+
 Refresh the consolidated objective checklist at any time:
 
 ```powershell
