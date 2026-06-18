@@ -43,6 +43,7 @@ FALLBACK_PHRASES = [
     (r"\bagenda\b", "今天的安排"),
     (r"\bsyllabus\b", "教学大纲"),
     (r"\bquestions?\b", "问题"),
+    (r"\bso\s+data\s*,\s*so\s+data\s+sampling\b", "所以，也就是数据采样"),
     (r"\bdata sampling\b", "数据采样"),
     (r"\bsampling\b", "采样"),
     (r"\bdata\b", "数据"),
@@ -1412,6 +1413,7 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
     if re.search(r"\byou\s+know\s+Stewart\b|\bStewart\b.{0,48}\bstarted\s+from\s+there\b", source, flags=re.IGNORECASE):
         work = re.sub(ascii_left + r"Stewart" + ascii_right, "Shewhart", work, flags=re.IGNORECASE)
         work = re.sub(r"斯图尔特|斯图亚特|史都华", "Shewhart", work)
+        work = re.sub(r"你知道\s*Shewhart|Shewhart\s*也知道", "比如Shewhart", work, flags=re.IGNORECASE)
 
     deming_context = re.search(
         r"Shewhart|statistical process control|SPC|control charts?|Western Electric|14\s*(?:points?|点)|quality product",
