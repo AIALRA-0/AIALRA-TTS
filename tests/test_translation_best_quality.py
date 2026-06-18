@@ -8,7 +8,9 @@ from ecse_localizer.translate import (
     context_window,
     default_style_guide,
     paragraph_lookup,
+    protected_term_flags,
     quality_requirements,
+    restore_and_repair_protected_terms,
     request_llm_chunk,
     use_best_quality,
 )
@@ -430,6 +432,31 @@ def test_known_spc_asr_deming_variants_are_corrected():
     assert "W. Edwards Deming" in corrected
     assert "Deming的14点" in corrected
     assert "Dimming" not in corrected
+
+
+def test_known_spc_control_variants_are_corrected_without_missing_term_flag():
+    corrected = apply_known_term_corrections(
+        "这里有很多SBC控制和SVC控制方法。",
+        "There is a lot out there for SBC control and SVC control.",
+        {"translation": {"target_language": "zh-CN"}},
+    )
+
+    assert "SPC控制" in corrected
+    assert "SBC控制" not in corrected
+    assert "SVC控制" not in corrected
+    assert protected_term_flags("SBC control and SVC charts", "SPC控制和SPC图表") == []
+
+
+def test_restore_repairs_unresolved_keep_placeholders_from_source_mapping():
+    restored = restore_and_repair_protected_terms(
+        "接近<KEEP_001>百万电话，超过<KEEP_002>%家庭。",
+        {},
+        "There were nearly 30 million telephones and over 70% of homes.",
+    )
+
+    assert "<KEEP_" not in restored
+    assert "30" in restored
+    assert "70%" in restored
 
 
 def test_sanitize_flags_drops_protected_placeholder_flags():

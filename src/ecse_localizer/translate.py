@@ -890,6 +890,7 @@ def normalize_coherence_text(text: str) -> str:
 
 def restore_and_repair_protected_terms(text: str, mapping: dict[str, str], source: str) -> str:
     restored = restore_text(text, mapping)
+    restored = repair_unresolved_keep_placeholders(restored, mapping, source)
     protected_acronyms = [value for value in mapping.values() if is_acronym(value)]
     original_acronyms = set(extract_acronyms(source))
     for wanted in protected_acronyms:
@@ -913,6 +914,26 @@ def restore_and_repair_protected_terms(text: str, mapping: dict[str, str], sourc
     return restored
 
 
+def repair_unresolved_keep_placeholders(text: str, mapping: dict[str, str], source: str) -> str:
+    placeholders = re.findall(r"<KEEP_\d{3}>", text or "")
+    if not placeholders:
+        return text or ""
+    source_mapping = protect_text(source or "").mapping
+    combined = {**source_mapping, **mapping}
+    ordered_values = [combined[key] for key in sorted(combined) if combined.get(key)]
+    work = text or ""
+    for placeholder in dict.fromkeys(placeholders):
+        replacement = combined.get(placeholder)
+        if not replacement:
+            match = re.search(r"KEEP_(\d{3})", placeholder)
+            index = int(match.group(1)) - 1 if match else -1
+            if 0 <= index < len(ordered_values):
+                replacement = ordered_values[index]
+        if replacement:
+            work = work.replace(placeholder, replacement)
+    return work
+
+
 def sanitize_flags(flags: object) -> list[str]:
     if not isinstance(flags, list):
         return []
@@ -926,10 +947,22 @@ def sanitize_flags(flags: object) -> list[str]:
 
 
 def protected_term_flags(source: str, zh: str) -> list[str]:
-    missing = protected_terms_missing(source, zh)
+    missing = [
+        term
+        for term in protected_terms_missing(source, zh)
+        if not known_spc_asr_term_equivalent(term, source, zh)
+    ]
     if not missing:
         return []
     return ["MISSING_PROTECTED_TERM:" + ",".join(missing[:6])]
+
+
+def known_spc_asr_term_equivalent(term: str, source: str, zh: str) -> bool:
+    if term.upper() not in {"SBC", "SVC"}:
+        return False
+    if not re.search(r"\bSPC\b|SPC图表|SPC控制", zh or "", flags=re.IGNORECASE):
+        return False
+    return bool(re.search(r"\b(?:SBC|SVC)\s*(?:charts?|control)\b|(?:SBC|SVC)\s*图表|(?:SBC|SVC)\s*控制", source or "", flags=re.IGNORECASE))
 
 
 def extract_acronyms(text: str) -> list[str]:
@@ -1201,11 +1234,14 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
     if deming_context:
         work = re.sub(ascii_left + r"Dimming" + ascii_right, "Deming", work, flags=re.IGNORECASE)
 
-    spc_chart_context = re.search(r"\b(?:SBC|SVC)\s*charts?\b|(?:SBC|SVC)\s*图表", combined, flags=re.IGNORECASE)
+    spc_chart_context = re.search(r"\b(?:SBC|SVC)\s*(?:charts?|control)\b|(?:SBC|SVC)\s*图表|(?:SBC|SVC)\s*控制", combined, flags=re.IGNORECASE)
     if spc_chart_context:
         work = re.sub(r"\b(?:SBC|SVC)\s*(charts?)\b", r"SPC \1", work, flags=re.IGNORECASE)
+        work = re.sub(r"\b(?:SBC|SVC)\s*(control)\b", r"SPC \1", work, flags=re.IGNORECASE)
         work = re.sub(r"\b(?:SBC|SVC)\s*图表", "SPC图表", work, flags=re.IGNORECASE)
         work = re.sub(r"(?:SBC|SVC)图表", "SPC图表", work, flags=re.IGNORECASE)
+        work = re.sub(r"\b(?:SBC|SVC)\s*控制", "SPC控制", work, flags=re.IGNORECASE)
+        work = re.sub(r"(?:SBC|SVC)控制", "SPC控制", work, flags=re.IGNORECASE)
 
     return work
 
