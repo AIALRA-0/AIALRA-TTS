@@ -651,6 +651,21 @@ def test_us_manufacturer_spc_translation_does_not_keep_misplaced_us_parenthetica
     assert protected_term_flags(source, normalized) == []
 
 
+def test_spc_chart_to_actual_hardware_phrase_is_rewritten_as_natural_lecture_zh():
+    source = (
+        "That you're using for your SBC to do your charts to the actual hardware "
+        "that the wafers are seeing, the actual processes."
+    )
+    normalized = normalize_translation(
+        "你用来做你的SPC图表到晶圆实际看到的硬件，以及实际的过程。",
+        {"translation": {"target_language": "zh-CN"}},
+        source,
+    )
+
+    assert normalized == "也就是把你用于制作SPC图表的内容，对应到晶圆实际经过的硬件和真实工艺。"
+    assert protected_term_flags(source, normalized) == []
+
+
 def test_generated_spc_placeholder_is_repaired():
     normalized = normalize_translation(
         "你必须要有<SPC_003>控制和关键参数指标KPI。",

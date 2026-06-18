@@ -1466,6 +1466,18 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = re.sub(r"（\s*U\.?\s*S\.?\s*）|\(\s*U\.?\s*S\.?\s*\)", "", work, flags=re.IGNORECASE)
         work = re.sub(r"统计过程控制方法（SPC）", "统计过程控制（SPC）方法", work)
 
+    if re.search(
+        r"using\s+for\s+your\s+(?:SBC|SPC)\s+to\s+do\s+your\s+charts?.{0,80}actual\s+hardware.{0,80}wafers?.{0,80}(?:seeing|see).{0,80}actual\s+process",
+        source,
+        flags=re.IGNORECASE,
+    ) and re.search(r"SPC\s*图表.{0,12}到.{0,12}晶圆实际(?:看到|看见)的硬件", work):
+        work = re.sub(
+            r"[^。！？]*SPC\s*图表.{0,12}到.{0,12}晶圆实际(?:看到|看见)的硬件[^。！？]*[。！？]?",
+            "也就是把你用于制作SPC图表的内容，对应到晶圆实际经过的硬件和真实工艺。",
+            work,
+            count=1,
+        )
+
     return work
 
 
