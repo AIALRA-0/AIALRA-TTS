@@ -23,7 +23,7 @@ from .subtitle_io import (
 )
 from .translate import TranslationTrace, is_usable_translation, numbers_missing, target_limit
 from .translation_quality import translation_target_language
-from .tts import build_aligned_dub
+from .tts import build_aligned_dub, make_tts_units
 from .utils import PROJECT_ROOT, ensure_dir, now_id, slugify, write_json
 
 
@@ -104,6 +104,205 @@ def repair_from_fidelity(
         write_json(repair_trace_path, {"repairs": [r.__dict__ for r in repairs]})
 
     return write_repaired_outputs(report, report_path, en_segments, zh_segments, repairs, glossary, config, logger)
+
+
+def auto_repair_translation_failures(
+    result: dict[str, Any],
+    traces: list[Any],
+    config: dict[str, Any],
+    logger: logging.Logger | None = None,
+) -> dict[str, Any]:
+    if not should_auto_repair_translation(result, traces, config):
+        return result
+    report_json = result.get("report_json")
+    if not report_json:
+        return result
+    report_path = Path(str(report_json))
+    fidelity_path = report_path.with_name(report_path.stem.replace("_report", "") + "_qa_fidelity_report.json")
+    fidelity = write_qa_fidelity_report(result, traces, fidelity_path, config)
+    if not fidelity.get("reviews"):
+        return result
+    if logger:
+        logger.info("Auto repairing %d QA-flagged translation segments", len(fidelity["reviews"]))
+    try:
+        return repair_from_fidelity(
+            report_path,
+            fidelity_path,
+            config,
+            max_score=int(config.get("qa", {}).get("auto_repair_max_score", 3)),
+            include_high=True,
+            logger=logger,
+        )
+    except Exception as exc:
+        if logger:
+            logger.exception("Automatic translation repair failed: %s", exc)
+        result.setdefault("qa", {}).setdefault("issues", []).append(
+            {"type": "auto_translation_repair_failed", "severity": "high", "error": str(exc)[:500]}
+        )
+        result.setdefault("qa", {})["pass"] = False
+        return result
+
+
+def should_auto_repair_translation(result: dict[str, Any], traces: list[Any], config: dict[str, Any]) -> bool:
+    if not bool(config.get("qa", {}).get("auto_repair_translation_failures", True)):
+        return False
+    qa = result.get("qa", {})
+    if qa.get("pass"):
+        return False
+    if str(result.get("mode", "")).lower() == "fidelity_repair":
+        return False
+    issues = qa.get("issues", [])
+    if any(is_repairable_issue(issue) for issue in issues):
+        return True
+    for trace in traces:
+        if any(is_repairable_trace_flag(flag) for flag in trace_flags(trace)):
+            return True
+    return False
+
+
+def write_qa_fidelity_report(
+    result: dict[str, Any],
+    traces: list[Any],
+    output_json: str | Path,
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    output_path = Path(output_json)
+    issues: list[dict[str, Any]] = []
+    repair_ids: set[int] = set()
+    high_ids: set[int] = set()
+
+    for issue in result.get("qa", {}).get("issues", []):
+        if not is_repairable_issue(issue):
+            continue
+        sid = parse_segment_id(issue.get("segment_id"))
+        if sid is None:
+            continue
+        normalized = dict(issue)
+        normalized["segment_id"] = sid
+        issues.append(normalized)
+        repair_ids.add(sid)
+        if issue.get("severity") == "high":
+            high_ids.add(sid)
+
+    for trace in traces:
+        sid = parse_segment_id(trace_value(trace, "segment_id", None))
+        if sid is None:
+            continue
+        flags = [flag for flag in trace_flags(trace) if is_repairable_trace_flag(flag)]
+        if not flags:
+            continue
+        severity = "high" if any(is_high_repair_trace_flag(flag) for flag in flags) else "medium"
+        issues.append({"type": "translation_quality_heuristic", "severity": severity, "segment_id": sid, "flags": flags})
+        repair_ids.add(sid)
+        if severity == "high":
+            high_ids.add(sid)
+
+    reviews = [
+        {
+            "id": sid,
+            "faithful": False,
+            "summary_like": sid in high_ids,
+            "missing_key_info": [],
+            "added_info": [],
+            "number_or_name_issue": [],
+            "score": 2 if sid in high_ids else 3,
+            "notes": "QA-derived repair target from translation quality, fallback, or fidelity flags.",
+        }
+        for sid in sorted(repair_ids)
+    ]
+    scores = [int(row["score"]) for row in reviews]
+    audit = {
+        "source_report": result.get("report_json"),
+        "source_video": result.get("source_video"),
+        "model": "qa_derived",
+        "segment_count": len(result.get("segments", {}).get("en", [])),
+        "reviewed_count": len(reviews),
+        "partial": False,
+        "pass": False if reviews else True,
+        "average_score": round(sum(scores) / len(scores), 3) if scores else 0,
+        "score_counts": {str(i): scores.count(i) for i in range(1, 6)},
+        "issues": issues,
+        "reviews": reviews,
+        "target_language": translation_target_language(config),
+        "source": "qa_and_translation_trace",
+    }
+    write_json(output_path, audit)
+    write_qa_fidelity_markdown(output_path.with_suffix(".md"), audit)
+    return audit
+
+
+def write_qa_fidelity_markdown(path: str | Path, audit: dict[str, Any]) -> None:
+    lines = [
+        "# QA-Derived Fidelity Repair Targets",
+        "",
+        f"- Source video: `{audit.get('source_video')}`",
+        f"- Source report: `{audit.get('source_report')}`",
+        f"- Target language: `{audit.get('target_language')}`",
+        f"- Repair targets: {audit.get('reviewed_count')} / {audit.get('segment_count')}",
+        "",
+        "## Issues",
+        "",
+    ]
+    for issue in audit.get("issues", [])[:200]:
+        lines.append(f"- [{issue.get('severity')}] segment {issue.get('segment_id')}: {issue.get('type')} `{issue}`")
+    if not audit.get("issues"):
+        lines.append("- None")
+    ensure_dir(Path(path).parent)
+    Path(path).write_text("\n".join(lines), encoding="utf-8")
+
+
+def is_repairable_issue(issue: dict[str, Any]) -> bool:
+    issue_type = str(issue.get("type", ""))
+    if issue_type in {
+        "translation_quality_heuristic",
+        "number_mismatch",
+        "possibly_untranslated",
+        "invalid_translation_text",
+        "non_translation_narration",
+        "translation_trace_flags",
+    }:
+        return True
+    return issue.get("severity") == "high" and issue_type.startswith("translation")
+
+
+def is_repairable_trace_flag(flag: Any) -> bool:
+    text = str(flag or "")
+    if not text:
+        return False
+    return is_high_repair_trace_flag(text)
+
+
+def is_high_repair_trace_flag(flag: Any) -> bool:
+    text = str(flag or "")
+    return text.startswith(
+        (
+            "SUMMARY_STYLE_TRANSLATION",
+            "REVIEW_COMMENTARY_LEAK",
+            "LOCAL_RULE_FALLBACK_REVIEW_REQUIRED",
+            "LLM_CHUNK_FAILED_FALLBACK",
+            "LOW_CAPACITY_LLM_BYPASSED_FOR_LONG_VIDEO",
+            "LLM_UNAVAILABLE",
+        )
+    )
+
+
+def trace_flags(trace: Any) -> list[str]:
+    value = trace_value(trace, "flags", [])
+    if not isinstance(value, list):
+        return []
+    return [str(flag) for flag in value if str(flag).strip()]
+
+
+def trace_value(trace: Any, key: str, default: Any = None) -> Any:
+    if isinstance(trace, dict):
+        return trace.get(key, default)
+    return getattr(trace, key, default)
+
+
+def parse_segment_id(value: Any) -> int | None:
+    if str(value).isdigit():
+        return int(value)
+    return None
 
 
 def select_repair_ids(fidelity: dict[str, Any], *, max_score: int, include_high: bool) -> set[int]:
@@ -204,7 +403,7 @@ def repair_chunk(
         old = zh_segments[sid - 1].text
         row = by_id[sid]
         new = clean_repair_text(str(row.get("zh", "")))
-        if not is_usable_translation(new, config) or looks_like_non_translation_narration(new):
+        if not is_usable_translation(new, config, en.text) or looks_like_non_translation_narration(new):
             raise RuntimeError(f"unusable repair for segment {sid}: {new!r}")
         flags = sanitize_flags(row.get("flags", []))
         flags.append("FIDELITY_REPAIRED")
@@ -277,7 +476,7 @@ def write_repaired_outputs(
     write_srt(bilingual_srt, bilingual_segments(en_segments, zh_segments), cjk=False)
     write_bilingual_ass(bilingual_ass, en_segments, zh_segments)
 
-    tts_info = build_aligned_dub(zh_segments, process_duration, zh_wav, run_dir, config, logger)
+    tts_info = build_aligned_dub(zh_segments, process_duration, zh_wav, run_dir, config, source_video=work_video, logger=logger)
     mux_video(work_video, zh_wav, zh_mp4, config, logger)
     hard_ok = hardsub_video(zh_mp4, bilingual_ass, hard_mp4, logger) if config.get("mux", {}).get("hard_subtitle", True) else False
 
@@ -346,13 +545,14 @@ def copy_unchanged_tts_cache(
     new_tts = ensure_dir(run_dir / "tts_segments")
     if not old_tts.exists():
         return
+    changed_unit_ids = changed_tts_unit_ids(report, changed_ids, config)
     copied = 0
     for src in old_tts.glob("seg_*_cosy.wav"):
         try:
             sid = int(src.stem.split("_")[1])
         except Exception:
             continue
-        if sid in changed_ids:
+        if sid in changed_unit_ids:
             continue
         dst = new_tts / src.name
         if not dst.exists():
@@ -360,6 +560,23 @@ def copy_unchanged_tts_cache(
             copied += 1
     if logger:
         logger.info("Copied %d unchanged CosyVoice segment clips from %s", copied, old_tts)
+
+
+def changed_tts_unit_ids(report: dict[str, Any], changed_ids: set[int], config: dict[str, Any]) -> set[int]:
+    if not changed_ids:
+        return set()
+    try:
+        zh_segments = [
+            Segment(int(x["id"]), float(x["start"]), float(x["end"]), str(x["text"]))
+            for x in report.get("segments", {}).get("zh", [])
+        ]
+        changed: set[int] = set()
+        for unit in make_tts_units(zh_segments, config):
+            if changed_ids.intersection(unit.segment_ids):
+                changed.add(unit.id)
+        return changed or set(changed_ids)
+    except Exception:
+        return set(changed_ids)
 
 
 def load_glossary(path: Path) -> dict[str, GlossaryTerm]:

@@ -3,6 +3,7 @@ import json
 from ecse_localizer.subtitle_io import Segment
 from ecse_localizer.translate import (
     build_translation_paragraphs,
+    coherence_rejection_flags,
     context_window,
     default_style_guide,
     paragraph_lookup,
@@ -184,6 +185,46 @@ def test_coherence_pass_cannot_drop_protected_placeholders():
     assert "sensor_readout.py" in zh
     assert "COHERENCE_REJECTED_FIDELITY_GUARD" in flags
     assert not any(flag.startswith("MISSING_PROTECTED_TERM") for flag in flags)
+
+
+def test_coherence_rejects_short_source_overexpansion():
+    flags = coherence_rejection_flags(
+        "Okay.",
+        "好的。",
+        "我仍然不明白为什么这不起作用。",
+        {"translation": {"target_language": "zh-CN"}},
+    )
+
+    assert "COHERENCE_REJECTED_SHORT_SOURCE_GUARD" in flags
+    assert "COHERENCE_SHORT_SOURCE_OVEREXPANDED" in flags
+
+
+def test_coherence_rejects_neighbor_literal_leak():
+    flags = coherence_rejection_flags(
+        "I still don't understand why this doesn't work.",
+        "我还是不明白为什么这不起作用。",
+        "今天真是奇怪的一天。",
+        {"translation": {"target_language": "zh-CN"}},
+        literal_zh="我还是不明白为什么这不起作用。",
+        neighbor_literal_zh=["今天真是奇怪的一天。"],
+    )
+
+    assert "COHERENCE_REJECTED_NEIGHBOR_LEAK" in flags
+    assert "COHERENCE_INCLUDED_NEIGHBOR_LITERAL" in flags
+
+
+def test_coherence_allows_normal_short_source_polish():
+    flags = coherence_rejection_flags(
+        "Okay, let's start.",
+        "好的，我们开始吧。",
+        "好，我们开始。",
+        {"translation": {"target_language": "zh-CN"}},
+        literal_zh="好的，我们开始吧。",
+        neighbor_literal_zh=["今天真是奇怪的一天。"],
+    )
+
+    assert "COHERENCE_REJECTED_SHORT_SOURCE_GUARD" not in flags
+    assert "COHERENCE_REJECTED_NEIGHBOR_LEAK" not in flags
 
 
 def test_non_chinese_target_translation_is_accepted_and_keeps_spaces():

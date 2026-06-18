@@ -149,6 +149,8 @@ qa:
   overcompression_min_zh_per_en_word: 0.45
   flag_tts_overrun: true
   fail_on_rule_fallback_translation: true
+  auto_repair_translation_failures: true
+  auto_repair_max_score: 3
   generate_html_report: true
 
 webui:

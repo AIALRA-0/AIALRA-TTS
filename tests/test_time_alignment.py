@@ -3,6 +3,7 @@ from array import array
 from ecse_localizer.align import overlap_count
 from ecse_localizer.compact import schedule_compact_units
 from ecse_localizer.ffmpeg_utils import audio_duration
+from ecse_localizer.repair import changed_tts_unit_ids
 from ecse_localizer.subtitle_io import Segment, normalize_segments, write_bilingual_ass
 from ecse_localizer.tts import (
     TTSUnit,
@@ -51,6 +52,33 @@ def test_tts_grouping_merges_short_adjacent_segments():
     units = make_tts_units(segments, config)
     assert len(units) == 1
     assert units[0].segment_ids == [1, 2, 3]
+
+
+def test_repair_invalidates_grouped_tts_cache_when_inner_segment_changes():
+    report = {
+        "segments": {
+            "zh": [
+                {"id": 1, "start": 0.0, "end": 3.0, "text": "第一句。"},
+                {"id": 2, "start": 3.0, "end": 6.0, "text": "第二句。"},
+                {"id": 3, "start": 10.0, "end": 13.0, "text": "第三句。"},
+            ]
+        }
+    }
+    config = {
+        "tts": {
+            "align_mode": "grouped",
+            "end_gap_seconds": 0.2,
+            "merge_gap_seconds": 0.35,
+            "min_group_duration": 7.0,
+            "max_group_duration": 12.0,
+            "max_group_chars": 110,
+            "estimated_zh_chars_per_second": 5.2,
+            "group_min_estimated_fill_ratio": 0.72,
+        }
+    }
+
+    assert changed_tts_unit_ids(report, {2}, config) == {1}
+    assert changed_tts_unit_ids(report, {3}, config) == {3}
 
 
 def test_tts_target_duration_respects_next_segment_start():

@@ -1,6 +1,6 @@
 from ecse_localizer.fidelity import heuristic_fidelity_issues
-from ecse_localizer.qa import run_qa
-from ecse_localizer.repair import repair_chunk, select_repair_ids
+from ecse_localizer.qa import has_usable_translation_text, run_qa
+from ecse_localizer.repair import repair_chunk, select_repair_ids, should_auto_repair_translation, write_qa_fidelity_report
 from ecse_localizer.subtitle_io import Segment
 from ecse_localizer.translation_quality import (
     assess_translation_quality,
@@ -8,6 +8,7 @@ from ecse_localizer.translation_quality import (
     quality_flag_severity,
 )
 from ecse_localizer.translate import TranslationTrace
+from ecse_localizer.translate import is_usable_translation
 
 
 def test_quality_flags_machine_translation_smells():
@@ -90,6 +91,22 @@ def test_qa_still_rejects_ascii_only_text_for_chinese_target():
     assert "invalid_translation_text" in issue_types
     assert "possibly_untranslated" in issue_types
     assert qa["pass"] is False
+
+
+def test_short_numeric_and_short_spoken_translations_are_usable_for_chinese():
+    config = {"translation": {"target_language": "zh-CN"}, "qa": {}}
+
+    assert is_usable_translation("92%", config, "92 %.")
+    assert has_usable_translation_text("92%", config, "92 %.")
+    assert is_usable_translation("不。", config, "No, NO NO.")
+    assert has_usable_translation_text("不。", config, "No, NO NO.")
+    assert not has_usable_translation_text("RPI", config, "At RPI.")
+
+    en = [Segment(1, 0.0, 1.0, "92 %.")]
+    zh = [Segment(1, 0.0, 1.0, "92%。")]
+    traces = [TranslationTrace(1, en[0].text, zh[0].text, zh[0].text, 1.0, 8, [])]
+    qa = run_qa({}, en, zh, {}, traces, {"duration": 1.0, "flags": []}, 1.0, config)
+    assert qa["pass"] is True
 
 
 def test_qa_reports_translation_quality_heuristics():
@@ -219,6 +236,43 @@ def test_fidelity_repair_accepts_non_chinese_target_language():
 
     assert repairs[0].new_text == "Ajusta el umbral del comparador a 25 mV antes de la siguiente medición."
     assert "FIDELITY_REPAIRED" in repairs[0].flags
+
+
+def test_qa_derived_fidelity_report_targets_trace_fallback_segments(tmp_path):
+    result = {
+        "report_json": str(tmp_path / "lecture_report.json"),
+        "source_video": "lecture.mp4",
+        "segments": {
+            "en": [{"id": 532, "text": "92 %."}],
+            "zh": [{"id": 532, "text": "【待人工复核】92%。"}],
+        },
+        "qa": {
+            "pass": False,
+            "issues": [
+                {"type": "translation_fallback_used", "severity": "high", "flags": {"LLM_CHUNK_FAILED_FALLBACK": 1}},
+                {"type": "translation_quality_heuristic", "severity": "high", "segment_id": 532, "flags": ["REVIEW_COMMENTARY_LEAK"]},
+            ],
+        },
+    }
+    traces = [
+        TranslationTrace(
+            532,
+            "92 %.",
+            "【待人工复核】92 %。",
+            "【待人工复核】92%。",
+            2.0,
+            10,
+            ["LLM_CHUNK_FAILED_FALLBACK", "LOCAL_RULE_FALLBACK_REVIEW_REQUIRED", "REVIEW_COMMENTARY_LEAK"],
+        )
+    ]
+
+    assert should_auto_repair_translation(result, traces, {"qa": {"auto_repair_translation_failures": True}})
+    audit = write_qa_fidelity_report(result, traces, tmp_path / "qa_fidelity.json", {"translation": {"target_language": "zh-CN"}})
+
+    assert audit["reviewed_count"] == 1
+    assert audit["reviews"][0]["id"] == 532
+    assert audit["reviews"][0]["score"] == 2
+    assert any(issue["segment_id"] == 532 for issue in audit["issues"])
 
 
 class FakeRepairClient:

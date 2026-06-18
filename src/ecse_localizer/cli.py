@@ -29,7 +29,7 @@ from .platform_store import PlatformStore, safe_worker_id
 from .platform_check import build_worker_health_payload, run_platform_check
 from .progress_checklist import write_progress_checklist
 from .qa import run_qa
-from .repair import repair_from_fidelity
+from .repair import auto_repair_translation_failures, repair_from_fidelity
 from .release_check import run_release_check
 from .remote_smoke import run_remote_smoke
 from .report import write_audit_report, write_index_report, write_video_report
@@ -809,6 +809,8 @@ def process_video(
     }
     write_video_report(report_md, report_json, result)
     write_json(run_dir / "result.json", result)
+    if mode == "full":
+        result = auto_repair_translation_failures(result, traces, config, logger)
     refresh_license_report(output_dir)
     return result
 

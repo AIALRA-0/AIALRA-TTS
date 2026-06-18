@@ -75,6 +75,36 @@ SAFE_SHORT_PHRASES = {
     "that is number one": "这是第一点。",
 }
 
+SHORT_DISCOURSE_SOURCE_TOKENS = {
+    "a",
+    "ah",
+    "alright",
+    "and",
+    "anyway",
+    "but",
+    "fine",
+    "good",
+    "great",
+    "hmm",
+    "let's",
+    "no",
+    "now",
+    "ok",
+    "okay",
+    "right",
+    "so",
+    "start",
+    "sure",
+    "thanks",
+    "then",
+    "uh",
+    "um",
+    "well",
+    "yeah",
+    "yep",
+    "yes",
+}
+
 SINGLE_SEGMENT_RESCUE_PROMPT = """You are a local lecture subtitle translator for engineering lectures.
 Return strict JSON only.
 
@@ -627,17 +657,27 @@ def run_coherence_pass(
         data = client.json_chat(prompt, json.dumps(payload, ensure_ascii=False), schema)
         rows = data.get("segments", [])
         by_id = {int(row.get("id")): row for row in rows if str(row.get("id", "")).isdigit()}
+        protected_ids = [int(item["id"]) for item in protected if str(item.get("id", "")).isdigit()]
+        protected_index = {sid: idx for idx, sid in enumerate(protected_ids)}
         for sid, row in by_id.items():
             source_item = next((item for item in protected if int(item.get("id", -1)) == sid), {})
             zh = str(row.get("zh_lecture", "")).strip()
             if not is_usable_translation(zh, config) or is_forbidden_non_translation(zh):
                 continue
             current = rewrite_by_id.get(sid, {})
+            idx = protected_index.get(sid)
+            neighbor_literal_zh: list[str] = []
+            if idx is not None:
+                for neighbor_idx in (idx - 1, idx + 1):
+                    if 0 <= neighbor_idx < len(protected_ids):
+                        neighbor_literal_zh.append(str(literal_by_id.get(protected_ids[neighbor_idx], {}).get("zh_literal", "")))
             rejection_flags = coherence_rejection_flags(
                 str(source_item.get("text", "")),
                 str(current.get("zh_lecture", "")),
                 zh,
                 config,
+                literal_zh=str(literal_by_id.get(sid, {}).get("zh_literal", "")),
+                neighbor_literal_zh=neighbor_literal_zh,
             )
             if rejection_flags:
                 kept = dict(current)
@@ -657,7 +697,15 @@ def run_coherence_pass(
         return rewrite_by_id
 
 
-def coherence_rejection_flags(source_text: str, previous_zh: str, candidate_zh: str, config: dict) -> list[str]:
+def coherence_rejection_flags(
+    source_text: str,
+    previous_zh: str,
+    candidate_zh: str,
+    config: dict,
+    *,
+    literal_zh: str = "",
+    neighbor_literal_zh: list[str] | None = None,
+) -> list[str]:
     flags: list[str] = []
     source_placeholders = placeholder_tokens(source_text)
     if source_placeholders:
@@ -673,11 +721,59 @@ def coherence_rejection_flags(source_text: str, previous_zh: str, candidate_zh: 
     if high_candidate and not (previous_quality & high_candidate):
         flags.append("COHERENCE_REJECTED_QUALITY_GUARD")
         flags.extend(sorted("COHERENCE_INTRODUCED_" + flag for flag in high_candidate))
+    if coherence_short_source_overexpanded(source_text, previous_zh, candidate_zh, config):
+        flags.append("COHERENCE_REJECTED_SHORT_SOURCE_GUARD")
+        flags.append("COHERENCE_SHORT_SOURCE_OVEREXPANDED")
+    if coherence_contains_neighbor_literal(candidate_zh, literal_zh, neighbor_literal_zh or []):
+        flags.append("COHERENCE_REJECTED_NEIGHBOR_LEAK")
+        flags.append("COHERENCE_INCLUDED_NEIGHBOR_LITERAL")
     return flags
 
 
 def placeholder_tokens(text: str) -> set[str]:
     return set(re.findall(r"<KEEP_\d{3}>", text or ""))
+
+
+def coherence_short_source_overexpanded(source_text: str, previous_zh: str, candidate_zh: str, config: dict) -> bool:
+    if not target_uses_compact_script(config):
+        return False
+    if not is_short_discourse_source(source_text):
+        return False
+    previous_len = target_meaningful_len(previous_zh)
+    candidate_len = target_meaningful_len(candidate_zh)
+    if previous_len == 0 or candidate_len == 0:
+        return False
+    allowed = max(10, previous_len + 8, int(previous_len * 2.5))
+    return candidate_len > allowed
+
+
+def is_short_discourse_source(source_text: str) -> bool:
+    tokens = [token.lower() for token in re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", source_text or "")]
+    if not tokens or len(tokens) > 4:
+        return False
+    return all(token in SHORT_DISCOURSE_SOURCE_TOKENS for token in tokens)
+
+
+def target_meaningful_len(text: str) -> int:
+    return len(re.sub(r"[\s\u3000，。！？、；：,.!?;:'\"“”‘’()（）\[\]【】]+", "", text or ""))
+
+
+def coherence_contains_neighbor_literal(candidate_zh: str, literal_zh: str, neighbor_literal_zh: list[str]) -> bool:
+    candidate_norm = normalize_coherence_text(candidate_zh)
+    literal_norm = normalize_coherence_text(literal_zh)
+    if not candidate_norm:
+        return False
+    if literal_norm and candidate_norm == literal_norm:
+        return False
+    for neighbor in neighbor_literal_zh:
+        neighbor_norm = normalize_coherence_text(neighbor)
+        if len(neighbor_norm) >= 6 and neighbor_norm in candidate_norm:
+            return True
+    return False
+
+
+def normalize_coherence_text(text: str) -> str:
+    return re.sub(r"[\s\u3000，。！？、；：,.!?;:'\"“”‘’()（）\[\]【】]+", "", text or "")
 
 
 def restore_and_repair_protected_terms(text: str, mapping: dict[str, str], source: str) -> str:
@@ -853,17 +949,55 @@ def is_usable_zh(text: str) -> bool:
     return is_usable_translation(text, {"translation": {"target_language": "zh-CN"}})
 
 
-def is_usable_translation(text: str, config: dict) -> bool:
+VALID_SHORT_TRANSLATIONS = {"对", "是", "好", "嗯", "行", "不", "否"}
+SCRIPTLESS_UNIT_TOKENS = {
+    "v",
+    "mv",
+    "kv",
+    "hz",
+    "khz",
+    "mhz",
+    "ghz",
+    "a",
+    "ma",
+    "w",
+    "kw",
+    "nm",
+    "um",
+    "mm",
+    "cm",
+    "m",
+    "s",
+    "ms",
+    "us",
+    "ns",
+    "db",
+}
+
+
+def is_usable_translation(text: str, config: dict, source_text: str = "") -> bool:
     stripped = (text or "").strip()
     if not stripped:
         return False
     if stripped in {"...", "…", "N/A", "null", "None"}:
         return False
+    non_punct = re.sub(r"[\s\W_]+", "", stripped, flags=re.UNICODE)
+    if non_punct in VALID_SHORT_TRANSLATIONS:
+        return True
+    if source_allows_scriptless_translation(source_text) and re.search(r"\d", stripped):
+        return len(non_punct) >= 1
     script_pattern = target_script_pattern(config)
     if script_pattern and not re.search(script_pattern, stripped):
         return False
-    non_punct = re.sub(r"[\s\W_]+", "", stripped, flags=re.UNICODE)
     return len(non_punct) >= 2
+
+
+def source_allows_scriptless_translation(source_text: str) -> bool:
+    source = source_text or ""
+    if not re.search(r"\d", source):
+        return False
+    alpha_tokens = re.findall(r"[A-Za-z]+", source)
+    return all(token.lower() in SCRIPTLESS_UNIT_TOKENS for token in alpha_tokens)
 
 
 def target_script_pattern(config: dict) -> str:

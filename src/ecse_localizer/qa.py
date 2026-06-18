@@ -8,6 +8,7 @@ from .align import overlap_count
 from .ffmpeg_utils import media_duration
 from .glossary import GlossaryTerm
 from .subtitle_io import Segment
+from .translate import VALID_SHORT_TRANSLATIONS, source_allows_scriptless_translation
 from .translation_quality import assess_translation_quality, quality_flag_severity, target_uses_compact_script
 
 
@@ -39,7 +40,8 @@ def run_qa(
         issues.append({"type": "empty_translation", "severity": "high", "segments": empty_zh[:20]})
 
     for en, zh in zip(en_segments, zh_segments):
-        if not has_usable_translation_text(zh.text, config):
+        scriptless_ok = source_allows_scriptless_translation(en.text)
+        if not has_usable_translation_text(zh.text, config, en.text):
             issues.append({"type": "invalid_translation_text", "severity": "high", "segment_id": zh.id, "text": zh.text})
         if looks_like_non_translation_narration(zh.text):
             issues.append({"type": "non_translation_narration", "severity": "high", "segment_id": zh.id, "text": zh.text})
@@ -49,7 +51,11 @@ def run_qa(
         if missing:
             issues.append({"type": "number_mismatch", "severity": "medium", "segment_id": en.id, "missing": missing})
         ascii_letters = sum(1 for ch in zh.text if ch.isascii() and ch.isalpha())
-        if target_uses_compact_script(config) and ascii_letters / max(1, len(zh.text)) > float(config.get("qa", {}).get("flag_untranslated_ascii_ratio", 0.5)):
+        if (
+            target_uses_compact_script(config)
+            and not scriptless_ok
+            and ascii_letters / max(1, len(zh.text)) > float(config.get("qa", {}).get("flag_untranslated_ascii_ratio", 0.5))
+        ):
             issues.append({"type": "possibly_untranslated", "severity": "medium", "segment_id": zh.id})
         quality_flags = assess_translation_quality(en.text, zh.text, "", config)
         if quality_flags:
@@ -207,13 +213,15 @@ def is_actionable_trace_flag(flag: str) -> bool:
     return text.startswith(prefixes)
 
 
-def has_usable_translation_text(text: str, config: dict[str, Any] | None = None) -> bool:
+def has_usable_translation_text(text: str, config: dict[str, Any] | None = None, source_text: str = "") -> bool:
     stripped = (text or "").strip()
     if stripped in {"...", "…", "N/A", "null", "None"}:
         return False
-    if re.sub(r"[\s\W_]+", "", stripped, flags=re.UNICODE) in {"对", "是", "好", "嗯", "行"}:
-        return True
     non_punct = re.sub(r"[\s\W_]+", "", stripped, flags=re.UNICODE)
+    if non_punct in VALID_SHORT_TRANSLATIONS:
+        return True
+    if source_allows_scriptless_translation(source_text) and re.search(r"\d", stripped):
+        return len(non_punct) >= 1
     if target_uses_compact_script(config):
         if not COMPACT_TRANSLATION_SCRIPT_RE.search(stripped):
             return False
