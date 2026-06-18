@@ -358,14 +358,17 @@ def rescue_translate_single_segment(
             if missing:
                 flags.append("MISSING_NUMBER:" + ",".join(missing[:6]))
             limit = target_limit(seg, config)
-            zh = normalize_translation(zh, config)
+            zh_before_correction = zh
+            zh = normalize_translation(zh, config, seg.text)
+            if zh != normalize_translation(zh_before_correction, config):
+                flags.append("KNOWN_TERM_CORRECTION_APPLIED")
             if len(zh) > limit:
                 flags.append("ZH_OVER_TARGET_LENGTH")
                 if config.get("translation", {}).get("hard_truncate_over_limit", False):
                     zh = compress_to_limit(zh, limit, config)
             flags.extend(protected_term_flags(seg.text, zh))
             flags.extend(assess_translation_quality(seg.text, zh, lit, config))
-            return (seg, normalize_translation(lit, config), zh, flags, limit)
+            return (seg, normalize_translation(lit, config, seg.text), zh, flags, limit)
         except Exception as exc:
             if logger:
                 logger.warning("LLM single-segment rescue failed for segment %s attempt %d: %s", seg.id, attempt, exc)
@@ -499,14 +502,17 @@ def request_llm_chunk(
         if missing_numbers:
             flags.append("MISSING_NUMBER:" + ",".join(missing_numbers[:6]))
         limit = target_limit(seg, config)
-        zh = normalize_translation(zh, config)
+        zh_before_correction = zh
+        zh = normalize_translation(zh, config, seg.text)
+        if zh != normalize_translation(zh_before_correction, config):
+            flags.append("KNOWN_TERM_CORRECTION_APPLIED")
         if len(zh) > limit:
             flags.append("ZH_OVER_TARGET_LENGTH")
             if config.get("translation", {}).get("hard_truncate_over_limit", False):
                 zh = compress_to_limit(zh, limit, config)
         flags.extend(protected_term_flags(seg.text, zh))
         flags.extend(assess_translation_quality(seg.text, zh, lit, config))
-        results.append((seg, normalize_translation(lit, config), zh, flags, limit))
+        results.append((seg, normalize_translation(lit, config, seg.text), zh, flags, limit))
     return results
 
 
@@ -545,11 +551,11 @@ def fallback_or_rescue_segment(
         rescue_seg, lit, zh, flags, rescue_limit = rescue
         return (rescue_seg, lit, zh, flags + [reason_flag, "LOCAL_LLM_ROW_RESCUE"], rescue_limit)
     literal, flags = fallback_translate_text(seg.text, glossary)
-    lecture = normalize_translation(normalize_zh(literal), config)
+    lecture = normalize_translation(normalize_zh(literal), config, seg.text)
     flags.extend([reason_flag, "LLM_ROW_FAILED_FALLBACK", "LOCAL_RULE_FALLBACK_REVIEW_REQUIRED"])
     flags.extend(protected_term_flags(seg.text, lecture))
     flags.extend(assess_translation_quality(seg.text, lecture, literal, config))
-    return (seg, normalize_translation(literal, config), lecture, flags, limit)
+    return (seg, normalize_translation(literal, config, seg.text), lecture, flags, limit)
 
 
 def short_source_translation_overexpanded(source_text: str, candidate_zh: str, config: dict) -> bool:
@@ -585,6 +591,7 @@ def quality_requirements(config: dict) -> list[str]:
         fluency_rule,
         "Make adjacent subtitle fragments read as one coherent explanation.",
         "Keep the subtitle concise enough for TTS, but never compress away key facts.",
+        "Correct obvious course-domain ASR confusions only when the context is clear, e.g. SPC charts, Shewhart, and W. Edwards Deming.",
     ]
 
 
@@ -598,6 +605,7 @@ def default_style_guide(config: dict) -> str:
             "- Use the course glossary consistently; keep technical acronyms in their standard form when appropriate.\n"
             "- Preserve every number, unit, formula, variable, code token, file path, URL, person name, and paper title.\n"
             "- Make adjacent subtitle fragments read coherently with natural transitions in the target language.\n"
+            "- Correct clear course-domain ASR confusions conservatively, such as SPC charts, Shewhart, and W. Edwards Deming.\n"
             "- Do not add conclusions, evaluations, or explanations that are not present in the source."
         )
     return (
@@ -606,6 +614,7 @@ def default_style_guide(config: dict) -> str:
         "- 术语使用课程术语表；专业名词宁可保留英文缩写，也不要乱译。\n"
         "- 保留全部数字、单位、公式、变量、代码、路径、URL、人名、论文名。\n"
         "- 句子之间要有承接关系，可使用“这里”“也就是说”“接下来”“注意”等自然衔接词。\n"
+        "- 对上下文明确的课程领域 ASR 错词要保守纠正，例如 SPC 图表、Shewhart、W. Edwards Deming。\n"
         "- 不要添加原文没有的结论、评价或解释。"
     )
 
@@ -910,7 +919,7 @@ def sanitize_flags(flags: object) -> list[str]:
     cleaned: list[str] = []
     for flag in flags:
         text = str(flag).strip()
-        if not text or text.startswith("<KEEP_"):
+        if not text or text.startswith("<KEEP_") or re.fullmatch(r"<?KEEP_\d{3}>?", text):
             continue
         cleaned.append(text)
     return cleaned
@@ -1147,11 +1156,57 @@ def normalize_zh(text: str) -> str:
     return text
 
 
-def normalize_translation(text: str, config: dict) -> str:
+def normalize_translation(text: str, config: dict, source_text: str = "") -> str:
+    corrected = apply_known_term_corrections(text or "", source_text, config)
     if target_uses_compact_script(config):
-        return normalize_zh(text)
-    work = re.sub(r"\s+", " ", text or "").strip()
+        return normalize_zh(corrected)
+    work = re.sub(r"\s+", " ", corrected).strip()
     work = re.sub(r"\s+([,.;:!?])", r"\1", work)
+    return work
+
+
+def apply_known_term_corrections(text: str, source_text: str = "", config: dict | None = None) -> str:
+    """Repair narrow, high-confidence ASR confusions in technical lectures."""
+    cfg = config or {}
+    translation_cfg = cfg.get("translation", {}) if isinstance(cfg.get("translation", {}), dict) else {}
+    if translation_cfg.get("known_term_corrections", True) is False:
+        return text or ""
+    work = text or ""
+    source = source_text or ""
+
+    ascii_left = r"(?<![A-Za-z0-9])"
+    ascii_right = r"(?![A-Za-z0-9])"
+    work = re.sub(ascii_left + r"W\s*\.?\s*Edward(?:s)?\s*Dimming" + ascii_right, "W. Edwards Deming", work, flags=re.IGNORECASE)
+    work = re.sub(ascii_left + r"WEdwardDimming" + ascii_right, "W. Edwards Deming", work, flags=re.IGNORECASE)
+    work = re.sub(ascii_left + r"WEdwardDeming" + ascii_right, "W. Edwards Deming", work, flags=re.IGNORECASE)
+    work = re.sub(ascii_left + r"W\s*\.?\s*Edward\s*Deming" + ascii_right, "W. Edwards Deming", work, flags=re.IGNORECASE)
+    work = re.sub(ascii_left + r"W\.?EdwardDeming" + ascii_right, "W. Edwards Deming", work, flags=re.IGNORECASE)
+    work = re.sub(ascii_left + r"(?:Sue\s*hart|Suehart|Shuhart|Schuhart)" + ascii_right, "Shewhart", work, flags=re.IGNORECASE)
+
+    combined = work + " " + source
+    near_deming_confusion = re.search(
+        r"(Shewhart|Suehart|Shuhart|Schuhart|Stuart).{0,32}(Dimming|Deming)|(Dimming|Deming).{0,32}(Shewhart|Suehart|Shuhart|Schuhart|Stuart)",
+        combined,
+        flags=re.IGNORECASE,
+    )
+    if near_deming_confusion:
+        work = re.sub(ascii_left + r"Stuart" + ascii_right, "Shewhart", work, flags=re.IGNORECASE)
+        work = re.sub(ascii_left + r"Dimming" + ascii_right, "Deming", work, flags=re.IGNORECASE)
+
+    deming_context = re.search(
+        r"Shewhart|statistical process control|SPC|control charts?|Western Electric|14\s*(?:points?|点)|quality product",
+        combined,
+        flags=re.IGNORECASE,
+    )
+    if deming_context:
+        work = re.sub(ascii_left + r"Dimming" + ascii_right, "Deming", work, flags=re.IGNORECASE)
+
+    spc_chart_context = re.search(r"\b(?:SBC|SVC)\s*charts?\b|(?:SBC|SVC)\s*图表", combined, flags=re.IGNORECASE)
+    if spc_chart_context:
+        work = re.sub(r"\b(?:SBC|SVC)\s*(charts?)\b", r"SPC \1", work, flags=re.IGNORECASE)
+        work = re.sub(r"\b(?:SBC|SVC)\s*图表", "SPC图表", work, flags=re.IGNORECASE)
+        work = re.sub(r"(?:SBC|SVC)图表", "SPC图表", work, flags=re.IGNORECASE)
+
     return work
 
 

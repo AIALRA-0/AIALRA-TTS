@@ -19,6 +19,8 @@ AWKWARD_ZH_PATTERNS: list[tuple[str, str]] = [
     (r"如何多层布线", "AWKWARD_TECHNICAL_CALQUE"),
     (r"(?:这个|那个|这些|那些)东西", "VAGUE_OBJECT_REFERENCE"),
     (r"被用来去|用来去|去进行|进行一个", "ENGLISH_WORD_ORDER_CALQUE"),
+    (r"Suehart|WEdwardDimming|W\.?Edward(?:s)?Dimming|Stuart(?:和|与|and)Dimming", "KNOWN_NAME_ASR_CONFUSION"),
+    (r"(?:SBC|SVC)(?:图表|charts?)", "KNOWN_SPC_CHART_ASR_CONFUSION"),
 ]
 COMPACT_TARGET_SCRIPT_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
 

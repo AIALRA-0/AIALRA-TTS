@@ -55,6 +55,7 @@ translation:
   style: "natural_chinese_lecture"
   quality_mode: "best_quality"
   context_window_segments: 3
+  known_term_corrections: true
   style_sample_segments: 80
   paragraph_max_gap_seconds: 1.2
   paragraph_max_source_chars: 900

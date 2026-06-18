@@ -2,6 +2,7 @@ import json
 
 from ecse_localizer.subtitle_io import Segment
 from ecse_localizer.translate import (
+    apply_known_term_corrections,
     build_translation_paragraphs,
     coherence_rejection_flags,
     context_window,
@@ -401,6 +402,40 @@ def test_non_chinese_target_translation_is_accepted_and_keeps_spaces():
     assert "sensor_readout.py" in lecture
     assert "HIGH_ASCII_RATIO_TRANSLATION" not in flags
     assert not any(flag.startswith("MISSING_PROTECTED_TERM") for flag in flags)
+
+
+def test_known_spc_asr_name_confusions_are_corrected():
+    text = "因此，在1938年，Suehart与WEdwardDimming合作。后来Stuart and Dimming推广了SVC图表。"
+
+    corrected = apply_known_term_corrections(
+        text,
+        "So in 1938 Suehart worked with WEdwardDimming. Stuart and Dimming used SVC charts.",
+        {"translation": {"target_language": "zh-CN"}},
+    )
+
+    assert "Shewhart" in corrected
+    assert "W. Edwards Deming" in corrected
+    assert "Dimming" not in corrected
+    assert "Stuart and" not in corrected
+    assert "SPC图表" in corrected
+
+
+def test_known_spc_asr_deming_variants_are_corrected():
+    corrected = apply_known_term_corrections(
+        "Shewhart与W.EdwardDeming合作。作为Dimming的14点之一。",
+        "So in 1938, Shewhart collaborated with W Edward Dimming. Dimming's 14 points.",
+        {"translation": {"target_language": "zh-CN"}},
+    )
+
+    assert "W. Edwards Deming" in corrected
+    assert "Deming的14点" in corrected
+    assert "Dimming" not in corrected
+
+
+def test_sanitize_flags_drops_protected_placeholder_flags():
+    from ecse_localizer.translate import sanitize_flags
+
+    assert sanitize_flags(["KEEP_001", "<KEEP_002>", "COHERENCE_PASS"]) == ["COHERENCE_PASS"]
 
 
 class FakeLLMClient:
