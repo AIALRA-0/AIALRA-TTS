@@ -264,6 +264,7 @@ def translate_chunk_with_retries(
             coherence_prompt,
             paragraph_by_segment or {},
             logger,
+            glossary,
         )
     except Exception as exc:
         if logger:
@@ -376,6 +377,7 @@ def request_llm_chunk(
     coherence_prompt: str,
     paragraph_by_segment: dict[int, TranslationParagraph],
     logger: logging.Logger | None = None,
+    glossary: dict[str, GlossaryTerm] | None = None,
 ) -> list[tuple[Segment, str, str, list[str], int]]:
     protected = []
     maps = []
@@ -432,7 +434,7 @@ def request_llm_chunk(
 
     results: list[tuple[Segment, str, str, list[str], int]] = []
     low_capacity = any(marker in (client.model or "").lower() for marker in ("0.5b", "1b"))
-    for seg, mapping in zip(chunk, maps):
+    for idx, (seg, mapping) in enumerate(zip(chunk, maps)):
         flags: list[str] = []
         literal_row = literal_by_id.get(seg.id, {})
         rewrite_row = rewrite_by_id.get(seg.id, {})
@@ -442,9 +444,39 @@ def request_llm_chunk(
         if low_capacity:
             flags.append("LOW_CAPACITY_LLM_REVIEW_REQUIRED")
         if not is_usable_translation(lit, config) or is_forbidden_non_translation(lit):
-            raise RuntimeError(f"unusable literal translation for segment {seg.id}: {lit[:80]}")
+            if logger:
+                logger.warning("LLM row fallback for segment %s: unusable literal translation: %s", seg.id, lit[:80])
+            results.append(
+                fallback_or_rescue_segment(
+                    all_segments,
+                    chunk_start + idx,
+                    seg,
+                    glossary_text,
+                    glossary or {},
+                    config,
+                    client,
+                    logger,
+                    "LLM_ROW_UNUSABLE_LITERAL_FALLBACK",
+                )
+            )
+            continue
         if not is_usable_translation(zh, config) or is_forbidden_non_translation(zh):
-            raise RuntimeError(f"unusable lecture translation for segment {seg.id}: {zh[:80]}")
+            if logger:
+                logger.warning("LLM row fallback for segment %s: unusable lecture translation: %s", seg.id, zh[:80])
+            results.append(
+                fallback_or_rescue_segment(
+                    all_segments,
+                    chunk_start + idx,
+                    seg,
+                    glossary_text,
+                    glossary or {},
+                    config,
+                    client,
+                    logger,
+                    "LLM_ROW_UNUSABLE_LECTURE_FALLBACK",
+                )
+            )
+            continue
         missing_numbers = numbers_missing(seg.text, zh)
         if missing_numbers:
             flags.append("MISSING_NUMBER:" + ",".join(missing_numbers[:6]))
@@ -458,6 +490,33 @@ def request_llm_chunk(
         flags.extend(assess_translation_quality(seg.text, zh, lit, config))
         results.append((seg, normalize_translation(lit, config), zh, flags, limit))
     return results
+
+
+def fallback_or_rescue_segment(
+    all_segments: list[Segment],
+    absolute_index: int,
+    seg: Segment,
+    glossary_text: str,
+    glossary: dict[str, GlossaryTerm],
+    config: dict,
+    client: LocalLLMClient,
+    logger: logging.Logger | None,
+    reason_flag: str,
+) -> tuple[Segment, str, str, list[str], int]:
+    limit = target_limit(seg, config)
+    safe_phrase = safe_short_phrase_translation(seg.text)
+    if safe_phrase:
+        return (seg, safe_phrase, safe_phrase, ["LOCAL_SAFE_PHRASE_TRANSLATION", reason_flag], limit)
+    rescue = rescue_translate_single_segment(all_segments, absolute_index, seg, glossary_text, config, client, logger)
+    if rescue:
+        rescue_seg, lit, zh, flags, rescue_limit = rescue
+        return (rescue_seg, lit, zh, flags + [reason_flag, "LOCAL_LLM_ROW_RESCUE"], rescue_limit)
+    literal, flags = fallback_translate_text(seg.text, glossary)
+    lecture = normalize_translation(normalize_zh(literal), config)
+    flags.extend([reason_flag, "LLM_ROW_FAILED_FALLBACK", "LOCAL_RULE_FALLBACK_REVIEW_REQUIRED"])
+    flags.extend(protected_term_flags(seg.text, lecture))
+    flags.extend(assess_translation_quality(seg.text, lecture, literal, config))
+    return (seg, normalize_translation(literal, config), lecture, flags, limit)
 
 
 def read_optional_prompt(path: Path) -> str:

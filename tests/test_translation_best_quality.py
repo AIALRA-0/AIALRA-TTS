@@ -227,6 +227,41 @@ def test_coherence_allows_normal_short_source_polish():
     assert "COHERENCE_REJECTED_NEIGHBOR_LEAK" not in flags
 
 
+def test_llm_chunk_keeps_good_rows_when_one_row_is_unusable():
+    config = {
+        "translation": {
+            "target_language": "zh-CN",
+            "max_zh_chars_per_second": 80,
+            "max_zh_chars_per_subtitle_line": 80,
+        }
+    }
+    segments = [
+        Segment(1, 0.0, 1.0, "Okay."),
+        Segment(2, 1.0, 4.0, "Statistical process control reduces variation."),
+    ]
+    fake = FakeOneBadRowClient()
+
+    results = request_llm_chunk(
+        segments,
+        0,
+        segments,
+        "",
+        config,
+        fake,
+        "literal",
+        "rewrite",
+        "style",
+        "",
+        {},
+    )
+
+    assert len(results) == 2
+    assert results[0][2] == "好的。"
+    assert "LLM_ROW_UNUSABLE_LECTURE_FALLBACK" in results[0][3]
+    assert results[1][2] == "统计过程控制可以减少波动。"
+    assert "LLM_ROW_UNUSABLE_LECTURE_FALLBACK" not in results[1][3]
+
+
 def test_non_chinese_target_translation_is_accepted_and_keeps_spaces():
     config = {
         "translation": {
@@ -321,5 +356,26 @@ class FakeSpanishLLMClient:
                     "zh_lecture": "Primero usamos <KEEP_001> y luego ejecutamos <KEEP_002>.",
                     "flags": [],
                 }
+            ]
+        }
+
+
+class FakeOneBadRowClient:
+    model = "qwen2.5:14b-instruct"
+
+    def json_chat(self, _system, user, schema):
+        payload = json.loads(user)
+        ids = [int(row["id"]) for row in payload["segments"]]
+        if "zh_literal" in schema:
+            return {
+                "segments": [
+                    {"id": sid, "zh_literal": "好的。" if sid == 1 else "统计过程控制可以减少波动。", "flags": []}
+                    for sid in ids
+                ]
+            }
+        return {
+            "segments": [
+                {"id": sid, "zh_lecture": "（NO）" if sid == 1 else "统计过程控制可以减少波动。", "flags": []}
+                for sid in ids
             ]
         }
