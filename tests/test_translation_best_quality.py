@@ -806,6 +806,18 @@ def test_ordinal_protected_token_not_appended_when_translated():
     assert "第一次" in restored
     assert "1st" not in restored
 
+    first_transition = restore_and_repair_protected_terms(
+        "首先，我们要讲的是历史部分。",
+        {"<KEEP_001>": "1st"},
+        "First, this is the 1st history part.",
+    )
+    assert "1st" not in first_transition
+
+    assert numbers_missing("during his 1st part of this", "在他的第一部分工作中") == []
+    assert protected_term_flags("during his 1st part of this", "在他的第一部分工作中") == []
+    assert numbers_missing("Put your customers 1st.", "把客户放在第一位。") == []
+    assert protected_term_flags("Put your customers 1st.", "把客户放在第一位。") == []
+
 
 def test_yield_range_spc_controls_has_natural_percent_phrase():
     normalized = normalize_translation(

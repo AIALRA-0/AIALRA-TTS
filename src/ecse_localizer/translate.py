@@ -1064,6 +1064,7 @@ def protected_term_flags(source: str, zh: str) -> list[str]:
         term
         for term in protected_terms_missing(source, zh)
         if not known_spc_asr_term_equivalent(term, source, zh)
+        and not protected_numeric_equivalent(term, zh)
     ]
     if not missing:
         return []
@@ -1111,9 +1112,13 @@ def protected_numeric_equivalent(wanted: str, restored: str) -> bool:
     ordinal = re.fullmatch(r"(\d+)(?:st|nd|rd|th)", wanted or "", flags=re.IGNORECASE)
     if not ordinal:
         return False
-    number = int(ordinal.group(1))
+    return ordinal_number_text_equivalent(ordinal.group(1), restored)
+
+
+def ordinal_number_text_equivalent(number_text: str, restored: str) -> bool:
+    number = int(number_text)
     if number == 1:
-        return bool(re.search(r"第\s*一\s*次|第\s*一(?![十百千万亿])", restored or ""))
+        return bool(re.search(r"首先|第\s*一\s*(?:次|个|位|部分|点|节|章|步)?|一\s*开始", restored or ""))
     chinese_digits = {
         2: "二",
         3: "三",
@@ -1334,6 +1339,7 @@ def numbers_missing(source: str, translated: str) -> list[str]:
         and not decade_number_equivalent(n, source, translated)
         and not leading_decimal_number_equivalent(n, source, translated)
         and not magnitude_number_equivalent(n, source, translated)
+        and not ordinal_number_equivalent(n, source, translated)
     ]
 
 
@@ -1343,6 +1349,14 @@ def leading_decimal_number_equivalent(number: str, source: str, translated: str)
     if not re.search(rf"(?<!\d)\.{re.escape(number)}\s*%?", source or ""):
         return False
     return bool(re.search(rf"(?<!\d)0\.{re.escape(number)}\s*%?", translated or ""))
+
+
+def ordinal_number_equivalent(number: str, source: str, translated: str) -> bool:
+    if not re.fullmatch(r"\d+", number or ""):
+        return False
+    if not re.search(rf"\b{re.escape(number)}(?:st|nd|rd|th)\b", source or "", flags=re.IGNORECASE):
+        return False
+    return ordinal_number_text_equivalent(number, translated)
 
 
 def magnitude_number_equivalent(number: str, source: str, translated: str) -> bool:
