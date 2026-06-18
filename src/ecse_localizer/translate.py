@@ -448,7 +448,7 @@ def request_llm_chunk(
         rewrite_row = rewrite_by_id.get(seg.id, {})
         lit = restore_and_repair_protected_terms(str(literal_row.get("zh_literal", "")), mapping, seg.text)
         zh = restore_and_repair_protected_terms(str(rewrite_row.get("zh_lecture", "")), mapping, seg.text)
-        neighbor_literal_zh = chunk_neighbor_literal_zh(chunk, literal_by_id, idx)
+        neighbor_literal_zh = chunk_neighbor_literal_zh(chunk, literal_by_id, maps, idx)
         flags.extend(sanitize_flags(literal_row.get("flags", [])) + sanitize_flags(rewrite_row.get("flags", [])))
         if low_capacity:
             flags.append("LOW_CAPACITY_LLM_REVIEW_REQUIRED")
@@ -513,12 +513,15 @@ def request_llm_chunk(
 def chunk_neighbor_literal_zh(
     chunk: list[Segment],
     literal_by_id: dict[int, dict[str, Any]],
+    maps: list[dict[str, str]],
     idx: int,
 ) -> list[str]:
     values: list[str] = []
     for neighbor_idx in (idx - 1, idx + 1):
         if 0 <= neighbor_idx < len(chunk):
-            values.append(str(literal_by_id.get(chunk[neighbor_idx].id, {}).get("zh_literal", "")))
+            neighbor = chunk[neighbor_idx]
+            raw = str(literal_by_id.get(neighbor.id, {}).get("zh_literal", ""))
+            values.append(restore_and_repair_protected_terms(raw, maps[neighbor_idx], neighbor.text))
     return values
 
 
