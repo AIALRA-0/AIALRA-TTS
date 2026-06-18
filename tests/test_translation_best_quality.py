@@ -821,9 +821,11 @@ def test_ordinal_protected_token_not_appended_when_translated():
     assert protected_term_flags("Put your customers 1st.", "把客户放在第一位。") == []
     assert numbers_missing("at 1st when you're starting off", "在新产品初期") == []
     assert protected_term_flags("at 1st when you're starting off", "在新产品初期") == []
+    assert numbers_missing("at 1st when you're starting off", "在刚开始新产品时") == []
+    assert protected_term_flags("at 1st when you're starting off", "在刚开始新产品时") == []
 
     initial_phase = restore_and_repair_protected_terms(
-        "但在新产品初期，你可能需要坚持单一供应商。",
+        "但是，在刚开始新产品时，你想要看看是否可以坚持单一供应商。",
         {"<KEEP_001>": "1st"},
         "but it was at 1st when you're starting off with new products",
     )
