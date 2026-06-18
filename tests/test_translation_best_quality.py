@@ -787,6 +787,14 @@ def test_data_sampling_stutter_is_naturalized_after_llm_output():
 
     assert normalized == "所以，也就是数据采样。"
 
+    truncated = normalize_translation(
+        "所以数据采集...",
+        {"translation": {"target_language": "zh-CN"}},
+        "So data, so data sampling.",
+    )
+
+    assert truncated == "所以，也就是数据采样。"
+
 
 def test_decade_numbers_do_not_trigger_missing_number_flags():
     assert numbers_missing("Back in the 1970s, quality improved.", "在20世纪70年代，质量提高了。") == []
