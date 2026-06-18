@@ -1311,6 +1311,7 @@ def numbers_missing(source: str, translated: str) -> list[str]:
         if n not in translated_nums
         and not decade_number_equivalent(n, source, translated)
         and not leading_decimal_number_equivalent(n, source, translated)
+        and not magnitude_number_equivalent(n, source, translated)
     ]
 
 
@@ -1320,6 +1321,21 @@ def leading_decimal_number_equivalent(number: str, source: str, translated: str)
     if not re.search(rf"(?<!\d)\.{re.escape(number)}\s*%?", source or ""):
         return False
     return bool(re.search(rf"(?<!\d)0\.{re.escape(number)}\s*%?", translated or ""))
+
+
+def magnitude_number_equivalent(number: str, source: str, translated: str) -> bool:
+    if not re.fullmatch(r"\d+(?:\.\d+)?", number or ""):
+        return False
+    if not re.search(rf"\b{re.escape(number)}\s+million\b", source or "", flags=re.IGNORECASE):
+        return False
+    value = float(number)
+    wan = value * 100
+    patterns = [rf"{re.escape(number)}\s*百万"]
+    if wan.is_integer():
+        patterns.append(rf"{int(wan)}\s*万")
+    else:
+        patterns.append(rf"{wan:g}\s*万")
+    return any(re.search(pattern, translated or "") for pattern in patterns)
 
 
 def decade_number_equivalent(number: str, source: str, translated: str) -> bool:

@@ -770,6 +770,7 @@ def test_decade_numbers_do_not_trigger_missing_number_flags():
     assert numbers_missing("So in the 1920s.", "所以到了20世纪20年代。") == []
     assert numbers_missing("In the 1980s, transistor counts grew.", "上世纪八十年代，晶体管数量增长。") == []
     assert numbers_missing("There is a .3% chance.", "有0.3%的可能性。") == []
+    assert numbers_missing("Close to 6 million telephones.", "接近600万部电话。") == []
     assert numbers_missing("Use 3.3V.", "使用电压。") == ["3.3"]
 
 
