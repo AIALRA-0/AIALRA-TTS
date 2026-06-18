@@ -1024,7 +1024,15 @@ def known_spc_asr_term_equivalent(term: str, source: str, zh: str) -> bool:
         return False
     if not re.search(r"\bSPC\b|SPC图表|SPC控制", zh or "", flags=re.IGNORECASE):
         return False
-    return bool(re.search(r"\b(?:SBC|SVC)\s*(?:charts?|control)\b|(?:SBC|SVC)\s*图表|(?:SBC|SVC)\s*控制", source or "", flags=re.IGNORECASE))
+    return bool(
+        re.search(
+            r"\b(?:SBC|SVC)\s*(?:charts?|control)\b|(?:charts?|control)\s*(?:with|for|using|your)?\s*(?:SBC|SVC)\b|"
+            r"\b(?:SBC|SVC)\b.{0,32}\bcharts?\b|\bcharts?\b.{0,32}\b(?:SBC|SVC)\b|"
+            r"(?:SBC|SVC)\s*图表|(?:SBC|SVC)\s*控制",
+            source or "",
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def extract_acronyms(text: str) -> list[str]:
@@ -1304,6 +1312,9 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = re.sub(r"休哈特", "Shewhart", work)
     if re.search(r"W\s*\.?\s*Edwards?\s*D(?:eming|imming)|WEdwards?D(?:eming|imming)", source, flags=re.IGNORECASE):
         work = re.sub(r"W[·\.]?\s*爱德华[·\.]?\s*戴明", "W. Edwards Deming", work)
+    if re.search(r"\b(?:over\s+)?a\s+hundred\s+thousand\b|\b(?:over\s+)?one\s+hundred\s+thousand\b", source, flags=re.IGNORECASE):
+        work = re.sub(r"超过了?一万", "超过十万", work)
+        work = re.sub(r"一万", "十万", work)
 
     combined = work + " " + source
     near_deming_confusion = re.search(
@@ -1329,7 +1340,9 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
     spc_chart_context = re.search(
         r"\b(?:SBC|SVC)\s*(?:charts?|control)\b|(?:SBC|SVC)\s*图表|(?:SBC|SVC)\s*控制|"
         r"(?:statistical|quality|process|control|charts?|semiconductor).{0,48}\b(?:SBC|SVC)\b|"
-        r"\b(?:SBC|SVC)\b.{0,48}(?:statistical|quality|process|control|charts?|semiconductor)",
+        r"\b(?:SBC|SVC)\b.{0,48}(?:statistical|quality|process|control|charts?|semiconductor)|"
+        r"(?:统计过程控制|统计|质量|控制|图表|半导体).{0,48}\b(?:SBC|SVC)\b|"
+        r"\b(?:SBC|SVC)\b.{0,48}(?:统计过程控制|统计|质量|控制|图表|半导体)",
         combined,
         flags=re.IGNORECASE,
     )

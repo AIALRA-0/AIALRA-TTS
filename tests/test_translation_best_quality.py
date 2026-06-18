@@ -464,6 +464,18 @@ def test_known_spc_control_variants_are_corrected_without_missing_term_flag():
     assert "SBC" not in corrected
     assert "SVC" not in corrected
     assert protected_term_flags("SBC control and SVC charts", "SPC控制和SPC图表") == []
+    assert protected_term_flags("That you're using for your SBC to do your charts.", "你用来做SPC图表。") == []
+
+
+def test_hundred_thousand_phrase_is_not_normalized_to_ten_thousand():
+    normalized = normalize_translation(
+        "晶体管数量超过了一万。",
+        {"translation": {"target_language": "zh-CN"}},
+        "By then the transistor count was over a hundred thousand.",
+    )
+
+    assert "超过十万" in normalized
+    assert "一万" not in normalized
 
 
 def test_decade_numbers_do_not_trigger_missing_number_flags():
