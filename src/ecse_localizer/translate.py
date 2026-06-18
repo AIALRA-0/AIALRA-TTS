@@ -1015,7 +1015,7 @@ def restore_and_repair_protected_terms(text: str, mapping: dict[str, str], sourc
     for wanted in [value for value in mapping.values() if is_numeric_token(value)]:
         compact_wanted = re.sub(r"\s+", "", wanted)
         compact_restored = re.sub(r"\s+", "", restored)
-        if compact_wanted not in compact_restored:
+        if compact_wanted not in compact_restored and not protected_numeric_equivalent(wanted, restored):
             restored = append_before_sentence_punctuation(restored, f"（{wanted}）")
     return restored
 
@@ -1105,6 +1105,28 @@ def is_numeric_token(text: str) -> bool:
             text or "",
         )
     )
+
+
+def protected_numeric_equivalent(wanted: str, restored: str) -> bool:
+    ordinal = re.fullmatch(r"(\d+)(?:st|nd|rd|th)", wanted or "", flags=re.IGNORECASE)
+    if not ordinal:
+        return False
+    number = int(ordinal.group(1))
+    if number == 1:
+        return bool(re.search(r"第\s*一\s*次|第\s*一(?![十百千万亿])", restored or ""))
+    chinese_digits = {
+        2: "二",
+        3: "三",
+        4: "四",
+        5: "五",
+        6: "六",
+        7: "七",
+        8: "八",
+        9: "九",
+        10: "十",
+    }
+    chinese = chinese_digits.get(number)
+    return bool(chinese and re.search(rf"第\s*{chinese}", restored or ""))
 
 
 def append_before_sentence_punctuation(text: str, suffix: str) -> str:
@@ -1432,6 +1454,8 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
     work = normalize_source_million_quantity_phrasing(work, source)
     if re.search(r"\bso\s+data\s*,?\s+so\s+data\s+sampling\b", source, flags=re.IGNORECASE):
         work = "所以，也就是数据采样。"
+    if re.search(r"\b90\s*%\s+yield\s+range\b.{0,120}\bSBC\s+controls?\b", source, flags=re.IGNORECASE):
+        work = "当良率达到90%左右时，你就会开始减少一些SPC控制措施。"
     if re.search(r"\b(?:SBC|SVC)\b.{0,96}\bKPIs?\b.{0,96}\bPDK\b|\bPDK\b.{0,96}\bKPIs?\b.{0,96}\b(?:SBC|SVC)\b", source, flags=re.IGNORECASE):
         work = re.sub(
             r"[^。！？]*(?:SPC|SBC|SVC)\s*应该为[^。！？]*(?:(?:关键性能指标|KPIs?)[^。！？]*(?:PDK|工艺设计套件)|(?:PDK|工艺设计套件)[^。！？]*(?:关键性能指标|KPIs?))[^。！？]*实施[^。！？]*[。！？]?",

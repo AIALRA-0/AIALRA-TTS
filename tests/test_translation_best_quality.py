@@ -796,6 +796,27 @@ def test_data_sampling_stutter_is_naturalized_after_llm_output():
     assert truncated == "所以，也就是数据采样。"
 
 
+def test_ordinal_protected_token_not_appended_when_translated():
+    restored = restore_and_repair_protected_terms(
+        "当我第一次进入这个行业时，日本人在这方面把我们远远甩在后面。",
+        {"<KEEP_001>": "1st"},
+        "when I 1st started in the industry in the early eighties",
+    )
+
+    assert "第一次" in restored
+    assert "1st" not in restored
+
+
+def test_yield_range_spc_controls_has_natural_percent_phrase():
+    normalized = normalize_translation(
+        "当良率达到一定范围时，你就会开始减少一些SPC控制措施（90）。",
+        {"translation": {"target_language": "zh-CN"}},
+        "maybe the 90 % yield range, then you'll start to eliminate a lot of these some of the the SBC controls,",
+    )
+
+    assert normalized == "当良率达到90%左右时，你就会开始减少一些SPC控制措施。"
+
+
 def test_decade_numbers_do_not_trigger_missing_number_flags():
     assert numbers_missing("Back in the 1970s, quality improved.", "在20世纪70年代，质量提高了。") == []
     assert numbers_missing("Back in the 1970s, quality improved.", "上世纪70年代，质量提高了。") == []
