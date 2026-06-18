@@ -648,6 +648,13 @@ def test_known_spc_control_variants_are_corrected_without_missing_term_flag():
     assert "SPC" in kpi_corrected
     assert "SVC" not in kpi_corrected
 
+    natural_kpi = normalize_translation(
+        "SPC应该为设计中在PDK中建立的关键性能指标（KPIs）实施。",
+        {"translation": {"target_language": "zh-CN"}},
+        "SVC should be implemented for the key performance indicators, the KPIs of the design established in the PDK, the process design kit.",
+    )
+    assert natural_kpi == "对PDK中为设计定义的关键性能指标（KPI），也应该实施SPC。"
+
 
 def test_us_manufacturer_spc_translation_does_not_keep_misplaced_us_parenthetical():
     source = "So, a lot of the US manufacturers started incorporating more SBC."
