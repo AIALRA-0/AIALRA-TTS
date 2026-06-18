@@ -448,6 +448,7 @@ def request_llm_chunk(
         rewrite_row = rewrite_by_id.get(seg.id, {})
         lit = restore_and_repair_protected_terms(str(literal_row.get("zh_literal", "")), mapping, seg.text)
         zh = restore_and_repair_protected_terms(str(rewrite_row.get("zh_lecture", "")), mapping, seg.text)
+        neighbor_literal_zh = chunk_neighbor_literal_zh(chunk, literal_by_id, idx)
         flags.extend(sanitize_flags(literal_row.get("flags", [])) + sanitize_flags(rewrite_row.get("flags", [])))
         if low_capacity:
             flags.append("LOW_CAPACITY_LLM_REVIEW_REQUIRED")
@@ -476,6 +477,7 @@ def request_llm_chunk(
             not is_usable_translation(zh, config)
             or is_forbidden_non_translation(zh)
             or short_source_translation_overexpanded(seg.text, zh, config)
+            or coherence_contains_neighbor_literal(zh, lit, neighbor_literal_zh)
         ):
             if logger:
                 logger.warning("LLM row fallback for segment %s: unusable lecture translation: %s", seg.id, zh[:80])
@@ -506,6 +508,18 @@ def request_llm_chunk(
         flags.extend(assess_translation_quality(seg.text, zh, lit, config))
         results.append((seg, normalize_translation(lit, config), zh, flags, limit))
     return results
+
+
+def chunk_neighbor_literal_zh(
+    chunk: list[Segment],
+    literal_by_id: dict[int, dict[str, Any]],
+    idx: int,
+) -> list[str]:
+    values: list[str] = []
+    for neighbor_idx in (idx - 1, idx + 1):
+        if 0 <= neighbor_idx < len(chunk):
+            values.append(str(literal_by_id.get(chunk[neighbor_idx].id, {}).get("zh_literal", "")))
+    return values
 
 
 def fallback_or_rescue_segment(

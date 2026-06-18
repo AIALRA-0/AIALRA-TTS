@@ -295,6 +295,39 @@ def test_llm_chunk_rejects_short_source_overexpanded_row():
     assert results[1][2] == "统计过程控制可以减少波动。"
 
 
+def test_llm_chunk_rejects_rewrite_that_includes_neighbor_literal():
+    config = {
+        "translation": {
+            "target_language": "zh-CN",
+            "max_zh_chars_per_second": 80,
+            "max_zh_chars_per_subtitle_line": 80,
+        }
+    }
+    segments = [
+        Segment(1, 0.0, 3.0, "I was working with SPC charts."),
+        Segment(2, 3.0, 6.0, "The next job was about MRAM tools."),
+    ]
+    fake = FakeNeighborLeakRewriteClient()
+
+    results = request_llm_chunk(
+        segments,
+        0,
+        segments,
+        "",
+        config,
+        fake,
+        "literal",
+        "rewrite",
+        "style",
+        "",
+        {},
+    )
+
+    assert results[0][2] == "我当时在使用SPC图表。"
+    assert "LLM_ROW_UNUSABLE_LECTURE_FALLBACK" in results[0][3]
+    assert results[1][2] == "下一份工作是关于MRAM工具的。"
+
+
 def test_non_chinese_target_translation_is_accepted_and_keeps_spaces():
     config = {
         "translation": {
@@ -433,6 +466,32 @@ class FakeShortSourceOverexpandedClient:
         return {
             "segments": [
                 {"id": sid, "zh_lecture": overexpanded if sid == 1 else "统计过程控制可以减少波动。", "flags": []}
+                for sid in ids
+            ]
+        }
+
+
+class FakeNeighborLeakRewriteClient:
+    model = "qwen2.5:14b-instruct"
+
+    def json_chat(self, _system, user, schema):
+        payload = json.loads(user)
+        if "segments" not in payload:
+            return {"id": 1, "zh_literal": "我当时在使用SPC图表。", "zh_lecture": "我当时在使用SPC图表。", "flags": []}
+        ids = [int(row["id"]) for row in payload["segments"]]
+        literals = {
+            1: "我当时在使用SPC图表。",
+            2: "下一份工作是关于MRAM工具的。",
+        }
+        if "zh_literal" in schema:
+            return {"segments": [{"id": sid, "zh_literal": literals[sid], "flags": []} for sid in ids]}
+        return {
+            "segments": [
+                {
+                    "id": sid,
+                    "zh_lecture": literals[1] + literals[2] if sid == 1 else literals[2],
+                    "flags": [],
+                }
                 for sid in ids
             ]
         }
