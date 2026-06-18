@@ -409,7 +409,7 @@ def test_non_chinese_target_translation_is_accepted_and_keeps_spaces():
 
 
 def test_known_spc_asr_name_confusions_are_corrected():
-    text = "因此，在1938年，Suehart与WEdwardDimming合作。后来Stuart and Dimming推广了SVC图表。战后的日本受到了斯图尔特和迪明的启发。"
+    text = "因此，在1938年，Suehart与WEdwardDimming合作。休哈特与W·爱德华·戴明合作。后来Stuart and Dimming推广了SVC图表。战后的日本受到了斯图尔特和迪明的启发。"
 
     corrected = apply_known_term_corrections(
         text,
@@ -423,6 +423,8 @@ def test_known_spc_asr_name_confusions_are_corrected():
     assert "Stuart and" not in corrected
     assert "斯图尔特" not in corrected
     assert "迪明" not in corrected
+    assert "休哈特" not in corrected
+    assert "戴明" not in corrected
     assert "SPC图表" in corrected
 
 
@@ -548,6 +550,41 @@ def test_llm_chunk_rejects_known_name_leak_from_next_segment():
     assert "LLM_ROW_UNUSABLE_LECTURE_FALLBACK" in flags
 
 
+def test_llm_chunk_rejects_chinese_known_name_leak_after_normalization():
+    config = {
+        "translation": {
+            "target_language": "zh-CN",
+            "max_zh_chars_per_second": 80,
+            "max_zh_chars_per_subtitle_line": 80,
+        }
+    }
+    all_segments = [
+        Segment(36, 0.0, 3.0, "If the control charts were within the three signal limits, that typically was quality enough."),
+        Segment(37, 3.0, 6.0, "So in 1938, Suehart collaborated with W Edward Dimming."),
+    ]
+    fake = FakeChineseKnownNameLeakClient()
+
+    results = request_llm_chunk(
+        all_segments,
+        0,
+        [all_segments[0]],
+        "",
+        config,
+        fake,
+        "literal",
+        "rewrite",
+        "style",
+        "",
+        {},
+    )
+
+    _, _, lecture, flags, _ = results[0]
+    assert "Shewhart" not in lecture
+    assert "Deming" not in lecture
+    assert lecture == "如果控制图在三个信号限制内，通常就足以保证质量。"
+    assert {"LLM_ROW_CONTEXT_ONLY_KNOWN_TERM_FALLBACK", "LLM_ROW_UNUSABLE_LECTURE_FALLBACK"} & set(flags)
+
+
 def test_sanitize_flags_drops_protected_placeholder_flags():
     from ecse_localizer.translate import sanitize_flags
 
@@ -651,6 +688,32 @@ class FakeKnownNameLeakClient:
                 {
                     "id": sid,
                     "zh_lecture": "如果控制图在三个信号限制内，通常就足以保证质量。1938年，Shewhart与W.EdwardsDeming合作。",
+                    "flags": [],
+                }
+            ]
+        }
+
+
+class FakeChineseKnownNameLeakClient:
+    model = "qwen2.5:14b-instruct"
+
+    def json_chat(self, _system, user, schema):
+        payload = json.loads(user)
+        if "segments" not in payload:
+            return {
+                "id": 36,
+                "zh_literal": "如果控制图在三个信号限制内，通常就足以保证质量。",
+                "zh_lecture": "如果控制图在三个信号限制内，通常就足以保证质量。",
+                "flags": [],
+            }
+        sid = int(payload["segments"][0]["id"])
+        if "zh_literal" in schema:
+            return {"segments": [{"id": sid, "zh_literal": "如果控制图在三个信号限制内，通常就足以保证质量。", "flags": []}]}
+        return {
+            "segments": [
+                {
+                    "id": sid,
+                    "zh_lecture": "如果控制图在三个信号限制内，通常就足以保证质量。因此，在1938年，休哈特与W·爱德华·戴明合作。",
                     "flags": [],
                 }
             ]

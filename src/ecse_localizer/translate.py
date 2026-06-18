@@ -365,6 +365,8 @@ def rescue_translate_single_segment(
             zh = normalize_translation(zh, config, seg.text)
             if zh != normalize_translation(zh_before_correction, config):
                 flags.append("KNOWN_TERM_CORRECTION_APPLIED")
+            if contains_context_only_known_term(zh, seg.text, all_segments, absolute_index):
+                continue
             if len(zh) > limit:
                 flags.append("ZH_OVER_TARGET_LENGTH")
                 if config.get("translation", {}).get("hard_truncate_over_limit", False):
@@ -512,6 +514,23 @@ def request_llm_chunk(
         zh = normalize_translation(zh, config, seg.text)
         if zh != normalize_translation(zh_before_correction, config):
             flags.append("KNOWN_TERM_CORRECTION_APPLIED")
+        if contains_context_only_known_term(zh, seg.text, all_segments, chunk_start + idx):
+            if logger:
+                logger.warning("LLM row fallback for segment %s: context-only known term leak after normalization: %s", seg.id, zh[:80])
+            results.append(
+                fallback_or_rescue_segment(
+                    all_segments,
+                    chunk_start + idx,
+                    seg,
+                    glossary_text,
+                    glossary or {},
+                    config,
+                    client,
+                    logger,
+                    "LLM_ROW_CONTEXT_ONLY_KNOWN_TERM_FALLBACK",
+                )
+            )
+            continue
         if len(zh) > limit:
             flags.append("ZH_OVER_TARGET_LENGTH")
             if config.get("translation", {}).get("hard_truncate_over_limit", False):
@@ -1281,6 +1300,10 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
     work = re.sub(ascii_left + r"W\.?EdwardDeming" + ascii_right, "W. Edwards Deming", work, flags=re.IGNORECASE)
     work = re.sub(ascii_left + r"W\.?EdwardsDeming" + ascii_right, "W. Edwards Deming", work, flags=re.IGNORECASE)
     work = re.sub(ascii_left + r"(?:Sue\s*hart|Suehart|Shuhart|Schuhart)" + ascii_right, "Shewhart", work, flags=re.IGNORECASE)
+    if re.search(r"Sue\s*hart|Suehart|Shuhart|Schuhart|Shewhart", source, flags=re.IGNORECASE):
+        work = re.sub(r"休哈特", "Shewhart", work)
+    if re.search(r"W\s*\.?\s*Edwards?\s*D(?:eming|imming)|WEdwards?D(?:eming|imming)", source, flags=re.IGNORECASE):
+        work = re.sub(r"W[·\.]?\s*爱德华[·\.]?\s*戴明", "W. Edwards Deming", work)
 
     combined = work + " " + source
     near_deming_confusion = re.search(
@@ -1292,7 +1315,7 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = re.sub(ascii_left + r"Stuart" + ascii_right, "Shewhart", work, flags=re.IGNORECASE)
         work = re.sub(ascii_left + r"Dimming" + ascii_right, "Deming", work, flags=re.IGNORECASE)
         work = re.sub(r"斯图尔特|斯图亚特|史都华", "Shewhart", work)
-        work = re.sub(r"迪明", "Deming", work)
+        work = re.sub(r"迪明|戴明", "Deming", work)
 
     deming_context = re.search(
         r"Shewhart|statistical process control|SPC|control charts?|Western Electric|14\s*(?:points?|点)|quality product",
@@ -1301,6 +1324,7 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
     )
     if deming_context:
         work = re.sub(ascii_left + r"Dimming" + ascii_right, "Deming", work, flags=re.IGNORECASE)
+        work = re.sub(r"迪明|戴明", "Deming", work)
 
     spc_chart_context = re.search(
         r"\b(?:SBC|SVC)\s*(?:charts?|control)\b|(?:SBC|SVC)\s*图表|(?:SBC|SVC)\s*控制|"
