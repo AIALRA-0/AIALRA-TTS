@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from collections import Counter
 from pathlib import Path
@@ -387,6 +388,7 @@ def latest_batch_background(config: dict[str, Any]) -> dict[str, Any]:
         status = "running_or_unknown"
         exit_code = None
 
+    progress = batch_background_progress(state)
     return {
         "available": True,
         "status": status,
@@ -402,7 +404,131 @@ def latest_batch_background(config: dict[str, Any]) -> dict[str, Any]:
         "stderr_log": str(state.get("stderr_log") or ""),
         "done_marker": str(done_path),
         "stop_marker": str(stop_path),
+        "progress": progress,
     }
+
+
+def batch_background_progress(state: dict[str, Any]) -> dict[str, Any]:
+    stdout_log = Path(str(state.get("stdout_log") or ""))
+    if not stdout_log.exists():
+        return {}
+    try:
+        lines = stdout_log.read_text(encoding="utf-8", errors="replace").splitlines()[-120:]
+    except Exception:
+        return {}
+    progress: dict[str, Any] = {
+        "phase": "unknown",
+        "current": 0,
+        "total": 0,
+        "percent": None,
+        "message": "",
+        "latest_warning": "",
+    }
+    for line in reversed(lines):
+        if not progress["latest_warning"]:
+            warning = re.search(r"\[WARNING\]\s*(.+)$", line)
+            if warning:
+                progress["latest_warning"] = warning.group(1)
+        tts_input = latest_cosyvoice_input_json_from_line(line)
+        if tts_input:
+            tts = cosyvoice_file_progress(Path(tts_input))
+            if tts:
+                return tts | {"latest_warning": progress["latest_warning"]}
+            return {
+                "phase": "tts",
+                "current": 0,
+                "total": 0,
+                "percent": None,
+                "message": "Synthesizing Chinese dubbed audio with CosyVoice",
+                "latest_warning": progress["latest_warning"],
+            }
+        translated = re.search(r"Translating segments\s+(\d+)-(\d+)\s*/\s*(\d+)", line)
+        if translated:
+            current = int(translated.group(2))
+            total = int(translated.group(3))
+            return {
+                "phase": "translation",
+                "current": current,
+                "total": total,
+                "percent": round(100.0 * current / total, 2) if total else None,
+                "message": f"Translating subtitle segments {translated.group(1)}-{translated.group(2)} / {translated.group(3)}",
+                "latest_warning": progress["latest_warning"],
+            }
+        if "speaker_gender_sample.wav" in line:
+            return {
+                "phase": "speaker_analysis",
+                "current": 0,
+                "total": 0,
+                "percent": None,
+                "message": "Analyzing speaker gender sample",
+                "latest_warning": progress["latest_warning"],
+            }
+    return progress
+
+
+def latest_cosyvoice_input_json_from_line(line: str) -> str:
+    for pattern in (r'--input-json\s+"([^"]+)"', r"--input-json\s+'([^']+)'"):
+        match = re.search(pattern, line)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def cosyvoice_file_progress(input_json: Path) -> dict[str, Any]:
+    if not input_json.exists():
+        return {}
+    try:
+        payload = read_json(input_json)
+    except Exception:
+        return {}
+    segments = [
+        segment
+        for segment in payload.get("segments", [])
+        if isinstance(segment, dict) and str(segment.get("text") or "").strip()
+    ]
+    total = len(segments)
+    if not total:
+        return {}
+    done = 0
+    latest: Path | None = None
+    earliest_mtime: float | None = None
+    latest_mtime: float | None = None
+    for segment in segments:
+        wav = Path(str(segment.get("out_wav") or ""))
+        if not wav.exists() or wav.stat().st_size <= 1000:
+            continue
+        done += 1
+        mtime = wav.stat().st_mtime
+        if earliest_mtime is None or mtime < earliest_mtime:
+            earliest_mtime = mtime
+        if latest_mtime is None or mtime > latest_mtime:
+            latest_mtime = mtime
+            latest = wav
+    eta_seconds = None
+    if done > 1 and earliest_mtime is not None and latest_mtime is not None and latest_mtime > earliest_mtime:
+        rate = (done - 1) / (latest_mtime - earliest_mtime)
+        if rate > 0:
+            eta_seconds = int(round(max(0, total - done) / rate))
+    result: dict[str, Any] = {
+        "phase": "tts",
+        "current": done,
+        "total": total,
+        "percent": round(100.0 * done / total, 2),
+        "message": f"Synthesizing Chinese dubbed audio with CosyVoice ({done}/{total} segments)",
+        "latest_wav": latest.name if latest else "",
+    }
+    if eta_seconds is not None:
+        result["eta_seconds"] = eta_seconds
+        result["eta_text"] = format_duration(eta_seconds)
+    return result
+
+
+def format_duration(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds} sec"
+    if seconds < 3600:
+        return f"{seconds // 60} min {seconds % 60} sec"
+    return f"{seconds // 3600} hr {(seconds % 3600) // 60} min"
 
 
 def latest_visual_ui_report(config: dict[str, Any]) -> dict[str, Any] | None:
@@ -666,12 +792,24 @@ def checklist_items(
     if batch.get("pass"):
         batch_evidence = f"Latest batch PASS: {batch.get('total')} jobs, skipped={batch.get('skipped')}; report: {batch.get('path')}"
     elif background.get("status") == "running_or_unknown":
+        bg_progress = background.get("progress") if isinstance(background.get("progress"), dict) else {}
+        progress_text = ""
+        if bg_progress.get("phase") and bg_progress.get("phase") != "unknown":
+            percent = bg_progress.get("percent")
+            percent_text = f", {percent}%" if percent is not None else ""
+            eta_text = f", ETA {bg_progress.get('eta_text')}" if bg_progress.get("eta_text") else ""
+            progress_text = (
+                f" Current phase={bg_progress.get('phase')}, "
+                f"progress={bg_progress.get('current', 0)}/{bg_progress.get('total', 0)}"
+                f"{percent_text}{eta_text}."
+            )
         batch_evidence = (
             f"Background batch chunk is running or awaiting completion marker: "
             f"{background.get('run_id')} pid={background.get('pid')} limit={background.get('limit')} "
             f"shortest_first={background.get('shortest_first')}; current completed videos: "
             f"{readiness.get('completed_count', 0)}/{readiness.get('video_count', 0)}, "
             f"pending={readiness.get('pending_count', 0)}."
+            f"{progress_text}"
         )
     else:
         batch_evidence = (
@@ -1011,6 +1149,7 @@ def render_progress_markdown(checklist: dict[str, Any]) -> str:
         f"- Latest batch process: {'PASS' if batch.get('pass') else 'not passing or unavailable'}",
         f"- Batch report: {batch.get('path') or 'not found'}",
         f"- Latest background batch: {background.get('status', 'not_started')} {background.get('run_id', '')}".rstrip(),
+        f"- Background batch progress: {background_progress_text(background)}",
         f"- Latest visual UI check: {'local browser verified' if visual.get('available') else 'not recorded'}",
         f"- Visual UI check report: {visual.get('path') or 'not found'}",
         f"- Batch readiness: {readiness.get('completed_count', 0)}/{readiness.get('video_count', 0)} videos complete; pending {readiness.get('pending_count', 0)}",
@@ -1048,3 +1187,14 @@ def status_mark(status: str) -> str:
     if status == STATUS_IN_PROGRESS:
         return "[~]"
     return "[ ]"
+
+
+def background_progress_text(background: dict[str, Any]) -> str:
+    progress = background.get("progress") if isinstance(background.get("progress"), dict) else {}
+    phase = progress.get("phase")
+    if not phase or phase == "unknown":
+        return "not available"
+    percent = progress.get("percent")
+    percent_text = f" ({percent}%)" if percent is not None else ""
+    eta = f", ETA {progress.get('eta_text')}" if progress.get("eta_text") else ""
+    return f"{phase} {progress.get('current', 0)}/{progress.get('total', 0)}{percent_text}{eta}: {progress.get('message', '')}"
