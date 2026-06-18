@@ -914,12 +914,28 @@ def test_ordinal_protected_token_not_appended_when_translated():
     assert numbers_missing("you can't get to production without 1st", "如果不先完成研发，就无法进入量产。") == []
     assert protected_term_flags("you can't get to production without 1st", "如果不先完成研发，就无法进入量产。") == []
 
+    second_source = normalize_translation(
+        "我们今天与供应商做很多这样的事情，但是最初在开始新产品时",
+        {"translation": {"target_language": "zh-CN"}},
+        "you could be compatible and have second sourcing, and we do a lot of that today with our vendors,",
+    )
+    assert second_source == "你可以做到兼容，并保留第二供应来源；我们现在和供应商就经常这样做。"
+    assert "新产品" not in second_source
+
     initial_phase = restore_and_repair_protected_terms(
         "但是，在刚开始新产品时，你想要看看是否可以坚持单一供应商。",
         {"<KEEP_001>": "1st"},
         "but it was at 1st when you're starting off with new products",
     )
     assert "1st" not in initial_phase
+
+    single_source = normalize_translation(
+        "你想要看看是否可以坚持单一供应商（1st）。",
+        {"translation": {"target_language": "zh-CN"}},
+        "but it was at 1st when you're starting off with new products, you wanna see if you can stick with a single source.",
+    )
+    assert single_source == "但在新产品刚开始阶段，你要先看看能不能坚持单一供应商。"
+    assert "1st" not in single_source
 
     first_part = normalize_translation(
         "如果有的话（1st）。",

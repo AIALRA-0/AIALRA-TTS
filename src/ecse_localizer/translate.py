@@ -1500,6 +1500,10 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = "随着工艺推进，产品晶圆会从第一层金属继续往后走；这一点我们前面已经讲过。"
     if re.search(r"\b1st\s+adopter\b.{0,40}\bJapanese\b.{0,120}\beverybody\s+in\s+the\s+world\b", source, flags=re.IGNORECASE):
         work = "所以你能看出来，这件事非常重要；日本人是最早采用这套方法的一方，如今全世界都在用。"
+    if re.search(r"\bcompatible\b.{0,80}\bsecond\s+sourcing\b.{0,120}\bvendors\b", source, flags=re.IGNORECASE):
+        work = "你可以做到兼容，并保留第二供应来源；我们现在和供应商就经常这样做。"
+    if re.search(r"\bat\s+1st\b.{0,80}\bstarting\s+off\s+with\s+new\s+products\b.{0,120}\bsingle\s+source\b", source, flags=re.IGNORECASE):
+        work = "但在新产品刚开始阶段，你要先看看能不能坚持单一供应商。"
     if re.search(
         r"\bwhen\s+I\s+1st\s+started\s+in\s+the\s+industry\s+in\s+the\s+early\s+eighties\b.{0,120}\bJapanese\b.{0,80}\bkilling\s+us\b",
         source,
