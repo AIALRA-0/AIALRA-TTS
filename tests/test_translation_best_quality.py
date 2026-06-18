@@ -1,4 +1,5 @@
 import json
+import re
 
 from ecse_localizer.subtitle_io import Segment
 from ecse_localizer.translate import (
@@ -713,6 +714,33 @@ def test_hundred_thousand_phrase_is_not_normalized_to_ten_thousand():
 
     assert "超过十万" in awkward
     assert "一十万" not in awkward
+
+
+def test_spc_process_rules_stutter_is_removed():
+    source = (
+        "I mean, and a company might not call it western Electric anymore, "
+        "but there's their process rules and your your your SBC."
+    )
+    normalized = normalize_translation(
+        "我的意思是，一家公司可能不再叫它西方电气了，但它们有自己的工艺规则和你的你的你的SPC。",
+        {"translation": {"target_language": "zh-CN"}},
+        source,
+    )
+
+    assert "你的你的" not in normalized
+    assert "工艺规则，也有你的SPC" in normalized
+    assert protected_term_flags(source, normalized) == []
+
+
+def test_fractional_percent_is_normalized_for_zh_subtitles():
+    normalized = normalize_translation(
+        "有大约.3%的可能性，这可能是假阳性或假阴性。",
+        {"translation": {"target_language": "zh-CN"}},
+        "There's a .3 % chance that it could be a false positive.",
+    )
+
+    assert "0.3%" in normalized
+    assert not re.search(r"(?<!\d)[.．]\s*3\s*%", normalized)
 
 
 def test_rule_fallback_translates_data_sampling_phrase():

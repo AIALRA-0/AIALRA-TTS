@@ -1409,6 +1409,8 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = re.sub(r"超过了?一十万", "超过十万", work)
         work = re.sub(r"一十万", "十万", work)
         work = re.sub(r"一万", "十万", work)
+    if re.search(r"(?<!\d)\.\s*3\s*%", source):
+        work = re.sub(r"(?<!\d)[.．]\s*3\s*%", "0.3%", work)
 
     combined = work + " " + source
     near_deming_confusion = re.search(
@@ -1479,6 +1481,10 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
             work,
             count=1,
         )
+
+    if re.search(r"western\s+Electric.{0,80}process\s+rules.{0,80}\byour\b.{0,16}\b(?:SBC|SPC)\b", source, flags=re.IGNORECASE):
+        work = re.sub(r"你的(?:你的){1,4}\s*SPC", "你的SPC", work, flags=re.IGNORECASE)
+        work = re.sub(r"工艺规则和你的SPC", "工艺规则，也有你的SPC", work)
 
     return work
 
