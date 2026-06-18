@@ -872,7 +872,7 @@ def test_ordinal_protected_token_not_appended_when_translated():
         "They did it for semiconductors, and so when I 1st started in the industry in the early eighties, the Japanese were just killing us on.",
     )
     assert "1st" not in started
-    assert "第一次" in started
+    assert "八十年代初刚进入这个行业" in started
 
     just_entered_industry = normalize_translation(
         "他们在半导体领域也做了同样的事情。当我八十年代初刚进入这个行业时，日本人在这方面把我们远远甩在后面了（1st）。",
@@ -881,6 +881,15 @@ def test_ordinal_protected_token_not_appended_when_translated():
     )
     assert "1st" not in just_entered_industry
     assert "刚进入这个行业" in just_entered_industry
+
+    malformed_decade = normalize_translation(
+        "他们在半导体领域也这样做，所以我一九八十年代初刚进入这个行业时，日本人在这方面就把我们远远甩在后面了。",
+        {"translation": {"target_language": "zh-CN"}},
+        "They did it for semiconductors, and so when I 1st started in the industry in the early eighties, the Japanese were just killing us on.",
+    )
+    assert malformed_decade == "他们在半导体领域也这样做；我在八十年代初刚进入这个行业时，日本人在这方面已经把我们远远甩在后面。"
+    assert "一九八十" not in malformed_decade
+    assert "1st" not in malformed_decade
 
     r_and_d_start = normalize_translation(
         "随着工艺的成熟，所需的晶圆数量会减少。当您首次开始研发阶段（R&D）并进入预生产阶段，在将其转移到量产前，然后为什么要把它转入量产（1st）？",

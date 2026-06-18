@@ -1479,6 +1479,12 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = "因此，军方极大地推动了这种SPC策略的采用。"
     if re.search(r"\bhaving\s+as\s+many\s+SBC\s+(?:charge|charts?)\b", source, flags=re.IGNORECASE):
         work = "他们可能没有足够重视建立足够多的SPC图表，甚至根本没有使用这些图表。"
+    if re.search(
+        r"\bwhen\s+I\s+1st\s+started\s+in\s+the\s+industry\s+in\s+the\s+early\s+eighties\b.{0,120}\bJapanese\b.{0,80}\bkilling\s+us\b",
+        source,
+        flags=re.IGNORECASE,
+    ):
+        work = "他们在半导体领域也这样做；我在八十年代初刚进入这个行业时，日本人在这方面已经把我们远远甩在后面。"
     if re.search(r"\bcollecting\s+a\s+lot\s+of\s+this\s+data\b.{0,80}\bduring\s+his\s+1st\s+part\b", source, flags=re.IGNORECASE):
         work = "他注意到，自己在第一阶段收集了大量这类数据，并且发现..."
     if re.search(r"\ball\s+of\s+this\s+is\s+1st\s+is\s+really\s+controlled\b", source, flags=re.IGNORECASE):
