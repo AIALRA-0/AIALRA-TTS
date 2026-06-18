@@ -491,6 +491,41 @@ def test_llm_chunk_rejects_extra_unresolved_keep_placeholder_leak():
     assert "LLM_ROW_UNUSABLE_LECTURE_FALLBACK" in flags
 
 
+def test_llm_chunk_rejects_known_name_leak_from_next_segment():
+    config = {
+        "translation": {
+            "target_language": "zh-CN",
+            "max_zh_chars_per_second": 80,
+            "max_zh_chars_per_subtitle_line": 80,
+        }
+    }
+    all_segments = [
+        Segment(36, 0.0, 3.0, "If the control charts were within the three signal limits, that typically was quality enough."),
+        Segment(37, 3.0, 6.0, "So in 1938, Suehart collaborated with W Edward Dimming."),
+    ]
+    fake = FakeKnownNameLeakClient()
+
+    results = request_llm_chunk(
+        all_segments,
+        0,
+        [all_segments[0]],
+        "",
+        config,
+        fake,
+        "literal",
+        "rewrite",
+        "style",
+        "",
+        {},
+    )
+
+    _, _, lecture, flags, _ = results[0]
+    assert "Shewhart" not in lecture
+    assert "Deming" not in lecture
+    assert lecture == "如果控制图在三个信号限制内，通常就足以保证质量。"
+    assert "LLM_ROW_UNUSABLE_LECTURE_FALLBACK" in flags
+
+
 def test_sanitize_flags_drops_protected_placeholder_flags():
     from ecse_localizer.translate import sanitize_flags
 
@@ -568,6 +603,32 @@ class FakeExtraPlaceholderLeakClient:
                 {
                     "id": sid,
                     "zh_lecture": "在二十年代的时候，有接近<KEEP_001>百万电话。",
+                    "flags": [],
+                }
+            ]
+        }
+
+
+class FakeKnownNameLeakClient:
+    model = "qwen2.5:14b-instruct"
+
+    def json_chat(self, _system, user, schema):
+        payload = json.loads(user)
+        if "segments" not in payload:
+            return {
+                "id": 36,
+                "zh_literal": "如果控制图在三个信号限制内，通常就足以保证质量。",
+                "zh_lecture": "如果控制图在三个信号限制内，通常就足以保证质量。",
+                "flags": [],
+            }
+        sid = int(payload["segments"][0]["id"])
+        if "zh_literal" in schema:
+            return {"segments": [{"id": sid, "zh_literal": "如果控制图在三个信号限制内，通常就足以保证质量。", "flags": []}]}
+        return {
+            "segments": [
+                {
+                    "id": sid,
+                    "zh_lecture": "如果控制图在三个信号限制内，通常就足以保证质量。1938年，Shewhart与W.EdwardsDeming合作。",
                     "flags": [],
                 }
             ]

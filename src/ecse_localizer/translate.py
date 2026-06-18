@@ -352,6 +352,7 @@ def rescue_translate_single_segment(
                 not is_usable_translation(zh, config)
                 or is_forbidden_non_translation(zh)
                 or has_unresolved_keep_placeholder(zh)
+                or contains_context_only_known_term(zh, seg.text, all_segments, absolute_index)
                 or short_source_translation_overexpanded(seg.text, zh, config)
             ):
                 continue
@@ -483,6 +484,7 @@ def request_llm_chunk(
             not is_usable_translation(zh, config)
             or is_forbidden_non_translation(zh)
             or has_unresolved_keep_placeholder(zh)
+            or contains_context_only_known_term(zh, seg.text, all_segments, chunk_start + idx)
             or short_source_translation_overexpanded(seg.text, zh, config)
             or coherence_contains_neighbor_literal(zh, lit, neighbor_literal_zh)
         ):
@@ -856,6 +858,35 @@ def placeholder_tokens(text: str) -> set[str]:
 
 def has_unresolved_keep_placeholder(text: str) -> bool:
     return bool(re.search(r"<KEEP_\d{3}>", text or ""))
+
+
+def contains_context_only_known_term(candidate_zh: str, source_text: str, all_segments: list[Segment], absolute_index: int) -> bool:
+    """Detect known person-name leakage from adjacent context across LLM chunk boundaries."""
+    checks = [
+        (
+            r"Shewhart|休哈特",
+            r"Shewhart|Sue\s*hart|Suehart|Shuhart|Schuhart|Stuart",
+        ),
+        (
+            r"W\s*[.·]?\s*Edwards?\s*Deming|W\.?Edwards?Deming|Deming|戴明",
+            r"W\s*\.?\s*Edwards?\s*D(?:eming|imming)|WEdwards?D(?:eming|imming)|Deming|Dimming",
+        ),
+    ]
+    context = " ".join(
+        seg.text
+        for i, seg in enumerate(all_segments)
+        if i in {absolute_index - 1, absolute_index + 1} and 0 <= i < len(all_segments)
+    )
+    if not context:
+        return False
+    for candidate_pattern, source_pattern in checks:
+        if not re.search(candidate_pattern, candidate_zh or "", flags=re.IGNORECASE):
+            continue
+        if re.search(source_pattern, source_text or "", flags=re.IGNORECASE):
+            continue
+        if re.search(source_pattern, context, flags=re.IGNORECASE):
+            return True
+    return False
 
 
 def coherence_short_source_overexpanded(source_text: str, previous_zh: str, candidate_zh: str, config: dict) -> bool:
