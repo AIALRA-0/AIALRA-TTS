@@ -72,6 +72,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p = sub.add_parser("process-all")
     p.add_argument("--input", required=True)
     p.add_argument("--force", action="store_true", help="Reprocess videos even when a passing report already exists.")
+    p.add_argument("--limit", type=int, default=0, help="Process at most this many non-skipped videos in this invocation.")
+    p.add_argument("--shortest-first", action="store_true", help="Process pending videos from shortest to longest duration.")
 
     p = sub.add_parser("resume")
     p.add_argument("--run-id", required=True)
@@ -235,7 +237,12 @@ def cmd_process_all(args: argparse.Namespace, config: dict[str, Any]) -> int:
     log_dir = ensure_dir(PROJECT_ROOT / "logs")
     logger = setup_logger("process_all", log_dir / "process_all.log")
     results = []
-    for video in find_videos(args.input):
+    videos = find_videos(args.input)
+    if args.shortest_first:
+        videos = sorted(videos, key=lambda path: safe_media_duration(path, logger))
+    processed_count = 0
+    deferred: list[str] = []
+    for video in videos:
         try:
             if not args.force:
                 existing = completed_report_for(video, output_dir)
@@ -243,20 +250,39 @@ def cmd_process_all(args: argparse.Namespace, config: dict[str, Any]) -> int:
                     logger.info("Skipping already-passed video: %s", video)
                     results.append({"video": str(video), "pass": True, "report": str(existing), "skipped": True})
                     continue
+            if args.limit and processed_count >= max(0, int(args.limit)):
+                deferred.append(str(video))
+                continue
             result = process_video(video, config, mode="full", input_dir=args.input)
+            processed_count += 1
             results.append({"video": str(video), "pass": result["qa"]["pass"], "report": result["report_md"]})
         except Exception as exc:
             logger.exception("Failed processing %s", video)
+            processed_count += 1
             results.append({"video": str(video), "pass": False, "error": str(exc)})
-    write_json(output_dir / "batch_report.json", {"results": results})
     failed = [r for r in results if not r.get("pass")]
     skipped = [r for r in results if r.get("skipped")]
+    batch_report = {
+        "total": len(videos),
+        "processed": len(results) - len(skipped),
+        "skipped": len(skipped),
+        "failed": len(failed),
+        "deferred": len(deferred),
+        "complete_all": not failed and not deferred,
+        "limit": int(args.limit or 0),
+        "shortest_first": bool(args.shortest_first),
+        "deferred_videos": deferred[:50],
+        "results": results,
+    }
+    write_json(output_dir / "batch_report.json", batch_report)
     print(
         json.dumps(
             {
-                "processed": len(results) - len(skipped),
-                "skipped": len(skipped),
-                "failed": len(failed),
+                "processed": batch_report["processed"],
+                "skipped": batch_report["skipped"],
+                "failed": batch_report["failed"],
+                "deferred": batch_report["deferred"],
+                "complete_all": batch_report["complete_all"],
                 "batch_report": str(output_dir / "batch_report.json"),
             },
             ensure_ascii=False,
@@ -264,6 +290,15 @@ def cmd_process_all(args: argparse.Namespace, config: dict[str, Any]) -> int:
         )
     )
     return 0 if not failed else 2
+
+
+def safe_media_duration(path: Path, logger=None) -> float:
+    try:
+        return media_duration(path)
+    except Exception as exc:
+        if logger:
+            logger.warning("Duration probe failed for %s: %s", path, exc)
+        return float("inf")
 
 
 def cmd_resume(args: argparse.Namespace, config: dict[str, Any]) -> int:

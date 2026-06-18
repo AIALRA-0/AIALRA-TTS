@@ -237,6 +237,39 @@ def test_progress_checklist_marks_batch_done_from_batch_report(tmp_path):
     assert rows["validation.batch_all"]["status"] == STATUS_DONE
 
 
+def test_progress_checklist_does_not_mark_partial_batch_done(tmp_path):
+    write_platform_report(tmp_path, passed=True)
+    write_smoke_report(tmp_path, passed=True)
+    write_full_report(tmp_path, passed=True)
+    output = tmp_path / "output"
+    output.mkdir(parents=True, exist_ok=True)
+    batch_path = output / "batch_report.json"
+    batch_path.write_text(
+        json.dumps(
+            {
+                "total": 3,
+                "processed": 1,
+                "skipped": 1,
+                "failed": 0,
+                "deferred": 1,
+                "complete_all": False,
+                "results": [
+                    {"video": "done.mp4", "pass": True, "skipped": True},
+                    {"video": "processed.mp4", "pass": True},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    checklist = build_progress_checklist(config(tmp_path))
+
+    assert checklist["latest_batch_process"]["pass"] is False
+    assert checklist["latest_batch_process"]["deferred"] == 1
+    rows = {item["id"]: item for item in checklist["items"]}
+    assert rows["validation.batch_all"]["status"] == STATUS_NEEDS_VALIDATION
+
+
 def test_progress_checklist_reports_batch_readiness_counts(tmp_path):
     input_dir = tmp_path / "input"
     input_dir.mkdir()

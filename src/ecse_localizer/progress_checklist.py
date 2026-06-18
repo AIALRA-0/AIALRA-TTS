@@ -237,17 +237,22 @@ def video_report_summary(report: dict[str, Any] | None) -> dict[str, Any]:
 
 def batch_report_summary(report: dict[str, Any] | None) -> dict[str, Any]:
     if not report:
-        return {"available": False, "pass": None, "path": "", "total": 0, "failed": 0, "skipped": 0}
+        return {"available": False, "pass": None, "path": "", "total": 0, "failed": 0, "skipped": 0, "deferred": 0}
     results = report.get("results") if isinstance(report.get("results"), list) else []
     failed = [row for row in results if not row.get("pass")]
     skipped = [row for row in results if row.get("skipped")]
+    total = int(report.get("total") or len(results))
+    deferred = int(report.get("deferred") or 0)
+    complete_all = bool(report.get("complete_all")) if "complete_all" in report else bool(results) and not failed
     return {
         "available": True,
-        "pass": bool(results) and not failed,
+        "pass": complete_all and not failed,
         "path": str(report.get("_path") or ""),
-        "total": len(results),
+        "total": total,
         "failed": len(failed),
-        "skipped": len(skipped),
+        "skipped": int(report.get("skipped") if "skipped" in report else len(skipped)),
+        "deferred": deferred,
+        "complete_all": complete_all,
     }
 
 
@@ -336,9 +341,10 @@ def checklist_items(
         f"Latest batch PASS: {batch.get('total')} jobs, skipped={batch.get('skipped')}; report: {batch.get('path')}"
         if batch.get("pass")
         else (
-            f"No passing batch_report.json found; current completed videos: "
+            f"No complete passing batch_report.json found; current completed videos: "
             f"{readiness.get('completed_count', 0)}/{readiness.get('video_count', 0)}, "
-            f"pending={readiness.get('pending_count', 0)}."
+            f"pending={readiness.get('pending_count', 0)}, "
+            f"last deferred={batch.get('deferred', 0)}."
             if readiness.get("available")
             else "No passing batch_report.json found in output_dir."
         )
