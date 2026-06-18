@@ -197,6 +197,11 @@ def test_progress_checklist_tracks_objective_and_latest_platform_gate(tmp_path):
 
     assert checklist["latest_platform_check"]["pass"] is True
     assert checklist["summary"]["total"] >= 20
+    assert checklist["detail_summary"]["total"] > checklist["summary"]["total"]
+    detailed = {item["id"]: item for item in checklist["detailed_items"]}
+    assert "core.scan.01" in detailed
+    assert "translation.best_quality.06" in detailed
+    assert detailed["deploy.real_contabo.01"]["status"] == STATUS_NEEDS_VALIDATION
     rows = {item["id"]: item for item in checklist["items"]}
     assert rows["translation.best_quality"]["status"] == STATUS_DONE
     assert rows["worker.lifecycle"]["status"] == STATUS_DONE

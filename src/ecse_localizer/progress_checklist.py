@@ -15,6 +15,197 @@ STATUS_IN_PROGRESS = "in_progress"
 STATUS_NEEDS_VALIDATION = "needs_real_world_validation"
 STATUS_PENDING = "pending"
 
+DETAILS_BY_ID = {
+    "core.scan": [
+        "Scan only source lecture media and subtitle files; ignore managed output, run, cache, and project folders.",
+        "Pair same-name .srt/.vtt/.ass subtitle files with each video when present.",
+        "Use ffprobe metadata for duration, resolution, codec, and audio stream reporting.",
+        "Keep original lecture files read-only from the pipeline perspective; write all generated files under configured output/work dirs.",
+        "Handle Windows paths with spaces and non-ASCII characters in PowerShell and Python.",
+    ],
+    "core.asr": [
+        "Use existing English subtitles first when coverage and timing are usable.",
+        "Normalize subtitle timing and text before downstream translation/TTS.",
+        "Run local ASR when subtitles are missing, unusable, or insufficient.",
+        "Prefer GPU ASR backends when available and keep CPU/quantized fallback paths.",
+        "Emit segment-level and word/metadata JSON for later QA, subtitle, and TTS alignment.",
+        "Avoid any cloud ASR endpoint or media upload.",
+    ],
+    "core.audio": [
+        "Extract mono 16 kHz WAV with ffmpeg for ASR/TTS preparation.",
+        "Apply loudnorm plus highpass/lowpass cleanup locally.",
+        "Attempt configured enhancement backend order and fall back to ffmpeg cleanup when optional models are unavailable.",
+        "Preserve original video/audio files unchanged.",
+        "Record enhancement backend, failures, and fallback decisions in logs/reports.",
+    ],
+    "core.outputs": [
+        "Generate English subtitles: *_en.srt and *_en.vtt when supported.",
+        "Generate Chinese subtitles: *_zh.srt and *_zh.vtt when supported.",
+        "Generate bilingual subtitles: *_bilingual.srt and styled *_bilingual.ass.",
+        "Generate Chinese dubbed audio: *_zh_dub.wav.",
+        "Generate Chinese dubbed video: *_zh_dub.mp4.",
+        "Optionally generate hard-subtitled MP4 when configured.",
+        "Generate per-video report.md/report.json and course glossary.tsv/glossary.json.",
+        "Never overwrite source media or source subtitle files.",
+    ],
+    "translation.best_quality": [
+        "Merge subtitle fragments into paragraph-level translation units before translating.",
+        "Apply a course style guide for natural Chinese lecture language.",
+        "Run literal translation first to preserve technical information.",
+        "Run lecture rewrite to improve flow, clarity, tone, and spoken delivery.",
+        "Run coherence pass to reduce machine-translation feel across neighboring segments.",
+        "Run fidelity repair only on segments failing preservation/consistency checks.",
+        "Flag suspicious mistranslation, omission, number mismatch, formula mismatch, and untranslated residue.",
+        "Use local LLM JSON responses with repair/retry logging.",
+    ],
+    "translation.protection": [
+        "Protect code blocks and inline code before LLM translation.",
+        "Protect formulas, variables, subscripts, superscripts, and complexity notation.",
+        "Protect Windows paths, URLs, filenames, versions, and model names.",
+        "Protect numbers, units, voltages, frequencies, scientific notation, and course codes.",
+        "Restore placeholders after translation and audit any missing or modified protected token.",
+        "Cover examples including O(n log n), x_i, C:\\path\\file.py, https://example.com, ResNet-50, ECSE 4961, 3.3V, 5 kHz, and 10^-6.",
+    ],
+    "tts.sync": [
+        "Synthesize each segment independently through the configured local TTS backend.",
+        "Detect segment overruns before final mix.",
+        "Compress wording first when a segment is too long.",
+        "Increase TTS speed only within configured safe bounds.",
+        "Use ffmpeg time compression only as a final small correction.",
+        "Insert speech according to the original timeline while enforcing no overlap.",
+        "Keep configurable short end gaps rather than leaving excessive silence.",
+        "Apply gain/normalization so the dubbed voice is clearly audible.",
+        "Report any severe overrun or timing compromise.",
+    ],
+    "tts.voice_policy": [
+        "Default to a neutral clear teaching voice.",
+        "Do not clone the original lecturer or any user voice by default.",
+        "Enable reference voice only when authorized reference audio and consent README are present.",
+        "Keep voice cloning controls explicit in config and reports.",
+    ],
+    "webui.auth_users": [
+        "Provide login UI and authenticated API session handling.",
+        "Support invite-style/admin-created users instead of public registration by default.",
+        "Support admin user enable/disable operations.",
+        "Associate projects, jobs, quotas, and artifacts with the authenticated user.",
+        "Reject unauthorized access to other users' jobs and artifacts.",
+    ],
+    "webui.projects_templates": [
+        "Create and list projects.",
+        "Create and list folders within projects.",
+        "Submit localization jobs with source/target language and style parameters.",
+        "Store reusable parameter templates for quality, subtitles, TTS, timing, and muxing.",
+        "Show job history with retry/delete/restore lifecycle operations.",
+        "Represent paused, retrying, failed, done, deleted, and cancelled states.",
+    ],
+    "webui.metrics_sse": [
+        "Expose worker online/offline status to the dashboard.",
+        "Show queue and active job status.",
+        "Show CPU, GPU, VRAM, disk, and quota metrics.",
+        "Use SSE for live updates and polling fallback when SSE is unavailable.",
+        "Show sanitized log tail/progress summaries without leaking local paths or secrets.",
+    ],
+    "worker.outbound": [
+        "Run Windows worker as a local service/script.",
+        "Worker initiates all network communication to the remote web service.",
+        "Support reverse tunnel/VPN deployment without opening a public Windows inbound port.",
+        "Keep GPU/CPU inference and full media storage on the Windows machine.",
+    ],
+    "worker.lifecycle": [
+        "Send signed heartbeat and capability reports.",
+        "Claim queued jobs safely.",
+        "Report running progress and failures.",
+        "Honor cancel/control requests from the remote UI.",
+        "Recover stale claimed/running jobs into retryable state.",
+        "Keep failed jobs isolated so one video does not crash the whole queue.",
+    ],
+    "storage.quotas": [
+        "Track remote web quota separately from Windows local storage quota.",
+        "Track user-level and project-level quotas.",
+        "Reserve space for active jobs before accepting work.",
+        "Reject jobs clearly when quota or disk free-space checks fail.",
+        "Keep soft-deleted records until cleanup physically removes files.",
+    ],
+    "storage.preview_cache": [
+        "Store original media and full outputs on Windows by default.",
+        "Upload only small thumbnails, metadata, low-bitrate previews, or short-term requested caches to Contabo.",
+        "Generate signed temporary links for downloads/previews.",
+        "Provide cleanup TTL for temporary caches and intermediate files.",
+        "Allow users to delete generated outputs and reclaim quota.",
+    ],
+    "security.no_cloud": [
+        "Default allow_cloud_api=false and allow_upload_media=false.",
+        "Fail closed on OpenAI/Google/Azure/DeepL/Baidu/Tencent/Aliyun/ElevenLabs/Rask/HeyGen-style inference endpoints.",
+        "Permit only local inference endpoints or explicitly open-source model downloads.",
+        "Record model/code license and commercial-use risk in licenses_report.md.",
+    ],
+    "security.worker_auth": [
+        "Authenticate worker calls with HMAC or equivalent signed requests.",
+        "Include timestamp and nonce replay protection.",
+        "Use different secrets for production and local development.",
+        "Never commit real worker tokens or server secrets.",
+    ],
+    "security.redaction": [
+        "Redact Windows usernames, full local paths, private IPs, tokens, and command lines from remote-visible logs.",
+        "Return stable artifact references instead of raw local filesystem paths.",
+        "Keep .env and other sensitive config ignored by git.",
+        "Run release/secret-safety checks before publishing.",
+    ],
+    "deploy.package": [
+        "Provide DEPLOY_CONTABO_PROMPT.md for a server-side deployment agent.",
+        "Provide .env.example without secrets.",
+        "Provide Docker Compose/service templates for the remote web service.",
+        "Provide proxy config examples with SSE no-buffering.",
+        "Provide systemd service/timer examples for app and cleanup tasks.",
+        "Provide Windows worker start/health scripts.",
+        "Document GitHub workflow, tags, and release checks.",
+    ],
+    "deploy.real_contabo": [
+        "Deploy the remote web service on the real Contabo host.",
+        "Configure domain, TLS, reverse proxy, and persistent database/storage.",
+        "Register the Windows worker through outbound-only connectivity.",
+        "Verify heartbeat, queue claim, preview, download, cancellation, and offline recovery from the real browser UI.",
+        "Validate storage quotas against the real Contabo disk budget.",
+    ],
+    "validation.smoke_90s": [
+        "Run 60-120 second smoke on a real lecture.",
+        "Verify audio extraction and enhancement.",
+        "Verify existing subtitle or local ASR path.",
+        "Verify glossary extraction and local LLM translation.",
+        "Verify lecture rewrite/coherence behavior.",
+        "Verify TTS generation, no overlap, bilingual subtitles, muxed MP4, and QA report.",
+        "Verify required output files exist and ffprobe can read the MP4.",
+    ],
+    "validation.first_full_lecture": [
+        "Process one complete lecture end to end.",
+        "Inspect first 10 subtitle entries for non-empty Chinese, retained English, and non-overlap.",
+        "Check TTS duration/timeline drift and serious overrun reporting.",
+        "Check final MP4 readability with ffprobe.",
+        "Review QA warnings for mistranslation, missing outputs, subtitle issues, and timing issues.",
+    ],
+    "validation.batch_all": [
+        "Process all detected lectures without starting with an unsafe all-at-once run.",
+        "Run resumable chunks that can recover from failures.",
+        "Skip already-passed videos.",
+        "Keep per-video logs and reports.",
+        "Continue after per-video fallback paths where possible.",
+        "Stop and surface actionable logs on hard failure.",
+        "Confirm final batch_report.json covers every detected lecture.",
+    ],
+    "validation.real_video": [
+        "Run the latest code, not stale earlier outputs, on representative real media.",
+        "Inspect subtitles, TTS timing, voice clarity, muxed MP4, reports, and glossary.",
+        "Ensure latest config changes for voice, volume, timing, and translation quality are reflected.",
+    ],
+    "validation.visual_ui": [
+        "Open the local WebUI in a real browser.",
+        "Check login interaction works from the UI, not just API smoke.",
+        "Check dashboard, task table, project sidebar, settings, upload form, and status panel layout.",
+        "Compare visual density and style against the requested deeeeepwiki/readlayer direction when reference screenshots/pages are available.",
+        "Check desktop and mobile/responsive layouts.",
+    ],
+}
+
 
 def build_progress_checklist(config: dict[str, Any]) -> dict[str, Any]:
     platform_report = latest_platform_report(config)
@@ -25,6 +216,8 @@ def build_progress_checklist(config: dict[str, Any]) -> dict[str, Any]:
     batch_background = latest_batch_background(config)
     items = checklist_items(platform_report, smoke_report, full_report, batch_report, batch_readiness, batch_background)
     counts = Counter(str(item["status"]) for item in items)
+    detailed_items = expand_detailed_items(items)
+    detail_counts = Counter(str(item["status"]) for item in detailed_items)
     return {
         "mode": "aialra_progress_checklist",
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -35,6 +228,13 @@ def build_progress_checklist(config: dict[str, Any]) -> dict[str, Any]:
             STATUS_NEEDS_VALIDATION: counts.get(STATUS_NEEDS_VALIDATION, 0),
             STATUS_PENDING: counts.get(STATUS_PENDING, 0),
         },
+        "detail_summary": {
+            "total": len(detailed_items),
+            STATUS_DONE: detail_counts.get(STATUS_DONE, 0),
+            STATUS_IN_PROGRESS: detail_counts.get(STATUS_IN_PROGRESS, 0),
+            STATUS_NEEDS_VALIDATION: detail_counts.get(STATUS_NEEDS_VALIDATION, 0),
+            STATUS_PENDING: detail_counts.get(STATUS_PENDING, 0),
+        },
         "latest_platform_check": platform_report_summary(platform_report),
         "latest_real_video_smoke": smoke_report_summary(smoke_report),
         "latest_full_lecture": video_report_summary(full_report),
@@ -42,6 +242,7 @@ def build_progress_checklist(config: dict[str, Any]) -> dict[str, Any]:
         "latest_batch_background": batch_background,
         "batch_readiness": batch_readiness,
         "items": items,
+        "detailed_items": detailed_items,
     }
 
 
@@ -630,7 +831,7 @@ def checklist_items(
     ]
 
 
-def item(identifier: str, area: str, requirement: str, status: str, evidence: str, next_step: str) -> dict[str, str]:
+def item(identifier: str, area: str, requirement: str, status: str, evidence: str, next_step: str) -> dict[str, Any]:
     return {
         "id": identifier,
         "area": area,
@@ -638,11 +839,43 @@ def item(identifier: str, area: str, requirement: str, status: str, evidence: st
         "status": status,
         "evidence": evidence,
         "next_step": next_step,
+        "subgoals": DETAILS_BY_ID.get(identifier, []),
     }
+
+
+def expand_detailed_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    detailed: list[dict[str, Any]] = []
+    for row in items:
+        subgoals = row.get("subgoals") if isinstance(row.get("subgoals"), list) else []
+        if not subgoals:
+            detailed.append(
+                {
+                    "id": str(row.get("id") or ""),
+                    "parent_id": str(row.get("id") or ""),
+                    "area": str(row.get("area") or ""),
+                    "requirement": str(row.get("requirement") or ""),
+                    "status": str(row.get("status") or STATUS_PENDING),
+                    "evidence": str(row.get("evidence") or ""),
+                }
+            )
+            continue
+        for index, subgoal in enumerate(subgoals, start=1):
+            detailed.append(
+                {
+                    "id": f"{row.get('id')}.{index:02d}",
+                    "parent_id": str(row.get("id") or ""),
+                    "area": str(row.get("area") or ""),
+                    "requirement": str(subgoal),
+                    "status": str(row.get("status") or STATUS_PENDING),
+                    "evidence": str(row.get("evidence") or ""),
+                }
+            )
+    return detailed
 
 
 def render_progress_markdown(checklist: dict[str, Any]) -> str:
     summary = checklist.get("summary", {})
+    detail_summary = checklist.get("detail_summary", {})
     platform = checklist.get("latest_platform_check", {})
     smoke = checklist.get("latest_real_video_smoke", {})
     full = checklist.get("latest_full_lecture", {})
@@ -656,11 +889,16 @@ def render_progress_markdown(checklist: dict[str, Any]) -> str:
         "",
         "## Summary",
         "",
-        f"- Total items: {summary.get('total', 0)}",
-        f"- Done: {summary.get(STATUS_DONE, 0)}",
-        f"- In progress: {summary.get(STATUS_IN_PROGRESS, 0)}",
-        f"- Needs real-world validation: {summary.get(STATUS_NEEDS_VALIDATION, 0)}",
-        f"- Pending: {summary.get(STATUS_PENDING, 0)}",
+        f"- High-level items: {summary.get('total', 0)}",
+        f"- High-level done: {summary.get(STATUS_DONE, 0)}",
+        f"- High-level in progress: {summary.get(STATUS_IN_PROGRESS, 0)}",
+        f"- High-level needs real-world validation: {summary.get(STATUS_NEEDS_VALIDATION, 0)}",
+        f"- High-level pending: {summary.get(STATUS_PENDING, 0)}",
+        f"- Detailed acceptance items: {detail_summary.get('total', 0)}",
+        f"- Detailed done: {detail_summary.get(STATUS_DONE, 0)}",
+        f"- Detailed in progress: {detail_summary.get(STATUS_IN_PROGRESS, 0)}",
+        f"- Detailed needs real-world validation: {detail_summary.get(STATUS_NEEDS_VALIDATION, 0)}",
+        f"- Detailed pending: {detail_summary.get(STATUS_PENDING, 0)}",
         f"- Latest platform-check: {'PASS' if platform.get('pass') else 'not passing or unavailable'}",
         f"- Platform-check report: {platform.get('path') or 'not found'}",
         f"- Latest real-video smoke: {'PASS' if smoke.get('pass') else 'not passing or unavailable'}",
@@ -687,6 +925,11 @@ def render_progress_markdown(checklist: dict[str, Any]) -> str:
         lines.append(f"  - Status: `{status}`")
         lines.append(f"  - Evidence: {row.get('evidence')}")
         lines.append(f"  - Next: {row.get('next_step')}")
+        subgoals = row.get("subgoals") if isinstance(row.get("subgoals"), list) else []
+        if subgoals:
+            lines.append("  - Detailed acceptance:")
+            for index, subgoal in enumerate(subgoals, start=1):
+                lines.append(f"    - {mark} {index}. {subgoal}")
     return "\n".join(lines).rstrip() + "\n"
 
 
