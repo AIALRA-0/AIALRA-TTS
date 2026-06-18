@@ -678,6 +678,24 @@ def test_us_manufacturer_spc_translation_does_not_keep_misplaced_us_parenthetica
     assert protected_term_flags(source, normalized) == []
 
 
+def test_spc_strategy_and_chart_asr_confusions_are_repaired():
+    strategy = normalize_translation(
+        "因此，军事部门极大地影响了这种SBC策略的采用。",
+        {"translation": {"target_language": "zh-CN"}},
+        "So the military greatly influenced the adoption of this SBC strategy.",
+    )
+    assert strategy == "因此，军方极大地推动了这种SPC策略的采用。"
+    assert "SBC" not in strategy
+
+    charts = normalize_translation(
+        "SBC的充电量可能没有他们需要的那么多，或者根本就没有使用。",
+        {"translation": {"target_language": "zh-CN"}},
+        "They weren't focused as much on having as many SBC charge maybe as they needed or maybe they weren't using them at all.",
+    )
+    assert charts == "他们可能没有足够重视建立足够多的SPC图表，甚至根本没有使用这些图表。"
+    assert "SBC" not in charts
+
+
 def test_spc_chart_to_actual_hardware_phrase_is_rewritten_as_natural_lecture_zh():
     source = (
         "That you're using for your SBC to do your charts to the actual hardware "
