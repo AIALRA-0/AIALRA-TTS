@@ -1452,6 +1452,8 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         r"\b(?:SBC|SVC)\s*(?:charts?|controls?)\b|(?:SBC|SVC)\s*图表|(?:SBC|SVC)\s*控制|"
         r"(?:statistical|quality|process|control|charts?|semiconductor).{0,48}\b(?:SBC|SVC)\b|"
         r"\b(?:SBC|SVC)\b.{0,48}(?:statistical|quality|process|control|charts?|semiconductor)|"
+        r"(?:implement\w*|key\s+performance\s+indicators?|KPIs?|PDK|process\s+design\s+kit).{0,80}\b(?:SBC|SVC)\b|"
+        r"\b(?:SBC|SVC)\b.{0,80}(?:implement\w*|key\s+performance\s+indicators?|KPIs?|PDK|process\s+design\s+kit)|"
         r"(?:统计过程控制|统计|质量|控制|图表|半导体).{0,48}\b(?:SBC|SVC)\b|"
         r"\b(?:SBC|SVC)\b.{0,48}(?:统计过程控制|统计|质量|控制|图表|半导体)",
         combined,

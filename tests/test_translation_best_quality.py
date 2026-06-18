@@ -640,6 +640,14 @@ def test_known_spc_control_variants_are_corrected_without_missing_term_flag():
         "SPC图表应该针对设计中在PDK中建立的关键性能指标（KPIs）实施。",
     ) == []
 
+    kpi_corrected = apply_known_term_corrections(
+        "SVC应该为设计中在PDK中建立的关键性能指标（KPIs）实施。",
+        "SVC should be implemented for the key performance indicators, the KPIs of the design established in the PDK, the process design kit.",
+        {"translation": {"target_language": "zh-CN"}},
+    )
+    assert "SPC" in kpi_corrected
+    assert "SVC" not in kpi_corrected
+
 
 def test_us_manufacturer_spc_translation_does_not_keep_misplaced_us_parenthetical():
     source = "So, a lot of the US manufacturers started incorporating more SBC."
