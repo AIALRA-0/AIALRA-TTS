@@ -774,6 +774,17 @@ def test_decade_numbers_do_not_trigger_missing_number_flags():
     assert numbers_missing("Use 3.3V.", "使用电压。") == ["3.3"]
 
 
+def test_million_telephone_quantity_is_natural_chinese():
+    normalized = normalize_translation(
+        "6百万电话被实际处理过，并且到七十年代时，超过90%的家庭拥有这种旋转装置。",
+        {"translation": {"target_language": "zh-CN"}},
+        "close to 6 million telephones that were actually processed.",
+    )
+
+    assert "600万部电话" in normalized
+    assert "6百万电话" not in normalized
+
+
 def test_restore_repairs_unresolved_keep_placeholders_from_source_mapping():
     restored = restore_and_repair_protected_terms(
         "接近<KEEP_001>百万电话，超过<KEEP_002>%家庭。",

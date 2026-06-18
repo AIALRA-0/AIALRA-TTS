@@ -1429,6 +1429,7 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = re.sub(r"一万", "十万", work)
     if re.search(r"(?<!\d)\.\s*3\s*%", source):
         work = re.sub(r"(?<!\d)[.．]\s*3\s*%", "0.3%", work)
+    work = normalize_source_million_quantity_phrasing(work, source)
 
     combined = work + " " + source
     near_deming_confusion = re.search(
@@ -1507,6 +1508,19 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = re.sub(r"工艺规则和你的SPC", "工艺规则，也有你的SPC", work)
 
     return work
+
+
+def normalize_source_million_quantity_phrasing(text: str, source_text: str) -> str:
+    work = text or ""
+    source = source_text or ""
+    source_match = re.search(r"\b(\d+(?:\.\d+)?)\s+million\s+telephones?\b", source, flags=re.IGNORECASE)
+    if not source_match:
+        return work
+    value = float(source_match.group(1))
+    wan = value * 100
+    wan_text = str(int(wan)) if wan.is_integer() else f"{wan:g}"
+    million_text = re.escape(source_match.group(1))
+    return re.sub(rf"{million_text}\s*百万\s*(?:部)?\s*电话", f"{wan_text}万部电话", work)
 
 
 def lecture_rewrite(literal: str, original: str) -> str:
