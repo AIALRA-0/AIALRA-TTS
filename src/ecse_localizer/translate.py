@@ -1434,7 +1434,7 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = re.sub(r"[^。！？]*(?:数据采集|数据)[^。！？]{0,24}数据采样[^。！？]*[。！？]?", "所以，也就是数据采样。", work, count=1)
     if re.search(r"\b(?:SBC|SVC)\b.{0,96}\bKPIs?\b.{0,96}\bPDK\b|\bPDK\b.{0,96}\bKPIs?\b.{0,96}\b(?:SBC|SVC)\b", source, flags=re.IGNORECASE):
         work = re.sub(
-            r"[^。！？]*SPC\s*应该为[^。！？]*(?:(?:关键性能指标|KPIs?)[^。！？]*(?:PDK|工艺设计套件)|(?:PDK|工艺设计套件)[^。！？]*(?:关键性能指标|KPIs?))[^。！？]*实施[^。！？]*[。！？]?",
+            r"[^。！？]*(?:SPC|SBC|SVC)\s*应该为[^。！？]*(?:(?:关键性能指标|KPIs?)[^。！？]*(?:PDK|工艺设计套件)|(?:PDK|工艺设计套件)[^。！？]*(?:关键性能指标|KPIs?))[^。！？]*实施[^。！？]*[。！？]?",
             "对PDK中为设计定义的关键性能指标（KPI），也应该实施SPC。",
             work,
             count=1,
