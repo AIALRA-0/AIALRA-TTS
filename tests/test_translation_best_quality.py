@@ -816,6 +816,15 @@ def test_million_telephone_quantity_is_natural_chinese():
     assert "600万部电话" in normalized
     assert "6百万电话" not in normalized
 
+    faithful = normalize_translation(
+        "接近600万部电话实际被处理了，到后来，在七十年代有超过90%的家庭使用这种旋转式电话，到了八十年代这个比例超过了90%。",
+        {"translation": {"target_language": "zh-CN"}},
+        "close to 6 million telephones that were actually processed and by the end there was over 90 % of like by the seventies over 90 % of the households had this rotary.",
+    )
+
+    assert faithful == "接近600万部电话被实际处理；到七十年代，超过90%的家庭都使用这种旋转式电话。"
+    assert "八十年代" not in faithful
+
 
 def test_restore_repairs_unresolved_keep_placeholders_from_source_mapping():
     restored = restore_and_repair_protected_terms(

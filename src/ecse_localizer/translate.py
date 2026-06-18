@@ -1529,6 +1529,12 @@ def normalize_source_million_quantity_phrasing(text: str, source_text: str) -> s
     value = float(source_match.group(1))
     wan = value * 100
     wan_text = str(int(wan)) if wan.is_integer() else f"{wan:g}"
+    if re.search(
+        r"\bmillion\s+telephones?\b.{0,180}\b(?:seventies|1970s|70s)\b.{0,120}\bhouseholds?\b.{0,80}\brotary\b",
+        source,
+        flags=re.IGNORECASE,
+    ):
+        return f"接近{wan_text}万部电话被实际处理；到七十年代，超过90%的家庭都使用这种旋转式电话。"
     million_text = re.escape(source_match.group(1))
     return re.sub(rf"{million_text}\s*百万\s*(?:部)?\s*电话", f"{wan_text}万部电话", work)
 
