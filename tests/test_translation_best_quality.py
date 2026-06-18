@@ -856,6 +856,14 @@ def test_ordinal_protected_token_not_appended_when_translated():
     assert "1st" not in just_entered_industry
     assert "刚进入这个行业" in just_entered_industry
 
+    r_and_d_start = normalize_translation(
+        "随着工艺的成熟，所需的晶圆数量会减少。当您首次开始研发阶段（R&D）并进入预生产阶段，在将其转移到量产前，然后为什么要把它转入量产（1st）？",
+        {"translation": {"target_language": "zh-CN"}},
+        "So, the more mature the process, the less waferage you need, but when you 1st start out in R and D than pre production before you transfer it into production, and then why you transfer into production.",
+    )
+    assert "1st" not in r_and_d_start
+    assert "研发、预生产以及转入量产" in r_and_d_start
+
     controlled = normalize_translation(
         "所有这些都必须严格控制（1st）。",
         {"translation": {"target_language": "zh-CN"}},
