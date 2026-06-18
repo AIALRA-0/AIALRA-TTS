@@ -893,11 +893,23 @@ def contains_context_only_known_term(candidate_zh: str, source_text: str, all_se
             r"W\s*[.·]?\s*Edwards?\s*Deming|W\.?Edwards?Deming|Deming|戴明",
             r"W\s*\.?\s*Edwards?\s*D(?:eming|imming)|WEdwards?D(?:eming|imming)|Deming|Dimming",
         ),
+        (
+            r"不仅仅|不只是|不止",
+            r"not\s+just|not\s+only",
+        ),
+        (
+            r"汽车行业|汽车工业",
+            r"auto industry",
+        ),
+        (
+            r"核心流程|核心过程",
+            r"core process",
+        ),
     ]
     context = " ".join(
         seg.text
         for i, seg in enumerate(all_segments)
-        if i in {absolute_index - 1, absolute_index + 1} and 0 <= i < len(all_segments)
+        if i in {absolute_index - 2, absolute_index - 1, absolute_index + 1, absolute_index + 2} and 0 <= i < len(all_segments)
     )
     if not context:
         return False

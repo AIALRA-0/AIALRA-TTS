@@ -447,6 +447,42 @@ def test_llm_chunk_rejects_short_source_with_next_two_segment_leak():
     assert "LLM_ROW_UNUSABLE_LECTURE_FALLBACK" in results[0][3]
 
 
+def test_llm_chunk_rejects_context_only_phrase_leaks():
+    config = {
+        "translation": {
+            "target_language": "zh-CN",
+            "max_zh_chars_per_second": 80,
+            "max_zh_chars_per_subtitle_line": 80,
+        }
+    }
+    segments = [
+        Segment(137, 0.0, 2.0, "They just basically, every industry,"),
+        Segment(138, 2.0, 4.0, "not just the auto industry, every industry,"),
+        Segment(139, 4.0, 6.0, "they started using this as just their core process"),
+    ]
+    fake = FakeContextOnlyPhraseLeakClient()
+
+    results = request_llm_chunk(
+        segments,
+        0,
+        segments,
+        "",
+        config,
+        fake,
+        "literal",
+        "rewrite",
+        "style",
+        "",
+        {},
+    )
+
+    assert "汽车行业" not in results[0][2]
+    assert "不仅仅" not in results[0][2]
+    assert "LLM_ROW_UNUSABLE_LECTURE_FALLBACK" in results[0][3]
+    assert "核心流程" not in results[1][2]
+    assert "LLM_ROW_UNUSABLE_LECTURE_FALLBACK" in results[1][3]
+
+
 def test_non_chinese_target_translation_is_accepted_and_keeps_spaces():
     config = {
         "translation": {
@@ -1023,3 +1059,27 @@ class FakeJapanesePhilosophyLeakClient:
                 for sid in ids
             ]
         }
+
+
+class FakeContextOnlyPhraseLeakClient:
+    model = "qwen2.5:14b-instruct"
+
+    def json_chat(self, _system, user, schema):
+        payload = json.loads(user)
+        literals = {
+            137: "他们基本上，各个行业。",
+            138: "不仅仅是汽车行业，每个行业。",
+            139: "他们开始把这作为核心流程使用。",
+        }
+        if "segments" not in payload:
+            sid = int(payload.get("segment", {}).get("id", 137))
+            return {"id": sid, "zh_literal": literals[sid], "zh_lecture": literals[sid], "flags": []}
+        ids = [int(row["id"]) for row in payload["segments"]]
+        if "zh_literal" in schema:
+            return {"segments": [{"id": sid, "zh_literal": literals[sid], "flags": []} for sid in ids]}
+        rewrites = {
+            137: "他们基本上，不仅仅是在汽车行业。",
+            138: "而是每个行业都开始使用这种方法作为核心流程。",
+            139: literals[139],
+        }
+        return {"segments": [{"id": sid, "zh_lecture": rewrites[sid], "flags": []} for sid in ids]}
