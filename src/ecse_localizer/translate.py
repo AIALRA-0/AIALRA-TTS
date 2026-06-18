@@ -548,7 +548,7 @@ def chunk_neighbor_literal_zh(
     idx: int,
 ) -> list[str]:
     values: list[str] = []
-    for neighbor_idx in (idx - 1, idx + 1):
+    for neighbor_idx in (idx - 2, idx - 1, idx + 1, idx + 2):
         if 0 <= neighbor_idx < len(chunk):
             neighbor = chunk[neighbor_idx]
             raw = str(literal_by_id.get(neighbor.id, {}).get("zh_literal", ""))
@@ -587,10 +587,10 @@ def short_source_translation_overexpanded(source_text: str, candidate_zh: str, c
     if not target_uses_compact_script(config):
         return False
     units = re.findall(r"[A-Za-z0-9%.-]+", source_text or "")
-    if not units or len(units) > 5:
+    if not units or len(units) > 8:
         return False
     candidate_len = target_meaningful_len(candidate_zh)
-    allowed = max(14, len(units) * 6)
+    allowed = max(18, len(units) * 5)
     return candidate_len > allowed
 
 
@@ -805,7 +805,7 @@ def run_coherence_pass(
             idx = protected_index.get(sid)
             neighbor_literal_zh: list[str] = []
             if idx is not None:
-                for neighbor_idx in (idx - 1, idx + 1):
+                for neighbor_idx in (idx - 2, idx - 1, idx + 1, idx + 2):
                     if 0 <= neighbor_idx < len(protected_ids):
                         neighbor_literal_zh.append(str(literal_by_id.get(protected_ids[neighbor_idx], {}).get("zh_literal", "")))
             rejection_flags = coherence_rejection_flags(
@@ -956,9 +956,9 @@ def normalize_coherence_text(text: str) -> str:
 
 
 def neighbor_literal_partial_leak_threshold(neighbor_norm: str) -> int:
-    if len(neighbor_norm or "") < 18:
+    if len(neighbor_norm or "") < 10:
         return 10**9
-    return max(12, min(24, int(len(neighbor_norm) * 0.45)))
+    return max(7, min(24, int(len(neighbor_norm) * 0.45)))
 
 
 def longest_common_substring_len(left: str, right: str) -> int:
@@ -1354,15 +1354,24 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
 
     combined = work + " " + source
     near_deming_confusion = re.search(
-        r"(Shewhart|Suehart|Shuhart|Schuhart|Stuart).{0,32}(Dimming|Deming)|(Dimming|Deming).{0,32}(Shewhart|Suehart|Shuhart|Schuhart|Stuart)",
+        r"(Shewhart|Suehart|Shuhart|Schuhart|Stuart|Stewart).{0,32}(Dimming|Deming)|(Dimming|Deming).{0,32}(Shewhart|Suehart|Shuhart|Schuhart|Stuart|Stewart)",
         combined,
         flags=re.IGNORECASE,
     )
     if near_deming_confusion:
-        work = re.sub(ascii_left + r"Stuart" + ascii_right, "Shewhart", work, flags=re.IGNORECASE)
+        work = re.sub(ascii_left + r"(?:Stuart|Stewart)" + ascii_right, "Shewhart", work, flags=re.IGNORECASE)
         work = re.sub(ascii_left + r"Dimming" + ascii_right, "Deming", work, flags=re.IGNORECASE)
         work = re.sub(r"斯图尔特|斯图亚特|史都华", "Shewhart", work)
         work = re.sub(r"迪明|戴明", "Deming", work)
+
+    shewhart_quality_context = re.search(
+        r"Shewhart|Suehart|Shuhart|Schuhart|statistical process control|SPC|control charts?|Western Electric|quality|Kaizen|Japanese|Japan|日本|质量|统计过程控制",
+        combined,
+        flags=re.IGNORECASE,
+    )
+    if shewhart_quality_context and re.search(r"\b(?:Stuart|Stewart)\b|斯图尔特|斯图亚特|史都华", combined, flags=re.IGNORECASE):
+        work = re.sub(ascii_left + r"(?:Stuart|Stewart)" + ascii_right, "Shewhart", work, flags=re.IGNORECASE)
+        work = re.sub(r"斯图尔特|斯图亚特|史都华", "Shewhart", work)
 
     deming_context = re.search(
         r"Shewhart|statistical process control|SPC|control charts?|Western Electric|14\s*(?:points?|点)|quality product",

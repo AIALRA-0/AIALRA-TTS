@@ -413,6 +413,39 @@ def test_llm_chunk_rejects_partial_neighbor_literal_leak():
     assert results[1][2] == "他注意到自己在这一阶段收集了大量数据，并且发现了一个现象（1st）。"
 
 
+def test_llm_chunk_rejects_short_source_with_next_two_segment_leak():
+    config = {
+        "translation": {
+            "target_language": "zh-CN",
+            "max_zh_chars_per_second": 80,
+            "max_zh_chars_per_subtitle_line": 80,
+        }
+    }
+    segments = [
+        Segment(136, 0.0, 2.0, "The Japanese just took it as a philosophy."),
+        Segment(137, 2.0, 4.0, "They just basically, every industry,"),
+        Segment(138, 4.0, 6.0, "not just the auto industry, every industry,"),
+    ]
+    fake = FakeJapanesePhilosophyLeakClient()
+
+    results = request_llm_chunk(
+        segments,
+        0,
+        segments,
+        "",
+        config,
+        fake,
+        "literal",
+        "rewrite",
+        "style",
+        "",
+        {},
+    )
+
+    assert results[0][2] == "日本人只是将其作为一种哲学来接受。"
+    assert "LLM_ROW_UNUSABLE_LECTURE_FALLBACK" in results[0][3]
+
+
 def test_non_chinese_target_translation_is_accepted_and_keeps_spaces():
     config = {
         "translation": {
@@ -486,6 +519,17 @@ def test_known_spc_asr_deming_variants_are_corrected():
     assert "W.EdwardsDeming" not in corrected
     assert "Deming的14点" in corrected
     assert "Dimming" not in corrected
+
+
+def test_known_spc_stewart_japanese_quality_context_is_corrected():
+    corrected = apply_known_term_corrections(
+        "我认为这一切都来自他们。你知道斯图尔特，他们从那里开始并继续发展。",
+        "The Japanese took the quality philosophy. You know Stewart, they started from there and ran with it.",
+        {"translation": {"target_language": "zh-CN"}},
+    )
+
+    assert "Shewhart" in corrected
+    assert "斯图尔特" not in corrected
 
 
 def test_chinese_normalization_preserves_spaces_inside_latin_names():
@@ -918,6 +962,38 @@ class FakePartialNeighborLeakRewriteClient:
                         literals[33] + "他注意到自己在这一阶段收集了大量数据。"
                         if sid == 33
                         else literals[34]
+                    ),
+                    "flags": [],
+                }
+                for sid in ids
+            ]
+        }
+
+
+class FakeJapanesePhilosophyLeakClient:
+    model = "qwen2.5:14b-instruct"
+
+    def json_chat(self, _system, user, schema):
+        payload = json.loads(user)
+        literals = {
+            136: "日本人只是将其作为一种哲学来接受。",
+            137: "他们基本上，各个行业都涉及到了。",
+            138: "不仅仅是汽车行业，各个行业都在使用。",
+        }
+        if "segments" not in payload:
+            sid = int(payload.get("segment", {}).get("id", 136))
+            return {"id": sid, "zh_literal": literals[sid], "zh_lecture": literals[sid], "flags": []}
+        ids = [int(row["id"]) for row in payload["segments"]]
+        if "zh_literal" in schema:
+            return {"segments": [{"id": sid, "zh_literal": literals[sid], "flags": []} for sid in ids]}
+        return {
+            "segments": [
+                {
+                    "id": sid,
+                    "zh_lecture": (
+                        "日本人只是将其作为一种哲学来接受。他们基本上在每个行业中都采用了这种方法，而不仅仅是汽车工业。"
+                        if sid == 136
+                        else literals[sid]
                     ),
                     "flags": [],
                 }
