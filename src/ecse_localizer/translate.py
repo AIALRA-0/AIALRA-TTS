@@ -1223,7 +1223,25 @@ def is_forbidden_non_translation(text: str) -> bool:
 def numbers_missing(source: str, translated: str) -> list[str]:
     original_nums = re.findall(r"\d+(?:\.\d+)?", source)
     translated_nums = re.findall(r"\d+(?:\.\d+)?", translated)
-    return [n for n in original_nums if n not in translated_nums]
+    return [n for n in original_nums if n not in translated_nums and not decade_number_equivalent(n, source, translated)]
+
+
+def decade_number_equivalent(number: str, source: str, translated: str) -> bool:
+    if not re.fullmatch(r"\d{4}", number or ""):
+        return False
+    if not re.search(rf"\b{re.escape(number)}s\b", source or "", flags=re.IGNORECASE):
+        return False
+    year = int(number)
+    if year < 1000:
+        return False
+    century = year // 100 + 1
+    decade = year % 100
+    patterns = [
+        rf"{number}\s*年代",
+        rf"{century}\s*世纪\s*{decade}\s*年代",
+        rf"{century}世纪{decade}年代",
+    ]
+    return any(re.search(pattern, translated or "") for pattern in patterns)
 
 
 def normalize_zh(text: str) -> str:
@@ -1273,6 +1291,8 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
     if near_deming_confusion:
         work = re.sub(ascii_left + r"Stuart" + ascii_right, "Shewhart", work, flags=re.IGNORECASE)
         work = re.sub(ascii_left + r"Dimming" + ascii_right, "Deming", work, flags=re.IGNORECASE)
+        work = re.sub(r"斯图尔特|斯图亚特|史都华", "Shewhart", work)
+        work = re.sub(r"迪明", "Deming", work)
 
     deming_context = re.search(
         r"Shewhart|statistical process control|SPC|control charts?|Western Electric|14\s*(?:points?|点)|quality product",
@@ -1282,7 +1302,13 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
     if deming_context:
         work = re.sub(ascii_left + r"Dimming" + ascii_right, "Deming", work, flags=re.IGNORECASE)
 
-    spc_chart_context = re.search(r"\b(?:SBC|SVC)\s*(?:charts?|control)\b|(?:SBC|SVC)\s*图表|(?:SBC|SVC)\s*控制", combined, flags=re.IGNORECASE)
+    spc_chart_context = re.search(
+        r"\b(?:SBC|SVC)\s*(?:charts?|control)\b|(?:SBC|SVC)\s*图表|(?:SBC|SVC)\s*控制|"
+        r"(?:statistical|quality|process|control|charts?|semiconductor).{0,48}\b(?:SBC|SVC)\b|"
+        r"\b(?:SBC|SVC)\b.{0,48}(?:statistical|quality|process|control|charts?|semiconductor)",
+        combined,
+        flags=re.IGNORECASE,
+    )
     if spc_chart_context:
         work = re.sub(r"\b(?:SBC|SVC)\s*(charts?)\b", r"SPC \1", work, flags=re.IGNORECASE)
         work = re.sub(r"\b(?:SBC|SVC)\s*(control)\b", r"SPC \1", work, flags=re.IGNORECASE)
@@ -1290,6 +1316,8 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         work = re.sub(r"(?:SBC|SVC)图表", "SPC图表", work, flags=re.IGNORECASE)
         work = re.sub(r"\b(?:SBC|SVC)\s*控制", "SPC控制", work, flags=re.IGNORECASE)
         work = re.sub(r"(?:SBC|SVC)控制", "SPC控制", work, flags=re.IGNORECASE)
+        work = re.sub(r"（\s*(?:SBC|SVC)\s*）", "（SPC）", work, flags=re.IGNORECASE)
+        work = re.sub(ascii_left + r"(?:SBC|SVC)" + ascii_right, "SPC", work, flags=re.IGNORECASE)
 
     return work
 

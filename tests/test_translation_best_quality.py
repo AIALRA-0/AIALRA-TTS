@@ -8,6 +8,7 @@ from ecse_localizer.translate import (
     context_window,
     default_style_guide,
     normalize_translation,
+    numbers_missing,
     paragraph_lookup,
     protected_term_flags,
     quality_requirements,
@@ -408,7 +409,7 @@ def test_non_chinese_target_translation_is_accepted_and_keeps_spaces():
 
 
 def test_known_spc_asr_name_confusions_are_corrected():
-    text = "因此，在1938年，Suehart与WEdwardDimming合作。后来Stuart and Dimming推广了SVC图表。"
+    text = "因此，在1938年，Suehart与WEdwardDimming合作。后来Stuart and Dimming推广了SVC图表。战后的日本受到了斯图尔特和迪明的启发。"
 
     corrected = apply_known_term_corrections(
         text,
@@ -420,6 +421,8 @@ def test_known_spc_asr_name_confusions_are_corrected():
     assert "W. Edwards Deming" in corrected
     assert "Dimming" not in corrected
     assert "Stuart and" not in corrected
+    assert "斯图尔特" not in corrected
+    assert "迪明" not in corrected
     assert "SPC图表" in corrected
 
 
@@ -450,15 +453,21 @@ def test_chinese_normalization_preserves_spaces_inside_latin_names():
 
 def test_known_spc_control_variants_are_corrected_without_missing_term_flag():
     corrected = apply_known_term_corrections(
-        "这里有很多SBC控制和SVC控制方法。",
-        "There is a lot out there for SBC control and SVC control.",
+        "这里有很多SBC控制和SVC控制方法。许多制造商采用更多统计过程控制（SBC）。你用来做图表的SBC。",
+        "There is a lot out there for SBC control and SVC control. Manufacturers incorporated more SBC. Using your SBC to do your charts.",
         {"translation": {"target_language": "zh-CN"}},
     )
 
     assert "SPC控制" in corrected
-    assert "SBC控制" not in corrected
-    assert "SVC控制" not in corrected
+    assert "SBC" not in corrected
+    assert "SVC" not in corrected
     assert protected_term_flags("SBC control and SVC charts", "SPC控制和SPC图表") == []
+
+
+def test_decade_numbers_do_not_trigger_missing_number_flags():
+    assert numbers_missing("Back in the 1970s, quality improved.", "在20世纪70年代，质量提高了。") == []
+    assert numbers_missing("So in the 1920s.", "所以到了20世纪20年代。") == []
+    assert numbers_missing("Use 3.3V.", "使用电压。") == ["3.3"]
 
 
 def test_restore_repairs_unresolved_keep_placeholders_from_source_mapping():
