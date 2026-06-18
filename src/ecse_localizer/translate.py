@@ -1470,9 +1470,9 @@ def apply_known_term_corrections(text: str, source_text: str = "", config: dict 
         r"using\s+for\s+your\s+(?:SBC|SPC)\s+to\s+do\s+your\s+charts?.{0,80}actual\s+hardware.{0,80}wafers?.{0,80}(?:seeing|see).{0,80}actual\s+process",
         source,
         flags=re.IGNORECASE,
-    ) and re.search(r"SPC\s*图表.{0,12}到.{0,12}晶圆实际(?:看到|看见)的硬件", work):
+    ) and re.search(r"(?:SPC\s*图表|图表的SPC).{0,16}到.{0,16}晶圆实际(?:看到|看见)的(?:实际)?硬件", work):
         work = re.sub(
-            r"[^。！？]*SPC\s*图表.{0,12}到.{0,12}晶圆实际(?:看到|看见)的硬件[^。！？]*[。！？]?",
+            r"[^。！？]*(?:SPC\s*图表|图表的SPC).{0,16}到.{0,16}晶圆实际(?:看到|看见)的(?:实际)?硬件[^。！？]*[。！？]?",
             "也就是把你用于制作SPC图表的内容，对应到晶圆实际经过的硬件和真实工艺。",
             work,
             count=1,

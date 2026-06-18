@@ -665,6 +665,13 @@ def test_spc_chart_to_actual_hardware_phrase_is_rewritten_as_natural_lecture_zh(
     assert normalized == "也就是把你用于制作SPC图表的内容，对应到晶圆实际经过的硬件和真实工艺。"
     assert protected_term_flags(source, normalized) == []
 
+    variant = normalize_translation(
+        "你用来做图表的SPC到晶圆实际看到的实际硬件和工艺。",
+        {"translation": {"target_language": "zh-CN"}},
+        source,
+    )
+    assert variant == "也就是把你用于制作SPC图表的内容，对应到晶圆实际经过的硬件和真实工艺。"
+
 
 def test_generated_spc_placeholder_is_repaired():
     normalized = normalize_translation(
