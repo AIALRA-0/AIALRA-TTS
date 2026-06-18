@@ -90,6 +90,16 @@ function Get-LogProgress($StdoutTail, $StderrTail) {
     if (-not $progress.latest_warning -and $line -match '\[WARNING\]\s*(.+)$') {
       $progress.latest_warning = $matches[1]
     }
+    if ($line -match 'cosyvoice_batch\.py|CosyVoice|cosyvoice_batch_.*\.json') {
+      $progress.phase = "tts"
+      $progress.message = "Synthesizing Chinese dubbed audio with CosyVoice"
+      return $progress
+    }
+    if ($line -match 'speaker_gender_sample\.wav') {
+      $progress.phase = "speaker_analysis"
+      $progress.message = "Analyzing speaker gender sample"
+      return $progress
+    }
     if ($line -match 'Translating segments\s+(\d+)-(\d+)\s*/\s*(\d+)') {
       $progress.phase = "translation"
       $progress.current = [int]$matches[2]
