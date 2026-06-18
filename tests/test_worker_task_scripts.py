@@ -61,6 +61,17 @@ def test_batch_chunk_status_reports_cosyvoice_file_progress():
     assert 'if ($Progress.Contains("eta_seconds"))' in script
 
 
+def test_batch_chunk_stop_kills_process_tree_not_only_parent():
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "15_manage_batch_chunk.ps1").read_text(encoding="utf-8")
+
+    assert "function Get-ChildProcessIds" in script
+    assert "function Stop-ProcessTree" in script
+    assert 'Get-CimInstance Win32_Process -Filter "ParentProcessId=$ParentPid"' in script
+    assert "Stop-ProcessTree ([int]$state.pid)" in script
+    assert "Stop-Process -Id ([int]$state.pid) -Force" not in script
+
+
 def test_cosyvoice_batch_writes_incremental_progress():
     root = Path(__file__).resolve().parents[1]
     script = (root / "tools" / "cosyvoice_batch.py").read_text(encoding="utf-8")

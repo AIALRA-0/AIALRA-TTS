@@ -66,6 +66,27 @@ function Test-StateRunning($State) {
   return [bool]$proc
 }
 
+function Get-ChildProcessIds([int]$ParentPid) {
+  $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$ParentPid" -ErrorAction SilentlyContinue)
+  foreach ($child in $children) {
+    [int]$child.ProcessId
+    foreach ($grandChild in Get-ChildProcessIds ([int]$child.ProcessId)) {
+      [int]$grandChild
+    }
+  }
+}
+
+function Stop-ProcessTree([int]$RootPid) {
+  $ids = @()
+  foreach ($childPid in Get-ChildProcessIds $RootPid) { $ids += [int]$childPid }
+  $ids += [int]$RootPid
+  $ids = @($ids | Sort-Object -Unique -Descending)
+  foreach ($targetPid in $ids) {
+    if ($targetPid -eq $PID) { continue }
+    Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Get-LogTail([string]$Path, [int]$Lines) {
   if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return @() }
   return @(Get-Content -LiteralPath $Path -Tail $Lines -Encoding UTF8 -ErrorAction SilentlyContinue)
@@ -541,7 +562,7 @@ if ($Action -eq "Stop") {
   }
   Write-JsonFile $stopRecord $state.stop_marker
   if ($running) {
-    Stop-Process -Id ([int]$state.pid) -Force
+    Stop-ProcessTree ([int]$state.pid)
     Start-Sleep -Milliseconds 500
   }
   $payload = Build-StatusPayload
